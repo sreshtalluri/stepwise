@@ -14,8 +14,8 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Starting pipeline on :8000 ..."
-cd "$ROOT_DIR/pipeline"
-uvicorn app:app --host 0.0.0.0 --port 8000 --reload &
+cd "$ROOT_DIR"
+uvicorn pipeline.app:app --host 0.0.0.0 --port 8000 --reload &
 PIPELINE_PID=$!
 
 echo "Starting frontend on :3000 ..."
