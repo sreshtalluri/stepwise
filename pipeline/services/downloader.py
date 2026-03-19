@@ -97,18 +97,25 @@ async def download_video(url: str, output_dir: str | None = None) -> VideoInfo:
         "--no-download",
         "--print", "duration",
         "--print", "fps",
+        "--no-check-certificates",
+        "--socket-timeout", "15",
+        "--no-warnings",
         url,
     ]
 
-    proc = await asyncio.create_subprocess_exec(
-        *probe_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *probe_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise DownloadError("Video probe timed out — TikTok may be blocking this request. Try again.")
 
     if proc.returncode != 0:
-        raise DownloadError(f"Failed to probe video: {stderr.decode()}")
+        raise DownloadError(f"Failed to probe video: {stderr.decode()[:200]}")
 
     lines = stdout.decode().strip().split("\n")
     try:
@@ -122,12 +129,16 @@ async def download_video(url: str, output_dir: str | None = None) -> VideoInfo:
             f"Video is {duration:.1f}s, max allowed is {MAX_DURATION_SECONDS}s"
         )
 
-    # Download video
+    # Download video — use simpler format selection for TikTok compatibility
+    # TikTok videos are single-stream (no separate video+audio merge needed)
     dl_cmd = [
         "yt-dlp",
-        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "-f", "best[ext=mp4]/best",
         "-o", video_path,
-        "--merge-output-format", "mp4",
+        "--no-check-certificates",
+        "--socket-timeout", "30",
+        "--retries", "3",
+        "--no-warnings",
         url,
     ]
 
