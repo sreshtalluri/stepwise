@@ -90,6 +90,7 @@ export interface StatusResponse {
   step?: string;
   result_url?: string;
   error_message?: string;
+  error?: string;
 }
 
 export type CameraAngle = "video" | "front" | "back" | "mirror" | "ghost";

@@ -8,7 +8,7 @@ import {
   CameraAngle,
   DetailLayer,
 } from "@/lib/types";
-import { POLL_INTERVAL, SPEED_RAMP } from "@/lib/constants";
+import { POLL_INTERVAL, SPEED_RAMP, PROCESSING_STEPS } from "@/lib/constants";
 import { ProcessingStatus } from "@/components/ProcessingStatus";
 import { CameraAngleBar } from "@/components/CameraAngleBar";
 import { PanelGrid } from "@/components/PanelGrid";
@@ -53,6 +53,12 @@ export default function ViewerPage() {
       try {
         const res = await fetch(`/api/status/${jobId}`);
         const data: StatusResponse = await res.json();
+
+        if (!res.ok) {
+          setViewState("error");
+          setErrorMsg(data.error_message || data.error || "Job not found");
+          return;
+        }
 
         if (data.status === "processing") {
           setViewState("processing");
@@ -217,7 +223,14 @@ export default function ViewerPage() {
 
   // Processing or loading state
   if (viewState === "loading" || viewState === "processing") {
-    return <ProcessingStatus step={step} />;
+    const stepIndex = PROCESSING_STEPS.findIndex((s) => s === step);
+    return (
+      <ProcessingStatus
+        step={step}
+        currentStepIndex={stepIndex >= 0 ? stepIndex : 0}
+        totalSteps={PROCESSING_STEPS.length}
+      />
+    );
   }
 
   // Error state
@@ -227,7 +240,13 @@ export default function ViewerPage() {
         <div className="text-center">
           <div className="text-error text-6xl mb-4">!</div>
           <p className="text-text-primary text-xl mb-2">Processing failed</p>
-          <p className="text-text-secondary">{errorMsg}</p>
+          <p className="text-text-secondary mb-6">{errorMsg}</p>
+          <a
+            href="/"
+            className="inline-block px-5 py-2 rounded-button bg-accent text-bg font-semibold text-sm hover:brightness-110 transition-all duration-150"
+          >
+            Back to home
+          </a>
         </div>
       </div>
     );
@@ -238,16 +257,20 @@ export default function ViewerPage() {
   const showHands = activeLayers.has("hands");
   const showFeet = activeLayers.has("footwork");
 
-  // Build panels from active angles
-  const panelEntries = Array.from(activeAngles).map((angle) => {
-    const labelMap: Record<CameraAngle, string> = {
-      video: "Video",
-      front: "Front",
-      back: "Back",
-      mirror: "Mirror",
-      ghost: "Ghost",
-    };
+  const labelMap: Record<CameraAngle, string> = {
+    video: "Video",
+    front: "Front",
+    back: "Back",
+    mirror: "Mirror",
+    ghost: "Ghost",
+  };
 
+  // All possible camera angles — we render ALL panels persistently so
+  // WebGL contexts are never destroyed/recreated on toggle. PanelGrid
+  // hides inactive panels with CSS display:none instead of unmounting.
+  const ALL_ANGLES: CameraAngle[] = ["video", "front", "back", "mirror", "ghost"];
+
+  const allPanelEntries = ALL_ANGLES.map((angle) => {
     if (angle === "video") {
       return {
         key: angle,
@@ -290,6 +313,8 @@ export default function ViewerPage() {
     };
   });
 
+  const visibleKeys = new Set<string>(activeAngles);
+
   return (
     <div className="h-screen flex flex-col bg-bg">
       {/* Camera angle bar */}
@@ -302,7 +327,7 @@ export default function ViewerPage() {
 
       {/* Panel grid - 70% viewport height */}
       <div className="flex-1 min-h-0 p-1" style={{ height: "70vh" }}>
-        <PanelGrid panels={panelEntries} />
+        <PanelGrid panels={allPanelEntries} visibleKeys={visibleKeys} />
       </div>
 
       {/* Timeline */}

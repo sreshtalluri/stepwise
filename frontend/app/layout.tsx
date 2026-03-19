@@ -8,6 +8,9 @@ export const metadata: Metadata = {
   title: "Stepwise — Learn Any Dance Move",
   description:
     "Paste a video URL and get an interactive 3D breakdown of any movement.",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+  },
 };
 
 export default function RootLayout({

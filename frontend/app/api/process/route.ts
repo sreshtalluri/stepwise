@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
+import { registerMockJob } from "@/lib/mock-jobs";
 
 const PIPELINE_URL = process.env.PIPELINE_URL || "http://localhost:8000";
 const USE_MOCK = process.env.USE_MOCK === "true";
@@ -19,6 +20,7 @@ export async function POST(request: NextRequest) {
     // Mock mode: return a fake job ID immediately
     if (USE_MOCK) {
       const jobId = uuidv4();
+      registerMockJob(jobId);
       return NextResponse.json({ jobId });
     }
 

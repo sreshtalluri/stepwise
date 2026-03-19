@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PROCESSING_STEPS } from "@/lib/constants";
+import { isMockJobRegistered } from "@/lib/mock-jobs";
 
 const PIPELINE_URL = process.env.PIPELINE_URL || "http://localhost:8000";
 const USE_MOCK = process.env.USE_MOCK === "true";
@@ -58,6 +59,12 @@ export async function GET(
 
   // Mock mode
   if (USE_MOCK) {
+    if (!isMockJobRegistered(jobId)) {
+      return NextResponse.json(
+        { status: "error", error: "Job not found" },
+        { status: 404 }
+      );
+    }
     return NextResponse.json(mockStatus(jobId));
   }
 

@@ -2,9 +2,11 @@
 
 interface ProcessingStatusProps {
   step: string;
+  currentStepIndex?: number;
+  totalSteps?: number;
 }
 
-export function ProcessingStatus({ step }: ProcessingStatusProps) {
+export function ProcessingStatus({ step, currentStepIndex = 0, totalSteps = 5 }: ProcessingStatusProps) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-bg px-4">
       {/* Spinner */}
@@ -19,20 +21,27 @@ export function ProcessingStatus({ step }: ProcessingStatusProps) {
 
       {/* Step label */}
       <p className="text-text-primary text-xl font-medium mb-2">{step}</p>
-      <p className="text-text-secondary text-sm">
+      <p className="text-text-secondary text-base">
         This usually takes a few seconds
       </p>
 
-      {/* Progress dots */}
-      <div className="flex gap-2 mt-6">
-        {[0, 1, 2].map((i) => (
+      {/* Step counter */}
+      <p className="text-text-secondary text-sm mt-1">
+        Step {currentStepIndex + 1} of {totalSteps}
+      </p>
+
+      {/* Segmented progress bar */}
+      <div className="flex gap-1.5 mt-6 w-64">
+        {Array.from({ length: totalSteps }).map((_, i) => (
           <div
             key={i}
-            className="w-2 h-2 rounded-full bg-accent"
-            style={{
-              opacity: 0.3,
-              animation: `pulse-glow 1.2s ease-in-out ${i * 0.3}s infinite`,
-            }}
+            className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${
+              i < currentStepIndex
+                ? "bg-accent"
+                : i === currentStepIndex
+                ? "bg-accent animate-pulse"
+                : "bg-border"
+            }`}
           />
         ))}
       </div>

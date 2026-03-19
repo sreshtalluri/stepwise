@@ -21,7 +21,7 @@ const config: Config = {
       borderRadius: {
         panel: "8px",
         button: "4px",
-        input: "2px",
+        input: "8px",
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],

@@ -29,7 +29,7 @@ export function CameraAngleBar({
   onToggleLayer,
 }: CameraAngleBarProps) {
   return (
-    <div className="flex items-center gap-1 px-4 py-2 bg-surface border-b border-border overflow-x-auto">
+    <div className="flex items-center gap-1 px-4 py-2 bg-surface border-b border-border overflow-x-auto [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
       {/* Camera angles */}
       <div className="flex items-center gap-1">
         {ANGLE_BUTTONS.map(({ id, label }) => {
