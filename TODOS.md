@@ -28,6 +28,24 @@ Record yourself dancing via webcam, see your pose overlaid on the original dance
 
 ## P2
 
+### Slow-Mo Isolation View
+When looping a section, camera auto-zooms to the body part that moves most. Learning a hand wave? Camera zooms to hands. Footwork? Camera drops to feet. Like a dance teacher saying "watch my feet here."
+- **Effort:** M (human: ~1 week / CC: ~1 hour)
+- **Depends on:** View presets working, joint velocity data available (already computed for difficulty)
+- **Context:** Deferred from CEO review #3 (2026-03-19). Requires mapping which joints have highest velocity in the looped section and animating camera position.
+
+### Floor Path View
+Top-down view showing just the feet with a trail line showing where the dancer travels across the floor over time. For stage choreography and formations.
+- **Effort:** S (human: ~3 days / CC: ~30 min)
+- **Depends on:** Foot contact data, pose data with position tracking
+- **Context:** Deferred from CEO review #3 (2026-03-19). Answers "where am I supposed to be standing?" — critical for stage choreography.
+
+### Quad View (Power User)
+2x2 grid showing Front, Back, Mirror, and Video simultaneously. For power users who want everything at once.
+- **Effort:** S (human: ~2 days / CC: ~20 min)
+- **Depends on:** View presets working
+- **Context:** Deferred from CEO review #3 (2026-03-19). Replaces the modular grid but as a single curated preset.
+
 ### Full Design System (DESIGN.md)
 Run /design-consultation to create a comprehensive design system: component library, animation guidelines, brand voice, icon style, motion principles. Prevents design drift as features are added.
 - **Effort:** M (human: ~3 days / CC: ~30 min)

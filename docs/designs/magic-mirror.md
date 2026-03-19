@@ -34,6 +34,9 @@ The feeling: **"I can learn any movement I see."**
 | 7 | Hand gesture tracking (MediaPipe Hands) | M | ACCEPTED | K-pop fans are a core user — hands ARE the choreography |
 | 8 | Foot contact detection (pose heuristic) | S | ACCEPTED | Footwork details (moonwalk, slides) invisible without it |
 | 9 | Toggleable detail layers (hands/feet) | S | ACCEPTED | Dancers practice one thing at a time — body, hands, feet |
+| 10 | View presets (replace modular grid) | M | ACCEPTED | Modular panels create layout bugs (3-panel, disappearing ghost). Presets always look good. |
+| 11 | Freeze Compare (orbit when paused) | S | ACCEPTED | Study any pose from any angle. Universally useful. |
+| 12 | Split Mirror view | S | ACCEPTED | See normal + mirrored simultaneously. How dancers use studio mirrors. |
 
 ## Accepted Scope (added to this plan)
 - Movement-agnostic branding and UI (don't hardcode "dance")
@@ -44,12 +47,25 @@ The feeling: **"I can learn any movement I see."**
 - Hand gesture tracking via MediaPipe Hands (simplified shapes: fist/open/spread/pointing)
 - Foot contact detection via pose heuristic (heel/toe/flat/slide/airborne)
 - Toggleable detail layers in viewer (body / hands / footwork as separate toggles)
+- **View presets replacing modular panel grid:**
+  1. Front — Full-screen 3D skeleton, front camera
+  2. Mirror — Full-screen 3D skeleton, mirrored (L/R flipped)
+  3. Side by Side — Original video (left) + Front 3D (right) [DEFAULT]
+  4. Front + Back — Front view (left) + Back view (right)
+  5. Ghost Overlay — 3D skeleton overlaid on video at 50% opacity
+  6. Video + PiP — Full video + small 3D skeleton in bottom-right corner
+  7. Freeze Compare — When paused, free orbit around frozen pose
+  8. Split Mirror — Normal (left half) + Mirrored (right half) simultaneously
+- Hands/Footwork layers toggle on/off independently in any preset
 
 ## Deferred to TODOS.md
 - Shareable clip generation with "Made with Stepwise" watermark (v2 distribution feature)
 - Skeleton style picker (3-4 visual styles — neon, mannequin, stick figure, cartoon)
 - Advanced foot contact via video frame analysis / optical flow (v1.5)
 - Full 21-joint hand rendering for subtle finger details (v1.5)
+- Slow-Mo Isolation view (auto-zoom to most active body part when looping)
+- Floor Path view (top-down feet + travel trail line)
+- Quad View (power user 2x2 grid: Front/Back/Mirror/Video)
 
 ## Architecture Decision
 **Decoupled Pipeline** chosen over Monolith MVP:
