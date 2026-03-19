@@ -51,7 +51,7 @@ export function PanelGrid({ panels, visibleKeys }: PanelGridProps) {
             style={isVisible ? undefined : { display: "none" }}
           >
             {/* Panel label */}
-            <div className="absolute top-2 left-3 z-10 text-xs text-text-secondary font-medium uppercase tracking-wider bg-surface/80 px-2 py-1 rounded-button">
+            <div className="absolute top-2 left-3 z-10 text-xs text-text-secondary font-medium uppercase tracking-wider bg-surface/80 px-2 py-1 rounded-button font-mono">
               {panel.label}
             </div>
             {panel.content}

@@ -39,7 +39,7 @@ export function CameraAngleBar({
               key={id}
               onClick={() => onToggleAngle(id)}
               className={`
-                px-3 py-1.5 rounded-button text-sm font-medium
+                px-3 py-1.5 rounded-button text-sm font-medium font-body
                 transition-all duration-150 whitespace-nowrap
                 ${
                   isActive
@@ -66,7 +66,7 @@ export function CameraAngleBar({
               key={id}
               onClick={() => onToggleLayer(id)}
               className={`
-                px-3 py-1.5 rounded-button text-sm font-medium
+                px-3 py-1.5 rounded-button text-sm font-medium font-body
                 transition-all duration-150 whitespace-nowrap
                 ${
                   isActive

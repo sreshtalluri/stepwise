@@ -58,7 +58,7 @@ export function UrlInput() {
             w-full px-5 py-4 rounded-panel
             bg-surface border transition-all duration-200
             text-text-primary placeholder:text-text-secondary
-            text-lg outline-none
+            text-lg outline-none font-body
             ${
               error
                 ? "border-error"
@@ -74,7 +74,7 @@ export function UrlInput() {
           className="
             absolute right-2 top-1/2 -translate-y-1/2
             px-5 py-2 rounded-button
-            bg-accent text-bg font-semibold text-sm
+            bg-accent text-bg font-semibold text-sm font-display
             hover:brightness-110 active:brightness-90
             disabled:opacity-30 disabled:cursor-not-allowed
             transition-all duration-150

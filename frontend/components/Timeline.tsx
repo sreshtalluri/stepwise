@@ -86,7 +86,7 @@ export function Timeline({
         </button>
 
         {/* Time display */}
-        <span className="text-text-secondary text-xs font-mono min-w-[80px]">
+        <span className="text-text-secondary text-xs font-mono min-w-[80px] tabular-nums">
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
 

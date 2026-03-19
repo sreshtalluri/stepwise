@@ -239,11 +239,11 @@ export default function ViewerPage() {
       <div className="min-h-screen flex items-center justify-center bg-bg">
         <div className="text-center">
           <div className="text-error text-6xl mb-4">!</div>
-          <p className="text-text-primary text-xl mb-2">Processing failed</p>
+          <p className="font-display text-text-primary text-xl mb-2">Processing failed</p>
           <p className="text-text-secondary mb-6">{errorMsg}</p>
           <a
             href="/"
-            className="inline-block px-5 py-2 rounded-button bg-accent text-bg font-semibold text-sm hover:brightness-110 transition-all duration-150"
+            className="inline-block px-5 py-2 rounded-button bg-accent text-bg font-semibold text-sm font-display hover:brightness-110 transition-all duration-150"
           >
             Back to home
           </a>

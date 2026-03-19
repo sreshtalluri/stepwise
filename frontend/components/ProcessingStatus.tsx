@@ -20,13 +20,13 @@ export function ProcessingStatus({ step, currentStepIndex = 0, totalSteps = 5 }:
       </div>
 
       {/* Step label */}
-      <p className="text-text-primary text-xl font-medium mb-2">{step}</p>
-      <p className="text-text-secondary text-base">
+      <p className="font-body text-text-primary text-xl font-medium mb-2">{step}</p>
+      <p className="font-body text-text-secondary text-base">
         This usually takes a few seconds
       </p>
 
       {/* Step counter */}
-      <p className="text-text-secondary text-sm mt-1">
+      <p className="font-mono text-text-secondary text-sm mt-1">
         Step {currentStepIndex + 1} of {totalSteps}
       </p>
 

@@ -22,7 +22,7 @@ export function LoopControls({
   };
 
   return (
-    <div className="flex items-center gap-2 text-xs text-text-secondary">
+    <div className="flex items-center gap-2 text-xs text-text-secondary font-mono">
       <span className="text-accent">Loop:</span>
       <span>
         {formatTime(loopStart)} - {formatTime(loopEnd)}
