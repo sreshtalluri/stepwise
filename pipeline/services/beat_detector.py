@@ -51,24 +51,26 @@ async def detect_beats(
         # Compute onset strength for beat strengths
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
 
-        beats: list[Beat] = []
+        # Collect raw strengths first, then normalize to 0-1 before creating Beat objects
+        raw_beats: list[tuple[float, float]] = []  # (timestamp, raw_strength)
         for frame_idx, t in zip(beat_frames, beat_times):
             if frame_idx < len(onset_env):
                 raw_strength = float(onset_env[frame_idx])
             else:
                 raw_strength = 0.5
+            raw_beats.append((round(float(t), 4), raw_strength))
 
+        # Normalize strengths to 0-1 range
+        max_str = max((s for _, s in raw_beats), default=1.0)
+        if max_str <= 0:
+            max_str = 1.0
+
+        beats: list[Beat] = []
+        for timestamp, strength in raw_beats:
             beats.append(Beat(
-                timestamp=round(float(t), 4),
-                strength=round(raw_strength, 4),
+                timestamp=timestamp,
+                strength=round(min(strength / max_str, 1.0), 4),
             ))
-
-        # Normalize strengths to 0-1
-        if beats:
-            max_str = max(b.strength for b in beats)
-            if max_str > 0:
-                for b in beats:
-                    b.strength = round(b.strength / max_str, 4)
 
         return beats
 

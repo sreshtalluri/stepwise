@@ -3,7 +3,7 @@
 Deploys the FastAPI app on a T4 GPU with all dependencies.
 Uses MediaPipe Pose Landmarker for 3D body pose estimation.
 
-Deploy:
+Deploy (from project root):
     modal deploy pipeline/modal_app.py
 
 Test locally:
@@ -12,9 +12,14 @@ Test locally:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import modal
 
 app = modal.App("stepwise-pipeline")
+
+# Path to the pipeline package (parent of this file)
+PIPELINE_DIR = Path(__file__).parent
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -37,7 +42,11 @@ image = (
         "wget -q -O /models/mediapipe/pose_landmarker_heavy.task "
         "'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task'",
     )
-    .add_local_python_source("pipeline")
+    .env({"PYTHONPATH": "/root"})
+    .add_local_dir(
+        local_path=str(PIPELINE_DIR),
+        remote_path="/root/pipeline",
+    )
 )
 
 
