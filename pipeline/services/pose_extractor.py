@@ -1,12 +1,13 @@
-"""MotionBERT wrapper — mock implementation returning realistic fake pose data.
+"""3D body pose extraction using MediaPipe Pose (Tasks API) or mock fallback.
 
-When the real MotionBERT model is available, replace the mock with actual
-inference. The interface stays the same: video path in, list of FramePose out.
+Set environment variable USE_REAL_POSE=true to use MediaPipe Pose.
+Otherwise, the mock implementation generates realistic fake pose data.
 """
 
 from __future__ import annotations
 
 import math
+import os
 from pathlib import Path
 
 from pipeline.models.schema import FramePose, Joint3D
@@ -52,6 +53,258 @@ _BASE_POSITIONS: dict[str, tuple[float, float, float]] = {
     "left_hand":       (0.65,  1.40, 0.0),
     "right_hand":      (-0.65, 1.40, 0.0),
 }
+
+# ---------------------------------------------------------------------------
+# MediaPipe landmark index -> SMPL joint mapping
+# MediaPipe Pose Landmarker has 33 landmarks; we map to 24 SMPL joints.
+# For joints without a direct MediaPipe equivalent, we interpolate.
+# ---------------------------------------------------------------------------
+
+# MediaPipe Pose landmark indices
+_MP_NOSE = 0
+_MP_LEFT_SHOULDER = 11
+_MP_RIGHT_SHOULDER = 12
+_MP_LEFT_ELBOW = 13
+_MP_RIGHT_ELBOW = 14
+_MP_LEFT_WRIST = 15
+_MP_RIGHT_WRIST = 16
+_MP_LEFT_PINKY = 17
+_MP_RIGHT_PINKY = 18
+_MP_LEFT_INDEX = 19
+_MP_RIGHT_INDEX = 20
+_MP_LEFT_HIP = 23
+_MP_RIGHT_HIP = 24
+_MP_LEFT_KNEE = 25
+_MP_RIGHT_KNEE = 26
+_MP_LEFT_ANKLE = 27
+_MP_RIGHT_ANKLE = 28
+_MP_LEFT_HEEL = 29
+_MP_RIGHT_HEEL = 30
+_MP_LEFT_FOOT_INDEX = 31
+_MP_RIGHT_FOOT_INDEX = 32
+
+# Scale factor for image-space landmarks (normalized [0,1] -> meters)
+_SCALE = 1.8
+
+
+def _midpoint(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+    return ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2)
+
+
+def _lerp(a: tuple[float, float, float], b: tuple[float, float, float], t: float) -> tuple[float, float, float]:
+    return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t)
+
+
+def _landmarks_to_smpl_joints(landmarks, world: bool = False) -> list[Joint3D]:
+    """Convert MediaPipe Pose landmarks to 24 SMPL joints.
+
+    Args:
+        landmarks: List of landmark objects with x, y, z attributes.
+        world: If True, landmarks are in world coordinates (meters, hip-centered).
+               If False, landmarks are in image-normalized coordinates.
+
+    Returns:
+        List of 24 Joint3D in SMPL order.
+    """
+    def lm(idx: int) -> tuple[float, float, float]:
+        l = landmarks[idx]
+        if world:
+            # World landmarks: x=right, y=down, z=toward camera
+            # Convert to: x=right, y=up, z=forward
+            return (l.x, -l.y, -l.z)
+        else:
+            # Image landmarks: x,y in [0,1], z is depth
+            return (
+                (l.x - 0.5) * _SCALE,
+                (1.0 - l.y) * _SCALE,
+                -l.z * _SCALE,
+            )
+
+    # Direct mappings
+    left_shoulder = lm(_MP_LEFT_SHOULDER)
+    right_shoulder = lm(_MP_RIGHT_SHOULDER)
+    left_elbow = lm(_MP_LEFT_ELBOW)
+    right_elbow = lm(_MP_RIGHT_ELBOW)
+    left_wrist = lm(_MP_LEFT_WRIST)
+    right_wrist = lm(_MP_RIGHT_WRIST)
+    left_hip = lm(_MP_LEFT_HIP)
+    right_hip = lm(_MP_RIGHT_HIP)
+    left_knee = lm(_MP_LEFT_KNEE)
+    right_knee = lm(_MP_RIGHT_KNEE)
+    left_ankle = lm(_MP_LEFT_ANKLE)
+    right_ankle = lm(_MP_RIGHT_ANKLE)
+    nose = lm(_MP_NOSE)
+
+    # Foot: midpoint of heel and foot index
+    left_foot = _midpoint(lm(_MP_LEFT_HEEL), lm(_MP_LEFT_FOOT_INDEX))
+    right_foot = _midpoint(lm(_MP_RIGHT_HEEL), lm(_MP_RIGHT_FOOT_INDEX))
+
+    # Hands: midpoint of pinky and index finger tip
+    left_hand = _midpoint(lm(_MP_LEFT_PINKY), lm(_MP_LEFT_INDEX))
+    right_hand = _midpoint(lm(_MP_RIGHT_PINKY), lm(_MP_RIGHT_INDEX))
+
+    # Derived joints (interpolated)
+    pelvis = _midpoint(left_hip, right_hip)
+    neck = _midpoint(left_shoulder, right_shoulder)
+    head = (nose[0], nose[1] + 0.08, nose[2])
+
+    # Spine: interpolate between pelvis and neck
+    spine1 = _lerp(pelvis, neck, 0.25)
+    spine2 = _lerp(pelvis, neck, 0.50)
+    spine3 = _lerp(pelvis, neck, 0.75)
+
+    # Collar: between neck and shoulder
+    left_collar = _midpoint(neck, left_shoulder)
+    right_collar = _midpoint(neck, right_shoulder)
+
+    joint_positions: dict[str, tuple[float, float, float]] = {
+        "pelvis": pelvis,
+        "left_hip": left_hip,
+        "right_hip": right_hip,
+        "spine1": spine1,
+        "left_knee": left_knee,
+        "right_knee": right_knee,
+        "spine2": spine2,
+        "left_ankle": left_ankle,
+        "right_ankle": right_ankle,
+        "spine3": spine3,
+        "left_foot": left_foot,
+        "right_foot": right_foot,
+        "neck": neck,
+        "left_collar": left_collar,
+        "right_collar": right_collar,
+        "head": head,
+        "left_shoulder": left_shoulder,
+        "right_shoulder": right_shoulder,
+        "left_elbow": left_elbow,
+        "right_elbow": right_elbow,
+        "left_wrist": left_wrist,
+        "right_wrist": right_wrist,
+        "left_hand": left_hand,
+        "right_hand": right_hand,
+    }
+
+    joints = []
+    for name in SMPL_JOINT_NAMES:
+        x, y, z = joint_positions[name]
+        joints.append(Joint3D(name=name, x=round(x, 4), y=round(y, 4), z=round(z, 4)))
+    return joints
+
+
+def _default_tpose_joints() -> list[Joint3D]:
+    """Return T-pose joints as a default when no pose is detected."""
+    return [
+        Joint3D(name=name, x=round(p[0], 4), y=round(p[1], 4), z=round(p[2], 4))
+        for name, p in ((n, _BASE_POSITIONS[n]) for n in SMPL_JOINT_NAMES)
+    ]
+
+
+def _find_model_path() -> str:
+    """Locate the MediaPipe Pose Landmarker model file.
+
+    Searches in order:
+    1. /models/mediapipe/pose_landmarker_heavy.task  (Modal container)
+    2. pipeline/models/mediapipe/pose_landmarker_heavy.task  (local dev)
+    3. Relative to this file
+    """
+    candidates = [
+        "/models/mediapipe/pose_landmarker_heavy.task",
+        str(Path(__file__).parent.parent / "models" / "mediapipe" / "pose_landmarker_heavy.task"),
+    ]
+    for p in candidates:
+        if Path(p).exists():
+            return p
+    raise FileNotFoundError(
+        "MediaPipe Pose Landmarker model not found. "
+        "Download it: curl -L -o pipeline/models/mediapipe/pose_landmarker_heavy.task "
+        "'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task'"
+    )
+
+
+def _extract_poses_mediapipe(video_path: str, total_frames: int, fps: float) -> list[FramePose]:
+    """Extract 3D poses from video using MediaPipe Pose Landmarker (Tasks API).
+
+    Processes every frame and maps MediaPipe's 33 landmarks to 24 SMPL joints.
+    Uses world landmarks when available for better 3D accuracy.
+    If a frame has no detected pose, the previous frame's pose is carried forward.
+    """
+    import cv2
+    import mediapipe as mp
+    from mediapipe.tasks.python import BaseOptions
+    from mediapipe.tasks.python.vision import (
+        PoseLandmarker,
+        PoseLandmarkerOptions,
+        RunningMode,
+    )
+
+    model_path = _find_model_path()
+
+    options = PoseLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=model_path),
+        running_mode=RunningMode.VIDEO,
+        num_poses=1,
+        min_pose_detection_confidence=0.5,
+        min_pose_presence_confidence=0.5,
+        min_tracking_confidence=0.5,
+        output_segmentation_masks=False,
+    )
+
+    frames: list[FramePose] = []
+    last_joints: list[Joint3D] | None = None
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
+
+    with PoseLandmarker.create_from_options(options) as landmarker:
+        frame_idx = 0
+        while frame_idx < total_frames:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # Convert BGR to RGB
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+
+            # Timestamp in milliseconds (must be monotonically increasing)
+            timestamp_ms = int(frame_idx * 1000 / fps)
+
+            result = landmarker.detect_for_video(mp_image, timestamp_ms)
+
+            if result.pose_world_landmarks and len(result.pose_world_landmarks) > 0:
+                # World landmarks give 3D positions in meters, hip-centered
+                joints = _landmarks_to_smpl_joints(result.pose_world_landmarks[0], world=True)
+                last_joints = joints
+            elif result.pose_landmarks and len(result.pose_landmarks) > 0:
+                # Fall back to image-space landmarks
+                joints = _landmarks_to_smpl_joints(result.pose_landmarks[0], world=False)
+                last_joints = joints
+            elif last_joints is not None:
+                joints = last_joints
+            else:
+                joints = _default_tpose_joints()
+                last_joints = joints
+
+            timestamp = round(frame_idx / fps, 4)
+            frames.append(FramePose(frame=frame_idx, timestamp=timestamp, joints=joints))
+            frame_idx += 1
+
+    cap.release()
+
+    # Pad if video had fewer frames than expected
+    while len(frames) < total_frames:
+        if last_joints is None:
+            last_joints = _default_tpose_joints()
+        timestamp = round(len(frames) / fps, 4)
+        frames.append(FramePose(frame=len(frames), timestamp=timestamp, joints=last_joints))
+
+    return frames
+
+
+# ---------------------------------------------------------------------------
+# Mock implementation (fallback)
+# ---------------------------------------------------------------------------
 
 
 def _generate_mock_movement(
@@ -132,6 +385,11 @@ def _generate_mock_movement(
     return frames
 
 
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
 async def extract_poses(
     video_path: Path,
     total_frames: int,
@@ -139,7 +397,7 @@ async def extract_poses(
 ) -> list[FramePose]:
     """Extract 3D body poses from video.
 
-    Currently uses mock data. Replace with MotionBERT inference when available.
+    Uses MediaPipe Pose Landmarker when USE_REAL_POSE=true, otherwise returns mock data.
 
     Args:
         video_path: Path to the video file.
@@ -149,5 +407,14 @@ async def extract_poses(
     Returns:
         List of FramePose, one per frame, each with 24 SMPL joints.
     """
-    # TODO: Replace with actual MotionBERT inference
+    use_real = os.environ.get("USE_REAL_POSE", "false").lower() in ("true", "1", "yes")
+
+    if use_real:
+        import asyncio
+        # Run in executor since MediaPipe + OpenCV are blocking
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, _extract_poses_mediapipe, str(video_path), total_frames, fps
+        )
+
     return _generate_mock_movement(total_frames, fps)

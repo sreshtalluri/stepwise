@@ -68,53 +68,39 @@ export async function GET(
     return NextResponse.json(mockStatus(jobId));
   }
 
-  // Call the real pipeline status endpoint
-  try {
-    const pipelineRes = await fetch(`${PIPELINE_URL}/status/${jobId}`);
+  // Check server-side job state (set by /api/process background fetch)
+  const jobs = (globalThis as any).__stepwise_jobs || {};
+  const job = jobs[jobId];
 
-    if (!pipelineRes.ok) {
-      if (pipelineRes.status === 404) {
-        return NextResponse.json(
-          { error: "Job not found" },
-          { status: 404 }
-        );
-      }
-      return NextResponse.json(
-        { error: "Failed to fetch job status" },
-        { status: pipelineRes.status }
-      );
-    }
-
-    const data = await pipelineRes.json();
-
-    // Map pipeline status to frontend format
-    if (data.status === "processing") {
-      return NextResponse.json({
-        status: "processing",
-        step: data.step || "Processing...",
-      });
-    }
-
-    if (data.status === "complete") {
-      // Return the proxy URL so the frontend gets data in the expected format
-      return NextResponse.json({
-        status: "complete",
-        result_url: `/api/result/${jobId}`,
-      });
-    }
-
-    if (data.status === "error") {
-      return NextResponse.json({
-        status: "error",
-        error_message: data.error || "Processing failed",
-      });
-    }
-
-    return NextResponse.json(data);
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to connect to pipeline" },
-      { status: 502 }
-    );
+  if (!job) {
+    // Job was registered (mock check passed) but not yet complete — still processing
+    return NextResponse.json({
+      status: "processing",
+      step: "Processing video...",
+    });
   }
+
+  if (job.status === "complete") {
+    // Store the result in a retrievable location and return a URL
+    // Cache the result JSON for the result endpoint to serve
+    (globalThis as any).__stepwise_results = (globalThis as any).__stepwise_results || {};
+    (globalThis as any).__stepwise_results[jobId] = job.result;
+
+    return NextResponse.json({
+      status: "complete",
+      result_url: `/api/result/${jobId}`,
+    });
+  }
+
+  if (job.status === "error") {
+    return NextResponse.json({
+      status: "error",
+      error_message: job.error || "Processing failed",
+    });
+  }
+
+  return NextResponse.json({
+    status: "processing",
+    step: "Processing video...",
+  });
 }

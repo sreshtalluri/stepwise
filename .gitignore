@@ -31,5 +31,9 @@ frontend/out/
 Thumbs.db
 .gstack/
 
+# Model weights
+*.task
+pipeline/models/mediapipe/
+
 # random
 flow.txt.claude/worktrees/

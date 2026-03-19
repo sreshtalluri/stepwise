@@ -41,10 +41,14 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS middleware — allow frontend (localhost:3000) to call the pipeline
+# CORS middleware — allow frontend (localhost:3000 + Modal deployment) to call the pipeline
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://localhost:3000",
+    ],
+    allow_origin_regex=r"https://.*--stepwise-pipeline.*\.modal\.run",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -152,40 +152,27 @@ export async function GET(
     return NextResponse.redirect(new URL("/fixtures/sample-result.json", _request.url));
   }
 
-  try {
-    // First get the job status to find the result_url
-    const statusRes = await fetch(`${PIPELINE_URL}/status/${jobId}`);
-    if (!statusRes.ok) {
-      return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    }
+  // Check server-side result cache (set by /api/process + /api/status)
+  const results = (globalThis as any).__stepwise_results || {};
+  const cachedResult = results[jobId];
 
-    const statusData = await statusRes.json();
-    if (statusData.status !== "complete" || !statusData.result_url) {
-      return NextResponse.json(
-        { error: "Result not ready yet" },
-        { status: 202 }
-      );
-    }
-
-    // Fetch the raw pipeline result from R2
-    const resultRes = await fetch(statusData.result_url);
-    if (!resultRes.ok) {
-      return NextResponse.json(
-        { error: "Failed to fetch result from storage" },
-        { status: 502 }
-      );
-    }
-
-    const pipelineResult = await resultRes.json();
-
-    // Transform to frontend format
-    const frontendResult = transformResult(pipelineResult);
-
+  if (cachedResult) {
+    // Transform pipeline format to frontend format
+    const frontendResult = transformResult(cachedResult);
     return NextResponse.json(frontendResult);
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to fetch result" },
-      { status: 500 }
-    );
   }
+
+  // Fallback: check if the job has a result in the global jobs state
+  const jobs = (globalThis as any).__stepwise_jobs || {};
+  const job = jobs[jobId];
+
+  if (job?.status === "complete" && job.result) {
+    const frontendResult = transformResult(job.result);
+    return NextResponse.json(frontendResult);
+  }
+
+  return NextResponse.json(
+    { error: "Result not ready yet" },
+    { status: 202 }
+  );
 }
