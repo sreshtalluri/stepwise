@@ -8,6 +8,7 @@ export function UrlInput() {
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [urlValid, setUrlValid] = useState(false);
   const router = useRouter();
 
   async function handleSubmit(e: FormEvent) {
@@ -49,8 +50,16 @@ export function UrlInput() {
           type="text"
           value={url}
           onChange={(e) => {
-            setUrl(e.target.value);
-            setError(null);
+            const value = e.target.value;
+            setUrl(value);
+            if (!value.trim()) {
+              setError(null);
+              setUrlValid(false);
+            } else {
+              const result = validateVideoUrl(value);
+              setUrlValid(result.valid);
+              setError(result.valid ? null : (result.error ?? "Invalid URL"));
+            }
           }}
           placeholder="Paste any video URL"
           disabled={loading}
@@ -70,7 +79,7 @@ export function UrlInput() {
 
         <button
           type="submit"
-          disabled={loading || !url.trim()}
+          disabled={loading || !urlValid}
           className="
             absolute right-2 top-1/2 -translate-y-1/2
             px-5 py-2 rounded-button
