@@ -69,6 +69,7 @@ export interface DifficultySegment {
 export interface StepwiseResult {
   version: string;
   source_url: string;
+  video_url?: string | null; // Direct video CDN URL for playback
   duration: number; // seconds
   fps: number;
   frames: PoseFrame[];

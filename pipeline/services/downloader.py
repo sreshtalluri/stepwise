@@ -38,6 +38,7 @@ class VideoInfo:
         platform: str,
         source_url: str,
         hash: str,
+        direct_video_url: str | None = None,
     ):
         self.video_path = video_path
         self.audio_path = audio_path
@@ -48,6 +49,7 @@ class VideoInfo:
         self.platform = platform
         self.source_url = source_url
         self.hash = hash
+        self.direct_video_url = direct_video_url
 
 
 MAX_DURATION_SECONDS = 120
@@ -91,12 +93,13 @@ async def download_video(url: str, output_dir: str | None = None) -> VideoInfo:
     video_path = os.path.join(output_dir, "video.mp4")
     audio_path = os.path.join(output_dir, "audio.wav")
 
-    # First, probe duration without downloading
+    # First, probe duration, fps, and direct video URL without downloading
     probe_cmd = [
         "yt-dlp",
         "--no-download",
         "--print", "duration",
         "--print", "fps",
+        "--print", "url",
         "--no-check-certificates",
         "--socket-timeout", "15",
         "--no-warnings",
@@ -121,6 +124,7 @@ async def download_video(url: str, output_dir: str | None = None) -> VideoInfo:
     try:
         duration = float(lines[0]) if lines[0] and lines[0] != "NA" else 0.0
         fps = float(lines[1]) if len(lines) > 1 and lines[1] and lines[1] != "NA" else 30.0
+        direct_video_url = lines[2].strip() if len(lines) > 2 and lines[2].strip().startswith("http") else None
     except (ValueError, IndexError):
         raise DownloadError(f"Failed to parse video metadata: {stdout.decode()}")
 
@@ -178,4 +182,5 @@ async def download_video(url: str, output_dir: str | None = None) -> VideoInfo:
         platform=platform,
         source_url=url,
         hash=computed_hash,
+        direct_video_url=direct_video_url,
     )

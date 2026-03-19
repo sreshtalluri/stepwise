@@ -263,6 +263,8 @@ export default function ViewerPage() {
           showHands={showHands}
           showFeet={showFeet}
           isPaused={!isPlaying}
+          videoUrl={result.video_url || undefined}
+          duration={result.duration}
         />
       </div>
 

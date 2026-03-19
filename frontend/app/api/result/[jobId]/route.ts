@@ -126,6 +126,7 @@ function transformResult(pipeline: Record<string, unknown>): Record<string, unkn
   return {
     version: pipeline.version,
     source_url: pipeline.source_url,
+    video_url: pipeline.video_url || null,
     duration: durationSeconds,
     fps,
     frames,
@@ -157,9 +158,13 @@ export async function GET(
   const cachedResult = results[jobId];
 
   if (cachedResult) {
-    // The cached result might be the full sync response { status, result, cached }
+    // The cached result might be the full sync response { status, result, cached, video_url }
     // or just the inner result object — handle both
     const pipelineData = cachedResult.result || cachedResult;
+    // video_url is on the wrapper, not inside result
+    if (cachedResult.video_url && pipelineData) {
+      pipelineData.video_url = cachedResult.video_url;
+    }
     const frontendResult = transformResult(pipelineData);
     return NextResponse.json(frontendResult);
   }
@@ -171,6 +176,9 @@ export async function GET(
   if (job?.status === "complete" && job.result) {
     // Same unwrapping — the result might be wrapped in { status, result }
     const pipelineData = job.result.result || job.result;
+    if (job.result.video_url && pipelineData) {
+      pipelineData.video_url = job.result.video_url;
+    }
     const frontendResult = transformResult(pipelineData);
     return NextResponse.json(frontendResult);
   }

@@ -47,10 +47,19 @@ function Skeleton({
   const groupRef = useRef<THREE.Group>(null);
 
   const jointPositions = useMemo(() => {
+    // First pass: collect all Y values to find the lowest point (feet)
+    const allJoints = Object.values(frame.joints);
+    const minY = allJoints.length > 0
+      ? Math.min(...allJoints.map((j) => j.y))
+      : 0;
+
+    // Offset so the lowest joint (feet) sits on the ground plane (Y=0)
+    const yOffset = -minY;
+
     const positions: Record<string, THREE.Vector3> = {};
     for (const [name, joint] of Object.entries(frame.joints)) {
       const x = mirror ? -joint.x : joint.x;
-      positions[name] = new THREE.Vector3(x, joint.y, joint.z);
+      positions[name] = new THREE.Vector3(x, joint.y + yOffset, joint.z);
     }
     return positions;
   }, [frame, mirror]);

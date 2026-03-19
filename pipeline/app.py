@@ -64,6 +64,7 @@ class ProcessResponse(BaseModel):
     result: StepwiseResult | None = None
     cached: bool = False
     error: str | None = None
+    video_url: str | None = None
 
 
 class AsyncProcessResponse(BaseModel):
@@ -324,7 +325,12 @@ async def process_video_sync(request: ProcessRequest):
     except Exception:
         pass
 
-    return ProcessResponse(status="ok", result=result, cached=False)
+    return ProcessResponse(
+        status="ok",
+        result=result,
+        cached=False,
+        video_url=video_info.direct_video_url,
+    )
 
 
 # ---------------------------------------------------------------------------

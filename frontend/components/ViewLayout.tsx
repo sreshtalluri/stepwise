@@ -1,7 +1,81 @@
 "use client";
 
+import { useRef, useEffect } from "react";
 import { ViewPreset, PoseFrame } from "@/lib/types";
 import { SkeletonViewer } from "./SkeletonViewer";
+
+function VideoPanel({
+  videoUrl,
+  currentFrame,
+  totalFrames,
+  duration,
+  isPaused,
+  className,
+}: {
+  videoUrl?: string;
+  currentFrame: number;
+  totalFrames: number;
+  duration: number;
+  isPaused: boolean;
+  className?: string;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Sync video playback with skeleton frame
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !duration) return;
+
+    const targetTime = (currentFrame / Math.max(totalFrames - 1, 1)) * duration;
+
+    // Only seek if we're more than 0.1s out of sync
+    if (Math.abs(video.currentTime - targetTime) > 0.1) {
+      video.currentTime = targetTime;
+    }
+
+    if (isPaused && !video.paused) {
+      video.pause();
+    } else if (!isPaused && video.paused) {
+      video.play().catch(() => {}); // Autoplay may be blocked
+    }
+  }, [currentFrame, totalFrames, duration, isPaused]);
+
+  if (!videoUrl) {
+    return (
+      <div className={`bg-surface flex flex-col items-center justify-center text-text-secondary ${className || ""}`}>
+        <svg
+          width="48"
+          height="48"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="mb-3 opacity-60"
+        >
+          <polygon points="23 7 16 12 23 17 23 7" />
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+        </svg>
+        <p className="text-sm">Original video</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`bg-black flex items-center justify-center ${className || ""}`}>
+      <video
+        ref={videoRef}
+        src={videoUrl}
+        className="w-full h-full object-contain"
+        playsInline
+        muted={false}
+        preload="auto"
+        crossOrigin="anonymous"
+      />
+    </div>
+  );
+}
 
 interface ViewLayoutProps {
   activePreset: ViewPreset;
@@ -10,6 +84,8 @@ interface ViewLayoutProps {
   showHands: boolean;
   showFeet: boolean;
   isPaused: boolean;
+  videoUrl?: string;
+  duration?: number;
 }
 
 export function ViewLayout({
@@ -19,7 +95,10 @@ export function ViewLayout({
   showHands,
   showFeet,
   isPaused,
+  videoUrl,
+  duration = 0,
 }: ViewLayoutProps) {
+  const totalFrames = frames.length;
   switch (activePreset) {
     // Preset 1: Front — full-screen front view
     case 1:
@@ -54,25 +133,14 @@ export function ViewLayout({
     case 3:
       return (
         <div className="flex w-full h-full">
-          <div className="w-1/2 h-full bg-surface flex items-center justify-center border-r border-border">
-            <div className="text-text-secondary text-sm flex flex-col items-center gap-3">
-              <svg
-                width="48"
-                height="48"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="opacity-60"
-              >
-                <polygon points="23 7 16 12 23 17 23 7" />
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-              </svg>
-              <span>Original video</span>
-            </div>
-          </div>
+          <VideoPanel
+            videoUrl={videoUrl}
+            currentFrame={currentFrame}
+            totalFrames={totalFrames}
+            duration={duration}
+            isPaused={isPaused}
+            className="w-1/2 h-full border-r border-border"
+          />
           <div className="w-1/2 h-full">
             <SkeletonViewer
               frames={frames}
@@ -114,24 +182,15 @@ export function ViewLayout({
     case 5:
       return (
         <div className="relative w-full h-full">
-          {/* Video layer (placeholder) */}
-          <div className="absolute inset-0 bg-surface flex flex-col items-center justify-center text-text-secondary">
-            <svg
-              width="48"
-              height="48"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="mb-3 opacity-60"
-            >
-              <polygon points="23 7 16 12 23 17 23 7" />
-              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-            </svg>
-            <p className="text-sm">Original video</p>
-          </div>
+          {/* Video layer */}
+          <VideoPanel
+            videoUrl={videoUrl}
+            currentFrame={currentFrame}
+            totalFrames={totalFrames}
+            duration={duration}
+            isPaused={isPaused}
+            className="absolute inset-0"
+          />
           {/* Skeleton overlay at 50% opacity */}
           <div className="absolute inset-0">
             <SkeletonViewer
@@ -150,24 +209,15 @@ export function ViewLayout({
     case 6:
       return (
         <div className="relative w-full h-full">
-          {/* Full video (placeholder) */}
-          <div className="absolute inset-0 bg-surface flex flex-col items-center justify-center text-text-secondary">
-            <svg
-              width="48"
-              height="48"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="mb-3 opacity-60"
-            >
-              <polygon points="23 7 16 12 23 17 23 7" />
-              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-            </svg>
-            <p className="text-sm">Original video</p>
-          </div>
+          {/* Full video */}
+          <VideoPanel
+            videoUrl={videoUrl}
+            currentFrame={currentFrame}
+            totalFrames={totalFrames}
+            duration={duration}
+            isPaused={isPaused}
+            className="absolute inset-0"
+          />
           {/* PiP skeleton in bottom-right corner */}
           <div
             className="absolute bottom-4 right-4 overflow-hidden"
