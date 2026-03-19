@@ -6,6 +6,8 @@ import hashlib
 import re
 from urllib.parse import urlparse, parse_qs
 
+import httpx
+
 
 class UnsupportedPlatformError(Exception):
     """Raised when the URL is from an unsupported platform."""
@@ -84,10 +86,27 @@ def _extract_instagram_id(url: str) -> str | None:
 
 
 def is_tiktok_shortlink(url: str) -> bool:
-    """Check if URL is a vm.tiktok.com short link that needs redirect resolution."""
+    """Check if URL is a TikTok short link that needs redirect resolution.
+
+    Covers: vm.tiktok.com/*, tiktok.com/t/*, www.tiktok.com/t/*
+    """
     parsed = urlparse(url)
     host = _strip_www(parsed.hostname or "")
-    return host == "vm.tiktok.com"
+    if host == "vm.tiktok.com":
+        return True
+    if host == "tiktok.com" and parsed.path.startswith("/t/"):
+        return True
+    return False
+
+
+async def resolve_shortlink(url: str) -> str:
+    """Follow redirects on a short link to get the final URL."""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
+            resp = await client.head(url)
+            return str(resp.url)
+    except Exception as e:
+        raise InvalidURLError(f"Failed to resolve short link: {url}") from e
 
 
 def extract_video_id(url: str) -> tuple[str, str]:
@@ -118,6 +137,13 @@ def extract_video_id(url: str) -> tuple[str, str]:
     ig_id = _extract_instagram_id(url)
     if ig_id:
         return ("instagram", ig_id)
+
+    # If it's a TikTok short link, we can't extract the ID without resolving
+    # the redirect. Return a special marker so the caller knows to resolve first.
+    if is_tiktok_shortlink(url):
+        raise UnsupportedPlatformError(
+            f"SHORTLINK:{url}"
+        )
 
     raise UnsupportedPlatformError(
         f"Unsupported platform: {parsed.hostname}"

@@ -26,6 +26,8 @@ from pipeline.utils.url_normalizer import (
     InvalidURLError,
     UnsupportedPlatformError,
     extract_video_id,
+    is_tiktok_shortlink,
+    resolve_shortlink,
     url_hash,
 )
 
@@ -83,6 +85,15 @@ async def _run_pipeline(job_id: str, url: str) -> None:
     job = _jobs[job_id]
 
     try:
+        # 0. Resolve short links
+        if is_tiktok_shortlink(url):
+            try:
+                url = await resolve_shortlink(url)
+            except InvalidURLError as e:
+                job["status"] = "error"
+                job["error"] = str(e)
+                return
+
         # 1. Validate URL
         job["step"] = "Downloading video..."
         try:
@@ -190,10 +201,19 @@ async def process_video(request: ProcessRequest):
     """Accept a video URL, start processing in the background, return a job ID."""
     url = request.url
 
+    # Resolve TikTok short links (tiktok.com/t/*, vm.tiktok.com/*)
+    if is_tiktok_shortlink(url):
+        try:
+            url = await resolve_shortlink(url)
+        except InvalidURLError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     # Basic URL validation
     try:
         extract_video_id(url)
     except (InvalidURLError, UnsupportedPlatformError) as e:
+        if str(e).startswith("SHORTLINK:"):
+            raise HTTPException(status_code=400, detail="Could not resolve TikTok short link")
         raise HTTPException(status_code=400, detail=str(e))
 
     job_id = str(uuid.uuid4())
