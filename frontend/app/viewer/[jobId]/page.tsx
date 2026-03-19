@@ -5,15 +5,13 @@ import { useParams } from "next/navigation";
 import {
   StepwiseResult,
   StatusResponse,
-  CameraAngle,
+  ViewPreset,
   DetailLayer,
 } from "@/lib/types";
 import { POLL_INTERVAL, SPEED_RAMP, PROCESSING_STEPS } from "@/lib/constants";
 import { ProcessingStatus } from "@/components/ProcessingStatus";
-import { CameraAngleBar } from "@/components/CameraAngleBar";
-import { PanelGrid } from "@/components/PanelGrid";
-import { SkeletonViewer } from "@/components/SkeletonViewer";
-import { GhostOverlay } from "@/components/GhostOverlay";
+import { ViewPresetBar } from "@/components/ViewPresetBar";
+import { ViewLayout } from "@/components/ViewLayout";
 import { Timeline } from "@/components/Timeline";
 
 type ViewState = "loading" | "processing" | "revealing" | "ready" | "error";
@@ -29,9 +27,7 @@ export default function ViewerPage() {
   const [result, setResult] = useState<StepwiseResult | null>(null);
 
   // Viewer state
-  const [activeAngles, setActiveAngles] = useState<Set<CameraAngle>>(
-    new Set<CameraAngle>(["front"])
-  );
+  const [activePreset, setActivePreset] = useState<ViewPreset>(3);
   const [activeLayers, setActiveLayers] = useState<Set<DetailLayer>>(
     new Set<DetailLayer>()
   );
@@ -150,18 +146,9 @@ export default function ViewerPage() {
     };
   }, [isPlaying, result, viewState, playbackSpeed, loopStart, loopEnd]);
 
-  // Toggle camera angle
-  const toggleAngle = useCallback((angle: CameraAngle) => {
-    setActiveAngles((prev) => {
-      const next = new Set(prev);
-      if (next.has(angle)) {
-        if (next.size > 1) next.delete(angle);
-      } else {
-        if (next.size >= 4) return next; // max 4 panels
-        next.add(angle);
-      }
-      return next;
-    });
+  // Select view preset
+  const selectPreset = useCallback((preset: ViewPreset) => {
+    setActivePreset(preset);
   }, []);
 
   // Toggle detail layer
@@ -257,77 +244,26 @@ export default function ViewerPage() {
   const showHands = activeLayers.has("hands");
   const showFeet = activeLayers.has("footwork");
 
-  const labelMap: Record<CameraAngle, string> = {
-    video: "Video",
-    front: "Front",
-    back: "Back",
-    mirror: "Mirror",
-    ghost: "Ghost",
-  };
-
-  // All possible camera angles — we render ALL panels persistently so
-  // WebGL contexts are never destroyed/recreated on toggle. PanelGrid
-  // hides inactive panels with CSS display:none instead of unmounting.
-  const ALL_ANGLES: CameraAngle[] = ["video", "front", "back", "mirror", "ghost"];
-
-  const allPanelEntries = ALL_ANGLES.map((angle) => {
-    if (angle === "video") {
-      return {
-        key: angle,
-        label: labelMap[angle],
-        content: (
-          <div className="w-full h-full flex items-center justify-center text-text-secondary text-sm">
-            Video panel (source video will appear here)
-          </div>
-        ),
-      };
-    }
-
-    if (angle === "ghost") {
-      return {
-        key: angle,
-        label: labelMap[angle],
-        content: (
-          <GhostOverlay
-            frames={result.frames}
-            currentFrame={currentFrame}
-            showHands={showHands}
-            showFeet={showFeet}
-          />
-        ),
-      };
-    }
-
-    return {
-      key: angle,
-      label: labelMap[angle],
-      content: (
-        <SkeletonViewer
-          frames={result.frames}
-          currentFrame={currentFrame}
-          angle={angle}
-          showHands={showHands}
-          showFeet={showFeet}
-        />
-      ),
-    };
-  });
-
-  const visibleKeys = new Set<string>(activeAngles);
-
   return (
     <div className="h-screen flex flex-col bg-bg">
-      {/* Camera angle bar */}
-      <CameraAngleBar
-        activeAngles={activeAngles}
+      {/* View preset bar */}
+      <ViewPresetBar
+        activePreset={activePreset}
         activeLayers={activeLayers}
-        onToggleAngle={toggleAngle}
+        onSelectPreset={selectPreset}
         onToggleLayer={toggleLayer}
       />
 
-      {/* Panel grid - 70% viewport height */}
+      {/* View layout */}
       <div className="flex-1 min-h-0 p-1" style={{ height: "70vh" }}>
-        <PanelGrid panels={allPanelEntries} visibleKeys={visibleKeys} />
+        <ViewLayout
+          activePreset={activePreset}
+          frames={result.frames}
+          currentFrame={currentFrame}
+          showHands={showHands}
+          showFeet={showFeet}
+          isPaused={!isPlaying}
+        />
       </div>
 
       {/* Timeline */}
