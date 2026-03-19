@@ -23,7 +23,7 @@ PIPELINE_DIR = Path(__file__).parent
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg", "libgl1-mesa-glx", "libglib2.0-0", "wget")
+    .apt_install("ffmpeg", "libgl1-mesa-glx", "libglib2.0-0", "libgles2-mesa", "libegl1-mesa", "wget")
     .pip_install(
         "fastapi>=0.104.0",
         "uvicorn>=0.24.0",
