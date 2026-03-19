@@ -19,7 +19,7 @@ export function SpeedControl({
     <div className="flex items-center gap-2">
       <button
         onClick={() => onSpeedChange(Math.max(0.25, speed - 0.25))}
-        className="w-6 h-6 flex items-center justify-center rounded-button text-text-secondary hover:text-text-primary hover:bg-[#1a1a1a] transition-colors text-xs"
+        className="w-6 h-6 flex items-center justify-center rounded-button text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors text-xs"
       >
         -
       </button>
@@ -39,7 +39,7 @@ export function SpeedControl({
         onClick={() =>
           onSpeedChange(Math.min(SPEED_RAMP.maxSpeed, speed + 0.25))
         }
-        className="w-6 h-6 flex items-center justify-center rounded-button text-text-secondary hover:text-text-primary hover:bg-[#1a1a1a] transition-colors text-xs"
+        className="w-6 h-6 flex items-center justify-center rounded-button text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors text-xs"
       >
         +
       </button>

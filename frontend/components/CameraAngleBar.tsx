@@ -44,7 +44,7 @@ export function CameraAngleBar({
                 ${
                   isActive
                     ? "bg-accent text-bg shadow-[0_0_12px_rgba(0,212,255,0.3)]"
-                    : "text-text-secondary hover:text-text-primary hover:bg-[#1a1a1a]"
+                    : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
                 }
               `}
             >
@@ -71,7 +71,7 @@ export function CameraAngleBar({
                 ${
                   isActive
                     ? "bg-accent text-bg shadow-[0_0_12px_rgba(0,212,255,0.3)]"
-                    : "text-text-secondary hover:text-text-primary hover:bg-[#1a1a1a]"
+                    : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
                 }
               `}
             >
