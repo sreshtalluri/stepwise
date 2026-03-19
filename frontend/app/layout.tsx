@@ -1,8 +1,13 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Instrument_Sans } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+const instrumentSans = Instrument_Sans({
+  subsets: ["latin"],
+  variable: "--font-body",
+  weight: ["400", "500", "600"],
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Stepwise — Learn Any Dance Move",
@@ -20,7 +25,19 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.className} bg-bg text-text-primary min-h-screen`}>
+      <head>
+        {/* Clash Grotesk from FontShare CDN */}
+        <link
+          href="https://api.fontshare.com/v2/css?f[]=clash-grotesk@600,700&display=swap"
+          rel="stylesheet"
+        />
+        {/* Geist Mono from Google Fonts CDN */}
+        <link
+          href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className={`${instrumentSans.variable} font-body bg-bg text-text-primary min-h-screen`}>
         {children}
       </body>
     </html>
