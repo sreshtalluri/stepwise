@@ -96,6 +96,8 @@ export interface StatusResponse {
 export type CameraAngle = "video" | "front" | "back" | "mirror" | "ghost";
 export type DetailLayer = "hands" | "footwork";
 
+export type ViewPreset = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+
 export interface ViewerState {
   activeAngles: Set<CameraAngle>;
   activeLayers: Set<DetailLayer>;

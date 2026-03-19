@@ -21,6 +21,9 @@ interface SkeletonViewerProps {
   showHands: boolean;
   showFeet: boolean;
   mirror?: boolean;
+  mirrored?: boolean;
+  orbitEnabled?: boolean;
+  opacity?: number;
 }
 
 // Camera positions for different angles
@@ -241,12 +244,15 @@ function Scene({
   angle,
   showHands,
   showFeet,
+  mirrored,
+  orbitEnabled,
 }: SkeletonViewerProps) {
   const frame = frames[currentFrame] || frames[0];
   if (!frame) return null;
 
-  const isMirror = angle === "mirror";
+  const isMirror = mirrored !== undefined ? mirrored : angle === "mirror";
   const cameraPos = CAMERA_POSITIONS[angle] || CAMERA_POSITIONS.front;
+  const orbitIsEnabled = orbitEnabled !== undefined ? orbitEnabled : true;
 
   return (
     <>
@@ -272,6 +278,7 @@ function Scene({
         enablePan={false}
         minDistance={1.5}
         maxDistance={6}
+        enabled={orbitIsEnabled}
       />
     </>
   );
@@ -281,7 +288,10 @@ export function SkeletonViewer(props: SkeletonViewerProps) {
   const cameraPos = CAMERA_POSITIONS[props.angle] || CAMERA_POSITIONS.front;
 
   return (
-    <div className="w-full h-full r3f-canvas">
+    <div
+      className="w-full h-full r3f-canvas"
+      style={props.opacity !== undefined ? { opacity: props.opacity } : undefined}
+    >
       <Canvas
         camera={{
           position: cameraPos,
