@@ -1,0 +1,225 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StepwiseResult",
+  "description": "The contract between the processing pipeline and the frontend viewer. Version 1.0.",
+  "type": "object",
+  "required": ["version", "source_url", "duration_ms", "fps", "frames", "beats", "difficulty", "metadata"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Schema version for backward compatibility",
+      "enum": ["1.0"]
+    },
+    "source_url": {
+      "type": "string",
+      "description": "Original video URL (canonical form after normalization)"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "description": "Video duration in milliseconds"
+    },
+    "fps": {
+      "type": "number",
+      "description": "Frame rate of the pose data"
+    },
+    "frames": {
+      "type": "array",
+      "description": "One entry per video frame",
+      "items": {
+        "type": "object",
+        "required": ["timestamp_ms", "joints", "hands", "feet", "camera"],
+        "properties": {
+          "timestamp_ms": {
+            "type": "integer"
+          },
+          "joints": {
+            "type": "array",
+            "description": "24 SMPL body joints",
+            "items": {
+              "type": "object",
+              "required": ["name", "position", "rotation", "confidence"],
+              "properties": {
+                "name": { "type": "string" },
+                "position": {
+                  "type": "array",
+                  "items": { "type": "number" },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "[x, y, z] in meters"
+                },
+                "rotation": {
+                  "type": "array",
+                  "items": { "type": "number" },
+                  "minItems": 4,
+                  "maxItems": 4,
+                  "description": "[x, y, z, w] quaternion"
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
+            }
+          },
+          "hands": {
+            "type": "object",
+            "required": ["left", "right", "detected"],
+            "properties": {
+              "detected": {
+                "type": "boolean",
+                "description": "Whether hands were visible in this frame"
+              },
+              "left": {
+                "$ref": "#/$defs/hand"
+              },
+              "right": {
+                "$ref": "#/$defs/hand"
+              }
+            }
+          },
+          "feet": {
+            "type": "object",
+            "required": ["left", "right"],
+            "properties": {
+              "left": {
+                "$ref": "#/$defs/foot"
+              },
+              "right": {
+                "$ref": "#/$defs/foot"
+              }
+            }
+          },
+          "camera": {
+            "type": "object",
+            "required": ["position", "rotation", "fov"],
+            "properties": {
+              "position": {
+                "type": "array",
+                "items": { "type": "number" },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "rotation": {
+                "type": "array",
+                "items": { "type": "number" },
+                "minItems": 4,
+                "maxItems": 4
+              },
+              "fov": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "beats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["timestamp_ms", "strength"],
+        "properties": {
+          "timestamp_ms": { "type": "integer" },
+          "strength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "0=upbeat, 1=strong downbeat"
+          }
+        }
+      }
+    },
+    "difficulty": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["timestamp_ms", "score"],
+        "properties": {
+          "timestamp_ms": { "type": "integer" },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "0=stationary, 1=max complexity"
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["model", "processing_time_ms", "video_resolution", "persons_detected"],
+      "properties": {
+        "model": { "type": "string" },
+        "processing_time_ms": { "type": "integer" },
+        "video_resolution": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[width, height]"
+        },
+        "persons_detected": { "type": "integer" }
+      }
+    }
+  },
+  "$defs": {
+    "hand": {
+      "type": "object",
+      "required": ["joints", "state", "confidence"],
+      "properties": {
+        "joints": {
+          "type": "array",
+          "description": "21 MediaPipe hand joints",
+          "items": {
+            "type": "object",
+            "required": ["name", "position", "confidence"],
+            "properties": {
+              "name": { "type": "string" },
+              "position": {
+                "type": "array",
+                "items": { "type": "number" },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          }
+        },
+        "state": {
+          "type": "string",
+          "enum": ["fist", "open", "spread", "pointing", "relaxed", "unknown"]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "foot": {
+      "type": "object",
+      "required": ["contact", "position", "confidence"],
+      "properties": {
+        "contact": {
+          "type": "string",
+          "enum": ["heel", "toe", "flat", "slide", "airborne"]
+        },
+        "position": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "Floor contact point [x, y, z]"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    }
+  }
+}
