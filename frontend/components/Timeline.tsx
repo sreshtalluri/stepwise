@@ -122,7 +122,7 @@ export function Timeline({
       >
         {/* Difficulty heatmap background */}
         <div className="absolute inset-x-0 top-2 h-2 rounded-full overflow-hidden bg-border">
-          {difficulty.map((seg, i) => {
+          {(difficulty || []).map((seg, i) => {
             const left = (seg.start / duration) * 100;
             const width = ((seg.end - seg.start) / duration) * 100;
             return (
@@ -152,7 +152,7 @@ export function Timeline({
         )}
 
         {/* Beat markers */}
-        {beats.map((beat, i) => {
+        {(beats || []).map((beat, i) => {
           const left = (beat.timestamp / duration) * 100;
           return (
             <div

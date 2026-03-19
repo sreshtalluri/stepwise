@@ -157,8 +157,10 @@ export async function GET(
   const cachedResult = results[jobId];
 
   if (cachedResult) {
-    // Transform pipeline format to frontend format
-    const frontendResult = transformResult(cachedResult);
+    // The cached result might be the full sync response { status, result, cached }
+    // or just the inner result object — handle both
+    const pipelineData = cachedResult.result || cachedResult;
+    const frontendResult = transformResult(pipelineData);
     return NextResponse.json(frontendResult);
   }
 
@@ -167,7 +169,9 @@ export async function GET(
   const job = jobs[jobId];
 
   if (job?.status === "complete" && job.result) {
-    const frontendResult = transformResult(job.result);
+    // Same unwrapping — the result might be wrapped in { status, result }
+    const pipelineData = job.result.result || job.result;
+    const frontendResult = transformResult(pipelineData);
     return NextResponse.json(frontendResult);
   }
 
