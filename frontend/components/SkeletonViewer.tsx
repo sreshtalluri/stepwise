@@ -285,10 +285,28 @@ function Scene({
 
   const isMirror = mirrored !== undefined ? mirrored : angle === "mirror";
   const orbitIsEnabled = orbitEnabled !== undefined ? orbitEnabled : true;
-  const cameraPos = CAMERA_POSITIONS[angle] || CAMERA_POSITIONS.front;
+  const baseCameraPos = CAMERA_POSITIONS[angle] || CAMERA_POSITIONS.front;
 
-  // Look-at target: center of the skeleton (approximate chest height)
-  const lookTarget: [number, number, number] = groundToFloor ? [0, 1.0, 0] : [0, 0, 0];
+  // For ghost mode: compute skeleton center from actual joint positions
+  // so the camera follows the dancer
+  const skeletonCenter = useMemo(() => {
+    if (groundToFloor || !frame?.joints) return null;
+    const joints = Object.values(frame.joints);
+    if (joints.length === 0) return null;
+    const avgX = joints.reduce((s, j) => s + j.x, 0) / joints.length;
+    const avgY = joints.reduce((s, j) => s + j.y, 0) / joints.length;
+    const avgZ = joints.reduce((s, j) => s + j.z, 0) / joints.length;
+    return [avgX, avgY, avgZ] as [number, number, number];
+  }, [frame, groundToFloor]);
+
+  const lookTarget: [number, number, number] = groundToFloor
+    ? [0, 1.0, 0]
+    : skeletonCenter || [0, 0, 0];
+
+  // Camera position: for ghost mode, position relative to skeleton center
+  const cameraPos: [number, number, number] = groundToFloor
+    ? baseCameraPos
+    : [lookTarget[0], lookTarget[1], lookTarget[2] + 2.5];
 
   return (
     <>

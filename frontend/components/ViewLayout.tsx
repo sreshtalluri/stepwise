@@ -186,21 +186,23 @@ export function ViewLayout({
         </div>
       );
 
-    // Preset 5: Ghost Overlay — skeleton at 50% opacity over video
+    // Preset 5: Ghost Overlay — dimmed video with bright skeleton on top
     case 5:
       return (
-        <div className="relative w-full h-full">
-          {/* Video layer */}
-          <VideoPanel
-            videoUrl={videoUrl}
-            currentFrame={currentFrame}
-            totalFrames={totalFrames}
-            duration={duration}
-            isPaused={isPaused}
-            playbackSpeed={playbackSpeed}
-            className="absolute inset-0"
-          />
-          {/* Skeleton overlay at 50% opacity */}
+        <div className="relative w-full h-full bg-black">
+          {/* Video layer — dimmed so skeleton is clearly visible */}
+          <div className="absolute inset-0" style={{ opacity: 0.35 }}>
+            <VideoPanel
+              videoUrl={videoUrl}
+              currentFrame={currentFrame}
+              totalFrames={totalFrames}
+              duration={duration}
+              isPaused={isPaused}
+              playbackSpeed={playbackSpeed}
+              className="w-full h-full"
+            />
+          </div>
+          {/* Skeleton overlay — full brightness, transparent canvas bg */}
           <div className="absolute inset-0">
             <SkeletonViewer
               frames={frames}
@@ -208,7 +210,6 @@ export function ViewLayout({
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
-              opacity={0.5}
               groundToFloor={false}
               orbitEnabled={false}
             />
