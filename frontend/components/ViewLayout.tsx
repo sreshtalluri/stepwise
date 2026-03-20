@@ -10,6 +10,7 @@ function VideoPanel({
   totalFrames,
   duration,
   isPaused,
+  playbackSpeed = 1.0,
   className,
 }: {
   videoUrl?: string;
@@ -17,14 +18,18 @@ function VideoPanel({
   totalFrames: number;
   duration: number;
   isPaused: boolean;
+  playbackSpeed?: number;
   className?: string;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Sync video playback with skeleton frame
+  // Sync video playback with skeleton frame and speed
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !duration) return;
+
+    // Set playback rate for smooth speed changes (browser handles interpolation)
+    video.playbackRate = playbackSpeed;
 
     const targetTime = (currentFrame / Math.max(totalFrames - 1, 1)) * duration;
 
@@ -38,7 +43,7 @@ function VideoPanel({
     } else if (!isPaused && video.paused) {
       video.play().catch(() => {}); // Autoplay may be blocked
     }
-  }, [currentFrame, totalFrames, duration, isPaused]);
+  }, [currentFrame, totalFrames, duration, isPaused, playbackSpeed]);
 
   if (!videoUrl) {
     return (
@@ -86,6 +91,7 @@ interface ViewLayoutProps {
   isPaused: boolean;
   videoUrl?: string;
   duration?: number;
+  playbackSpeed?: number;
 }
 
 export function ViewLayout({
@@ -97,6 +103,7 @@ export function ViewLayout({
   isPaused,
   videoUrl,
   duration = 0,
+  playbackSpeed = 1.0,
 }: ViewLayoutProps) {
   const totalFrames = frames.length;
   switch (activePreset) {
@@ -139,6 +146,7 @@ export function ViewLayout({
             totalFrames={totalFrames}
             duration={duration}
             isPaused={isPaused}
+            playbackSpeed={playbackSpeed}
             className="w-1/2 h-full border-r border-border"
           />
           <div className="w-1/2 h-full">
@@ -189,6 +197,7 @@ export function ViewLayout({
             totalFrames={totalFrames}
             duration={duration}
             isPaused={isPaused}
+            playbackSpeed={playbackSpeed}
             className="absolute inset-0"
           />
           {/* Skeleton overlay at 50% opacity */}
@@ -218,6 +227,7 @@ export function ViewLayout({
             totalFrames={totalFrames}
             duration={duration}
             isPaused={isPaused}
+            playbackSpeed={playbackSpeed}
             className="absolute inset-0"
           />
           {/* PiP skeleton in bottom-right corner */}

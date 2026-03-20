@@ -21,6 +21,7 @@ interface TimelineProps {
   onPrevBeat?: () => void;
   onNextBeat?: () => void;
   activeBeatIndex?: number;
+  onSpeedChange?: (speed: number) => void;
 }
 
 function difficultyColor(score: number): string {
@@ -47,6 +48,7 @@ export function Timeline({
   onPrevBeat,
   onNextBeat,
   activeBeatIndex,
+  onSpeedChange,
 }: TimelineProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const progress = totalFrames > 0 ? currentFrame / (totalFrames - 1) : 0;
@@ -127,7 +129,32 @@ export function Timeline({
           </button>
         )}
 
-        {/* Speed badge removed — SpeedControl component in controls row handles this */}
+        {/* Speed control */}
+        {onSpeedChange && (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => onSpeedChange(Math.max(0.25, playbackSpeed - 0.25))}
+              className="w-6 h-6 flex items-center justify-center rounded-button text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors text-xs"
+            >
+              -
+            </button>
+            <div
+              className={`text-xs font-mono px-2 py-1 rounded-button border ${
+                loopIteration > 0
+                  ? "speed-pulse text-accent border-accent"
+                  : "text-text-secondary border-border"
+              }`}
+            >
+              {playbackSpeed.toFixed(2)}x
+            </div>
+            <button
+              onClick={() => onSpeedChange(Math.min(2.0, playbackSpeed + 0.25))}
+              className="w-6 h-6 flex items-center justify-center rounded-button text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors text-xs"
+            >
+              +
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Timeline bar */}

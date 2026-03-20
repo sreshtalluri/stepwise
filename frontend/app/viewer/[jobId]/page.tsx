@@ -13,8 +13,6 @@ import { ProcessingStatus } from "@/components/ProcessingStatus";
 import { ViewPresetBar } from "@/components/ViewPresetBar";
 import { ViewLayout } from "@/components/ViewLayout";
 import { Timeline } from "@/components/Timeline";
-import { LoopControls } from "@/components/LoopControls";
-import { SpeedControl } from "@/components/SpeedControl";
 
 type ViewState = "loading" | "processing" | "revealing" | "ready" | "error";
 
@@ -146,12 +144,15 @@ export default function ViewerPage() {
     // Only restart the loop when play state or data changes — NOT on speed/loop changes
   }, [isPlaying, result, viewState]);
 
-  // Sync audio with current frame
+  // Sync audio with current frame + playback speed
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !result) return;
 
     const targetTime = (currentFrame / Math.max(result.frames.length - 1, 1)) * result.duration;
+
+    // Set playback rate to match skeleton speed — this is how browsers do smooth speed changes
+    audio.playbackRate = playbackSpeed;
 
     // Only seek if >0.15s out of sync
     if (Math.abs(audio.currentTime - targetTime) > 0.15) {
@@ -167,7 +168,7 @@ export default function ViewerPage() {
     } else if (isPlaying && audio.paused) {
       audio.play().catch(() => {});
     }
-  }, [currentFrame, isPlaying, activePreset, result]);
+  }, [currentFrame, isPlaying, activePreset, result, playbackSpeed]);
 
   // Select view preset
   const selectPreset = useCallback((preset: ViewPreset) => {
@@ -327,6 +328,7 @@ export default function ViewerPage() {
           isPaused={!isPlaying}
           videoUrl={result.video_url || undefined}
           duration={result.duration}
+          playbackSpeed={playbackSpeed}
         />
       </div>
 
@@ -336,12 +338,6 @@ export default function ViewerPage() {
         src={result.video_url || undefined}
         preload="auto"
       />
-
-      {/* Controls row */}
-      <div className="flex items-center justify-between px-4 py-1 bg-surface border-t border-border">
-        <LoopControls loopStart={loopStart} loopEnd={loopEnd} onClearLoop={handleClearLoop} duration={result.duration} />
-        <SpeedControl speed={playbackSpeed} loopIteration={loopIteration} onSpeedChange={handleSpeedChange} />
-      </div>
 
       {/* Timeline */}
       <Timeline
@@ -362,6 +358,7 @@ export default function ViewerPage() {
         onPrevBeat={handlePrevBeat}
         onNextBeat={handleNextBeat}
         activeBeatIndex={activeBeatIndex}
+        onSpeedChange={handleSpeedChange}
       />
     </div>
   );
