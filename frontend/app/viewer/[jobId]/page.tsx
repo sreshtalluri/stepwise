@@ -90,33 +90,32 @@ export default function ViewerPage() {
   const playbackSpeedRef = useRef(playbackSpeed);
   const loopStartRef = useRef(loopStart);
   const loopEndRef = useRef(loopEnd);
+  const playbackTimeRef = useRef(0); // Shared mutable playback time — seekable from outside
 
   useEffect(() => { playbackSpeedRef.current = playbackSpeed; }, [playbackSpeed]);
   useEffect(() => { loopStartRef.current = loopStart; }, [loopStart]);
   useEffect(() => { loopEndRef.current = loopEnd; }, [loopEnd]);
 
   // Time-based animation loop — smooth like a video player
-  // Uses continuous time tracking instead of frame-counting to avoid jitter
   useEffect(() => {
     if (!isPlaying || !result || viewState !== "ready") return;
 
     const totalFrames = result.frames.length;
-    const duration = result.duration;
-    let playbackTime = (currentFrame / Math.max(totalFrames - 1, 1)) * duration;
+    const dur = result.duration;
     let lastTimestamp = performance.now();
 
     const animate = (now: number) => {
       const deltaMs = now - lastTimestamp;
       lastTimestamp = now;
 
-      // Advance playback time by delta * speed (continuous, not frame-stepped)
-      playbackTime += (deltaMs / 1000) * playbackSpeedRef.current;
+      // Advance playback time by delta * speed
+      playbackTimeRef.current += (deltaMs / 1000) * playbackSpeedRef.current;
 
       // Handle looping
       const ls = loopStartRef.current;
       const le = loopEndRef.current;
-      if (ls !== null && le !== null && playbackTime > le) {
-        playbackTime = ls;
+      if (ls !== null && le !== null && playbackTimeRef.current > le) {
+        playbackTimeRef.current = ls;
         setLoopIteration((prev) => {
           const newIter = prev + 1;
           const newSpeed = Math.min(
@@ -126,12 +125,12 @@ export default function ViewerPage() {
           setPlaybackSpeed(newSpeed);
           return newIter;
         });
-      } else if (playbackTime >= duration) {
-        playbackTime = 0;
+      } else if (playbackTimeRef.current >= dur) {
+        playbackTimeRef.current = 0;
       }
 
       // Convert continuous time to frame index
-      const frame = Math.round((playbackTime / duration) * (totalFrames - 1));
+      const frame = Math.round((playbackTimeRef.current / dur) * (totalFrames - 1));
       setCurrentFrame(Math.max(0, Math.min(frame, totalFrames - 1)));
 
       animationRef.current = requestAnimationFrame(animate);
@@ -141,7 +140,6 @@ export default function ViewerPage() {
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
     };
-    // Only restart the loop when play state or data changes — NOT on speed/loop changes
   }, [isPlaying, result, viewState]);
 
   // Sync audio with current frame + playback speed
@@ -191,18 +189,28 @@ export default function ViewerPage() {
   // Seek
   const handleSeek = useCallback((frame: number) => {
     setCurrentFrame(frame);
-  }, []);
+    // Update shared playback time so animation loop picks up the new position
+    if (result) {
+      playbackTimeRef.current = (frame / Math.max(result.frames.length - 1, 1)) * result.duration;
+    }
+  }, [result]);
 
   // Toggle play/pause
   const handleTogglePlay = useCallback(() => {
     setIsPlaying((prev) => !prev);
   }, []);
 
-  // Beat click for loop
+  // Beat click: always seek to that beat + set loop boundaries
   const handleBeatClick = useCallback(
     (timestamp: number) => {
       if (!result) return;
 
+      // Always jump to the clicked beat
+      const frame = Math.round((timestamp / result.duration) * (result.frames.length - 1));
+      setCurrentFrame(frame);
+      playbackTimeRef.current = timestamp;
+
+      // Loop selection: first click = start, second click = end
       if (loopStart === null) {
         setLoopStart(timestamp);
       } else if (loopEnd === null) {
@@ -210,11 +218,16 @@ export default function ViewerPage() {
           setLoopEnd(timestamp);
           setLoopIteration(0);
           setPlaybackSpeed(SPEED_RAMP.initialSpeed);
+          // Jump to loop start
+          const startFrame = Math.round((loopStart / result.duration) * (result.frames.length - 1));
+          setCurrentFrame(startFrame);
+          playbackTimeRef.current = loopStart;
         } else {
+          // Clicked before the start — reset start
           setLoopStart(timestamp);
         }
       } else {
-        // Reset and start new loop selection
+        // Loop already set — reset and start new selection
         setLoopStart(timestamp);
         setLoopEnd(null);
         setLoopIteration(0);

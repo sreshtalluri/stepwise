@@ -119,14 +119,23 @@ export function Timeline({
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Loop indicator */}
-        {loopStart !== null && loopEnd !== null && (
+        {/* Loop status */}
+        {loopStart !== null && loopEnd !== null ? (
           <button
             onClick={onClearLoop}
             className="text-xs text-accent bg-accent-glow px-2 py-1 rounded-button hover:brightness-110 transition-all"
+            title="Click to clear loop"
           >
-            Loop x{loopIteration + 1} &times;
+            &#x1f501; Loop x{loopIteration + 1} &times;
           </button>
+        ) : loopStart !== null && loopEnd === null ? (
+          <span className="text-xs text-accent animate-pulse">
+            Click a second beat to set loop end
+          </span>
+        ) : (
+          <span className="text-xs text-text-tertiary">
+            Click a beat to loop
+          </span>
         )}
 
         {/* Speed control */}
