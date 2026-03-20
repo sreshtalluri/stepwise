@@ -7,6 +7,7 @@ import {
   StatusResponse,
   ViewPreset,
   DetailLayer,
+  PersonPose,
 } from "@/lib/types";
 import { POLL_INTERVAL, SPEED_RAMP, PROCESSING_STEPS } from "@/lib/constants";
 import { ProcessingStatus } from "@/components/ProcessingStatus";
@@ -38,13 +39,23 @@ export default function ViewerPage() {
   const [loopEnd, setLoopEnd] = useState<number | null>(null);
   const [loopIteration, setLoopIteration] = useState(0);
 
+  // Mannequin / X-ray state
+  const [xrayMode, setXrayMode] = useState(false);
+  const [personPoses, setPersonPoses] = useState<PersonPose[]>([]);
+  const [mannequinReady, setMannequinReady] = useState(false);
+
   const animationRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   // Poll for status
   useEffect(() => {
-    if (viewState !== "loading" && viewState !== "processing") return;
+    // Keep polling while loading/processing, or if mannequin upgrade is pending
+    const shouldPoll =
+      viewState === "loading" ||
+      viewState === "processing" ||
+      (viewState === "ready" && !mannequinReady);
+    if (!shouldPoll) return;
 
     const poll = async () => {
       try {
@@ -57,21 +68,42 @@ export default function ViewerPage() {
           return;
         }
 
-        if (data.status === "processing") {
+        if (data.status === "processing" || data.status === "upgrading") {
           setViewState("processing");
           setStep(data.step || "Processing...");
-        } else if (data.status === "complete" && data.result_url) {
-          // Fetch the result data
-          const resultRes = await fetch(data.result_url);
-          const resultData: StepwiseResult = await resultRes.json();
-          setResult(resultData);
-          setViewState("revealing");
+        } else if (
+          data.status === "complete" ||
+          data.status === "skeleton_ready" ||
+          data.status === "mannequin_ready"
+        ) {
+          // Fetch skeleton result if not already loaded
+          const resultUrl = data.result_url || data.skeleton_result_url;
+          if (resultUrl && !result) {
+            const resultRes = await fetch(resultUrl);
+            const resultData: StepwiseResult = await resultRes.json();
+            setResult(resultData);
+            setViewState("revealing");
 
-          // Dramatic reveal: hold first frame for 1 second
-          setTimeout(() => {
-            setViewState("ready");
-            setIsPlaying(true);
-          }, 1000);
+            // Dramatic reveal: hold first frame for 1 second
+            setTimeout(() => {
+              setViewState("ready");
+              setIsPlaying(true);
+            }, 1000);
+          }
+
+          // Fetch mannequin result when available
+          if (data.mannequin_result_url && !mannequinReady) {
+            try {
+              const mannequinRes = await fetch(data.mannequin_result_url);
+              const mannequinData = await mannequinRes.json();
+              if (mannequinData.person_poses) {
+                setPersonPoses(mannequinData.person_poses);
+                setMannequinReady(true);
+              }
+            } catch {
+              // Mannequin data not ready yet — will retry on next poll
+            }
+          }
         } else if (data.status === "error") {
           setViewState("error");
           setErrorMsg(data.error_message || "Something went wrong");
@@ -84,7 +116,7 @@ export default function ViewerPage() {
     poll();
     const interval = setInterval(poll, POLL_INTERVAL);
     return () => clearInterval(interval);
-  }, [jobId, viewState]);
+  }, [jobId, viewState, result, mannequinReady]);
 
   // Use refs for mutable values so the animation loop doesn't restart on speed/loop changes
   const playbackSpeedRef = useRef(playbackSpeed);
@@ -167,6 +199,17 @@ export default function ViewerPage() {
       audio.play().catch(() => {});
     }
   }, [currentFrame, isPlaying, activePreset, result, playbackSpeed]);
+
+  // Keyboard shortcut: X key toggles X-ray mode
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "x" || e.key === "X") {
+        setXrayMode((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   // Select view preset
   const selectPreset = useCallback((preset: ViewPreset) => {
@@ -328,6 +371,9 @@ export default function ViewerPage() {
         activeLayers={activeLayers}
         onSelectPreset={selectPreset}
         onToggleLayer={toggleLayer}
+        xrayMode={xrayMode}
+        onXrayToggle={() => setXrayMode((prev) => !prev)}
+        hasMannequinData={mannequinReady}
       />
 
       {/* View layout */}
@@ -342,6 +388,9 @@ export default function ViewerPage() {
           videoUrl={result.video_url || undefined}
           duration={result.duration}
           playbackSpeed={playbackSpeed}
+          personPoses={personPoses}
+          focusedPersonId={0}
+          xrayMode={xrayMode}
         />
       </div>
 
