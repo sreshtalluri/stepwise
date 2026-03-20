@@ -7,6 +7,9 @@ interface ViewPresetBarProps {
   activeLayers: Set<DetailLayer>;
   onSelectPreset: (preset: ViewPreset) => void;
   onToggleLayer: (layer: DetailLayer) => void;
+  xrayMode?: boolean;
+  onXrayToggle?: () => void;
+  hasMannequinData?: boolean;
 }
 
 const PRESET_BUTTONS: { id: ViewPreset; label: string }[] = [
@@ -30,6 +33,9 @@ export function ViewPresetBar({
   activeLayers,
   onSelectPreset,
   onToggleLayer,
+  xrayMode = false,
+  onXrayToggle,
+  hasMannequinData = false,
 }: ViewPresetBarProps) {
   return (
     <div
@@ -120,6 +126,48 @@ export function ViewPresetBar({
           );
         })}
       </div>
+
+      {/* X-Ray toggle — only shown when mannequin data is available */}
+      {hasMannequinData && (
+        <>
+          <div
+            className="h-6 mx-2 flex-shrink-0"
+            style={{ width: "1px", backgroundColor: "#222222" }}
+          />
+          <button
+            onClick={onXrayToggle}
+            className="px-3 py-1.5 rounded-button text-sm font-medium font-body transition-all duration-150 whitespace-nowrap"
+            style={
+              xrayMode
+                ? {
+                    backgroundColor: "#00d4ff",
+                    color: "#0a0a0a",
+                    boxShadow: "0 0 12px rgba(0,212,255,0.3)",
+                  }
+                : {
+                    backgroundColor: "transparent",
+                    color: "#888888",
+                  }
+            }
+            onMouseEnter={(e) => {
+              if (!xrayMode) {
+                e.currentTarget.style.backgroundColor = "#1a1a1a";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!xrayMode) {
+                e.currentTarget.style.backgroundColor = "transparent";
+              }
+            }}
+            title="Toggle X-ray skeleton view (X)"
+            role="switch"
+            aria-checked={xrayMode}
+            aria-label="Toggle X-ray skeleton view"
+          >
+            X-Ray
+          </button>
+        </>
+      )}
     </div>
   );
 }
