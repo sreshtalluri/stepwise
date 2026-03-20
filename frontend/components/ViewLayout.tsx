@@ -97,6 +97,24 @@ function VideoPanel({
   );
 }
 
+function ViewLabel({ label }: { label: string }) {
+  return (
+    <div
+      className="absolute top-2 left-2 z-10 pointer-events-none select-none"
+      style={{
+        fontFamily: "var(--font-geist-mono, 'Geist Mono', monospace)",
+        fontSize: "11px",
+        color: "rgba(255,255,255,0.5)",
+        backgroundColor: "rgba(0,0,0,0.4)",
+        padding: "2px 6px",
+        borderRadius: "4px",
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
 /** Compute where object-contain places the video inside a container */
 function computeContainedRect(
   containerW: number,
@@ -188,6 +206,7 @@ function GhostOverlay({
 
   return (
     <div ref={containerRef} className="relative w-full h-full bg-black">
+      <ViewLabel label="Ghost" />
       {/* Video layer — dimmed so skeleton is clearly visible */}
       <div className="absolute inset-0" style={{ opacity: 0.35 }}>
         <VideoPanel
@@ -246,7 +265,8 @@ export function ViewLayout({
     // Preset 1: Front — full-screen front view
     case 1:
       return (
-        <div className="w-full h-full">
+        <div className="relative w-full h-full">
+          <ViewLabel label="Front" />
           <SkeletonViewer
             frames={frames}
             currentFrame={currentFrame}
@@ -260,7 +280,8 @@ export function ViewLayout({
     // Preset 2: Mirror — full-screen mirrored view
     case 2:
       return (
-        <div className="w-full h-full">
+        <div className="relative w-full h-full">
+          <ViewLabel label="Mirror" />
           <SkeletonViewer
             frames={frames}
             currentFrame={currentFrame}
@@ -276,16 +297,20 @@ export function ViewLayout({
     case 3:
       return (
         <div className="flex w-full h-full">
-          <VideoPanel
-            videoUrl={videoUrl}
-            currentFrame={currentFrame}
-            totalFrames={totalFrames}
-            duration={duration}
-            isPaused={isPaused}
-            playbackSpeed={playbackSpeed}
-            className="w-1/2 h-full border-r border-border"
-          />
-          <div className="w-1/2 h-full">
+          <div className="relative w-1/2 h-full border-r border-border">
+            <ViewLabel label="Original" />
+            <VideoPanel
+              videoUrl={videoUrl}
+              currentFrame={currentFrame}
+              totalFrames={totalFrames}
+              duration={duration}
+              isPaused={isPaused}
+              playbackSpeed={playbackSpeed}
+              className="w-full h-full"
+            />
+          </div>
+          <div className="relative w-1/2 h-full">
+            <ViewLabel label="Front" />
             <SkeletonViewer
               frames={frames}
               currentFrame={currentFrame}
@@ -301,7 +326,8 @@ export function ViewLayout({
     case 4:
       return (
         <div className="flex w-full h-full">
-          <div className="w-1/2 h-full border-r border-border">
+          <div className="relative w-1/2 h-full border-r border-border">
+            <ViewLabel label="Front" />
             <SkeletonViewer
               frames={frames}
               currentFrame={currentFrame}
@@ -310,7 +336,8 @@ export function ViewLayout({
               showFeet={showFeet}
             />
           </div>
-          <div className="w-1/2 h-full">
+          <div className="relative w-1/2 h-full">
+            <ViewLabel label="Back" />
             <SkeletonViewer
               frames={frames}
               currentFrame={currentFrame}
@@ -342,6 +369,7 @@ export function ViewLayout({
     case 6:
       return (
         <div className="relative w-full h-full">
+          <ViewLabel label="Original" />
           {/* Full video */}
           <VideoPanel
             videoUrl={videoUrl}
@@ -363,6 +391,7 @@ export function ViewLayout({
               borderRadius: "12px",
             }}
           >
+            <ViewLabel label="Front" />
             <SkeletonViewer
               frames={frames}
               currentFrame={currentFrame}
@@ -378,6 +407,7 @@ export function ViewLayout({
     case 7:
       return (
         <div className="relative w-full h-full">
+          <ViewLabel label={isPaused ? "Freeze — drag to orbit" : "Freeze"} />
           <SkeletonViewer
             frames={frames}
             currentFrame={currentFrame}
@@ -405,7 +435,8 @@ export function ViewLayout({
     case 8:
       return (
         <div className="flex w-full h-full">
-          <div className="w-1/2 h-full border-r border-border">
+          <div className="relative w-1/2 h-full border-r border-border">
+            <ViewLabel label="Front" />
             <SkeletonViewer
               frames={frames}
               currentFrame={currentFrame}
@@ -415,7 +446,8 @@ export function ViewLayout({
               mirrored={false}
             />
           </div>
-          <div className="w-1/2 h-full">
+          <div className="relative w-1/2 h-full">
+            <ViewLabel label="Mirror" />
             <SkeletonViewer
               frames={frames}
               currentFrame={currentFrame}

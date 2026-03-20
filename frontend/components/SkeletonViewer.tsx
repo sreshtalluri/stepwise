@@ -334,28 +334,24 @@ function Scene({
 const GHOST_SCALE = 1.8; // must match pipeline _SCALE
 
 function GhostCameraSetup() {
-  const { camera, size } = useThree();
+  const { camera } = useThree();
   useEffect(() => {
     const cam = camera as THREE.OrthographicCamera;
-    const aspect = size.width / size.height;
     // Pipeline maps: x = (lm.x - 0.5) * SCALE → X ∈ [-0.9, 0.9]
     //                y = (1 - lm.y) * SCALE   → Y ∈ [0, 1.8]
-    // The canvas now matches the video's aspect ratio (via GhostOverlay),
-    // so we set the camera to cover exactly the pipeline's coordinate range.
-    const halfW = GHOST_SCALE / 2; // 0.9 — matches pipeline X range
-    const halfH = halfW / aspect;  // vertical extent from aspect ratio
-    cam.left = -halfW;
-    cam.right = halfW;
-    // Center vertically: pipeline Y range is [0, SCALE], camera covers [centerY - halfH, centerY + halfH]
-    const centerY = GHOST_SCALE / 2;
-    cam.top = centerY + halfH;
-    cam.bottom = centerY - halfH;
+    // The canvas matches the video's aspect ratio (via GhostOverlay),
+    // so fixed bounds map skeleton coordinates directly to video pixels.
+    // Non-uniform scaling is intentional — pipeline coords are image-normalized.
+    cam.left = -GHOST_SCALE / 2;   // -0.9
+    cam.right = GHOST_SCALE / 2;   //  0.9
+    cam.bottom = 0;
+    cam.top = GHOST_SCALE;          //  1.8
     cam.near = 0.1;
     cam.far = 100;
-    cam.position.set(0, centerY, 5);
-    cam.lookAt(0, centerY, 0);
+    cam.position.set(0, GHOST_SCALE / 2, 5);
+    cam.lookAt(0, GHOST_SCALE / 2, 0);
     cam.updateProjectionMatrix();
-  }, [camera, size]);
+  }, [camera]);
   return null;
 }
 
