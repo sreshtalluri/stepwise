@@ -10,6 +10,9 @@ import pytest
 
 from pipeline.models.schema import (
     Beat,
+    BodyPartDifficulty,
+    BodyPartDifficultyFrame,
+    BodyPartScores,
     ContactType,
     Difficulty,
     DifficultyFrame,
@@ -20,7 +23,10 @@ from pipeline.models.schema import (
     HandGesture,
     HandState,
     Joint3D,
+    PersonPose,
+    SmplxParams,
     StepwiseResult,
+    StepwiseResultV2,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -151,3 +157,114 @@ class TestStepwiseResultValidation:
         data["difficulty"]["overall"] = 1.5
         with pytest.raises(Exception):
             StepwiseResult.model_validate(data)
+
+
+class TestSmplxParams:
+    def test_valid_smplx_params(self):
+        params = SmplxParams(
+            betas=[0.0] * 10,
+            body_pose=[0.0] * 63,
+            left_hand_pose=[0.0] * 45,
+            right_hand_pose=[0.0] * 45,
+            global_orient=[0.0, 0.0, 0.0],
+            transl=[0.0, 0.95, 0.0],
+        )
+        assert len(params.betas) == 10
+        assert len(params.body_pose) == 63
+
+    def test_rejects_wrong_betas_length(self):
+        with pytest.raises(Exception):
+            SmplxParams(
+                betas=[0.0] * 5,  # wrong: need 10
+                body_pose=[0.0] * 63,
+                left_hand_pose=[0.0] * 45,
+                right_hand_pose=[0.0] * 45,
+                global_orient=[0.0, 0.0, 0.0],
+                transl=[0.0, 0.0, 0.0],
+            )
+
+
+class TestPersonPose:
+    def test_valid_person_pose(self):
+        params = SmplxParams(
+            betas=[0.0] * 10,
+            body_pose=[0.0] * 63,
+            left_hand_pose=[0.0] * 45,
+            right_hand_pose=[0.0] * 45,
+            global_orient=[0.0, 0.0, 0.0],
+            transl=[0.0, 0.0, 0.0],
+        )
+        person = PersonPose(
+            person_id=0,
+            frame=0,
+            timestamp=0.0,
+            smplx_params=params,
+        )
+        assert person.person_id == 0
+
+
+class TestBodyPartDifficulty:
+    def test_valid_body_part_difficulty_frame(self):
+        scores = BodyPartScores(arms=0.3, legs=0.8, core=0.5)
+        df = BodyPartDifficultyFrame(frame=0, overall=0.5, body_parts=scores)
+        assert df.body_parts.arms == 0.3
+        assert df.body_parts.legs == 0.8
+
+    def test_scores_bounded(self):
+        with pytest.raises(Exception):
+            BodyPartScores(arms=1.5, legs=0.0, core=0.0)
+
+
+class TestStepwiseResultV2:
+    def _minimal_v2_result(self) -> dict:
+        return {
+            "version": "2.0",
+            "video_id": "test123",
+            "url_hash": "abc" * 20 + "ab",
+            "source_url": "https://youtube.com/watch?v=test123",
+            "duration_seconds": 10.0,
+            "fps": 30.0,
+            "total_frames": 1,
+            "body_poses": [{
+                "frame": 0, "timestamp": 0.0,
+                "joints": [{"name": f"joint_{i}", "x": 0.0, "y": 0.0, "z": 0.0} for i in range(24)],
+            }],
+            "hand_states": [{
+                "frame": 0, "timestamp": 0.0,
+                "left": {"detected": False, "gesture": "none", "confidence": 0.0},
+                "right": {"detected": False, "gesture": "none", "confidence": 0.0},
+            }],
+            "foot_contacts": [{
+                "frame": 0, "timestamp": 0.0,
+                "left": {"contact": "flat"}, "right": {"contact": "flat"},
+            }],
+            "beats": [],
+            "difficulty": {"overall": 0.0, "per_frame": [{"frame": 0, "score": 0.0}]},
+            "processed_at": "2026-01-15T12:00:00Z",
+            "person_count": 1,
+            "person_poses": [{
+                "person_id": 0, "frame": 0, "timestamp": 0.0,
+                "smplx_params": {
+                    "betas": [0.0] * 10, "body_pose": [0.0] * 63,
+                    "left_hand_pose": [0.0] * 45, "right_hand_pose": [0.0] * 45,
+                    "global_orient": [0.0, 0.0, 0.0], "transl": [0.0, 0.0, 0.0],
+                },
+            }],
+            "body_part_difficulty": {
+                "overall": 0.0,
+                "per_frame": [{"frame": 0, "overall": 0.0, "body_parts": {"arms": 0.0, "legs": 0.0, "core": 0.0}}],
+            },
+        }
+
+    def test_valid_v2_result(self):
+        data = self._minimal_v2_result()
+        result = StepwiseResultV2.model_validate(data)
+        assert result.version == "2.0"
+        assert result.person_count == 1
+
+    def test_v2_backward_compatible_with_v1_fields(self):
+        """V2 must still contain all v1 fields (body_poses, hand_states, etc.)."""
+        data = self._minimal_v2_result()
+        result = StepwiseResultV2.model_validate(data)
+        assert len(result.body_poses) == 1
+        assert len(result.hand_states) == 1
