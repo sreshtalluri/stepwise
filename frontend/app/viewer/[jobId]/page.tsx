@@ -37,6 +37,7 @@ export default function ViewerPage() {
   const [loopStart, setLoopStart] = useState<number | null>(null);
   const [loopEnd, setLoopEnd] = useState<number | null>(null);
   const [loopIteration, setLoopIteration] = useState(0);
+  const [loopSpeedUp, setLoopSpeedUp] = useState(false);
 
   const animationRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
@@ -90,11 +91,13 @@ export default function ViewerPage() {
   const playbackSpeedRef = useRef(playbackSpeed);
   const loopStartRef = useRef(loopStart);
   const loopEndRef = useRef(loopEnd);
+  const loopSpeedUpRef = useRef(loopSpeedUp);
   const playbackTimeRef = useRef(0); // Shared mutable playback time — seekable from outside
 
   useEffect(() => { playbackSpeedRef.current = playbackSpeed; }, [playbackSpeed]);
   useEffect(() => { loopStartRef.current = loopStart; }, [loopStart]);
   useEffect(() => { loopEndRef.current = loopEnd; }, [loopEnd]);
+  useEffect(() => { loopSpeedUpRef.current = loopSpeedUp; }, [loopSpeedUp]);
 
   // Time-based animation loop — smooth like a video player
   useEffect(() => {
@@ -118,11 +121,13 @@ export default function ViewerPage() {
         playbackTimeRef.current = ls;
         setLoopIteration((prev) => {
           const newIter = prev + 1;
-          const newSpeed = Math.min(
-            SPEED_RAMP.maxSpeed,
-            SPEED_RAMP.initialSpeed + SPEED_RAMP.increment * newIter
-          );
-          setPlaybackSpeed(newSpeed);
+          if (loopSpeedUpRef.current) {
+            const newSpeed = Math.min(
+              SPEED_RAMP.maxSpeed,
+              SPEED_RAMP.initialSpeed + SPEED_RAMP.increment * newIter
+            );
+            setPlaybackSpeed(newSpeed);
+          }
           return newIter;
         });
       } else if (playbackTimeRef.current >= dur) {
@@ -200,41 +205,34 @@ export default function ViewerPage() {
     setIsPlaying((prev) => !prev);
   }, []);
 
-  // Beat click: always seek to that beat + set loop boundaries
+  // Beat click: seek to the beat (loop is handled by drag)
   const handleBeatClick = useCallback(
     (timestamp: number) => {
       if (!result) return;
-
-      // Always jump to the clicked beat
       const frame = Math.round((timestamp / result.duration) * (result.frames.length - 1));
       setCurrentFrame(frame);
       playbackTimeRef.current = timestamp;
-
-      // Loop selection: first click = start, second click = end
-      if (loopStart === null) {
-        setLoopStart(timestamp);
-      } else if (loopEnd === null) {
-        if (timestamp > loopStart) {
-          setLoopEnd(timestamp);
-          setLoopIteration(0);
-          setPlaybackSpeed(SPEED_RAMP.initialSpeed);
-          // Jump to loop start
-          const startFrame = Math.round((loopStart / result.duration) * (result.frames.length - 1));
-          setCurrentFrame(startFrame);
-          playbackTimeRef.current = loopStart;
-        } else {
-          // Clicked before the start — reset start
-          setLoopStart(timestamp);
-        }
-      } else {
-        // Loop already set — reset and start new selection
-        setLoopStart(timestamp);
-        setLoopEnd(null);
-        setLoopIteration(0);
-        setPlaybackSpeed(1.0);
-      }
     },
-    [result, loopStart, loopEnd]
+    [result]
+  );
+
+  // Drag-to-loop: set loop region from drag start/end times
+  const handleLoopDrag = useCallback(
+    (startTime: number, endTime: number) => {
+      if (!result) return;
+      setLoopStart(startTime);
+      setLoopEnd(endTime);
+      setLoopIteration(0);
+      // If speed ramp is on, start at initial speed; otherwise keep current speed
+      if (loopSpeedUp) {
+        setPlaybackSpeed(SPEED_RAMP.initialSpeed);
+      }
+      // Jump to loop start
+      const startFrame = Math.round((startTime / result.duration) * (result.frames.length - 1));
+      setCurrentFrame(startFrame);
+      playbackTimeRef.current = startTime;
+    },
+    [result, loopSpeedUp]
   );
 
   // Clear loop
@@ -248,6 +246,11 @@ export default function ViewerPage() {
   // Speed change
   const handleSpeedChange = useCallback((speed: number) => {
     setPlaybackSpeed(speed);
+  }, []);
+
+  // Toggle loop speed ramp
+  const handleToggleLoopSpeedUp = useCallback(() => {
+    setLoopSpeedUp((prev) => !prev);
   }, []);
 
   // Prev beat navigation
@@ -271,6 +274,82 @@ export default function ViewerPage() {
       setCurrentFrame(frame);
     }
   }, [result, currentFrame]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (viewState !== "ready" || !result) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      switch (e.key) {
+        case " ": {
+          e.preventDefault();
+          setIsPlaying((prev) => !prev);
+          break;
+        }
+        case "ArrowLeft": {
+          e.preventDefault();
+          // Jump to previous beat
+          const ct = (currentFrame / Math.max(result.frames.length - 1, 1)) * result.duration;
+          const prev = [...(result.beats || [])].reverse().find(b => b.timestamp < ct - 0.05);
+          if (prev) {
+            const f = Math.round((prev.timestamp / result.duration) * (result.frames.length - 1));
+            setCurrentFrame(f);
+            playbackTimeRef.current = prev.timestamp;
+          }
+          break;
+        }
+        case "ArrowRight": {
+          e.preventDefault();
+          // Jump to next beat
+          const ct2 = (currentFrame / Math.max(result.frames.length - 1, 1)) * result.duration;
+          const next = (result.beats || []).find(b => b.timestamp > ct2 + 0.05);
+          if (next) {
+            const f = Math.round((next.timestamp / result.duration) * (result.frames.length - 1));
+            setCurrentFrame(f);
+            playbackTimeRef.current = next.timestamp;
+          }
+          break;
+        }
+        case "Escape": {
+          // Clear loop
+          if (loopStart !== null) {
+            setLoopStart(null);
+            setLoopEnd(null);
+            setLoopIteration(0);
+            setPlaybackSpeed(1.0);
+          }
+          break;
+        }
+        case "[": {
+          // Slow down
+          e.preventDefault();
+          setPlaybackSpeed((s) => Math.max(0.25, s - 0.25));
+          break;
+        }
+        case "]": {
+          // Speed up
+          e.preventDefault();
+          setPlaybackSpeed((s) => Math.min(2.0, s + 0.25));
+          break;
+        }
+        default: {
+          // Number keys 1-8 for view presets
+          const num = parseInt(e.key);
+          if (num >= 1 && num <= 8) {
+            setActivePreset(num as ViewPreset);
+          }
+          break;
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [viewState, result, currentFrame, loopStart]);
 
   // Compute active beat index
   const activeBeatIndex = useMemo(() => {
@@ -366,8 +445,11 @@ export default function ViewerPage() {
         onTogglePlay={handleTogglePlay}
         onBeatClick={handleBeatClick}
         onClearLoop={handleClearLoop}
+        onLoopDrag={handleLoopDrag}
         playbackSpeed={playbackSpeed}
         loopIteration={loopIteration}
+        loopSpeedUp={loopSpeedUp}
+        onToggleLoopSpeedUp={handleToggleLoopSpeedUp}
         onPrevBeat={handlePrevBeat}
         onNextBeat={handleNextBeat}
         activeBeatIndex={activeBeatIndex}
