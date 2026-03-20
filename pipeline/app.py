@@ -21,7 +21,7 @@ from pipeline.services.downloader import (
 from pipeline.services.foot_contact import compute_foot_contacts
 from pipeline.services.hand_detector import detect_hands
 from pipeline.services.pose_extractor import extract_poses
-from pipeline.services.storage import check_cache, get_signed_url, upload_result
+from pipeline.services.storage import check_cache, get_signed_url, get_video_signed_url, upload_result, upload_video
 from pipeline.utils.url_normalizer import (
     InvalidURLError,
     UnsupportedPlatformError,
@@ -271,7 +271,13 @@ async def process_video_sync(request: ProcessRequest):
     try:
         cached = await check_cache(computed_hash)
         if cached is not None:
-            return ProcessResponse(status="ok", result=cached, cached=True)
+            # Try to get the video URL from R2 too
+            cached_video_url = None
+            try:
+                cached_video_url = await get_video_signed_url(computed_hash)
+            except Exception:
+                pass
+            return ProcessResponse(status="ok", result=cached, cached=True, video_url=cached_video_url)
     except Exception:
         pass
 
@@ -319,17 +325,21 @@ async def process_video_sync(request: ProcessRequest):
         processed_at=datetime.now(timezone.utc),
     )
 
-    # 7. Upload to R2
+    # 7. Upload result + video to R2
+    video_signed_url = None
     try:
         await upload_result(computed_hash, result)
+        await upload_video(computed_hash, str(video_info.video_path))
+        video_signed_url = await get_video_signed_url(computed_hash)
     except Exception:
-        pass
+        # Fall back to direct CDN URL if R2 upload fails
+        video_signed_url = video_info.direct_video_url
 
     return ProcessResponse(
         status="ok",
         result=result,
         cached=False,
-        video_url=video_info.direct_video_url,
+        video_url=video_signed_url,
     )
 
 

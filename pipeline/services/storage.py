@@ -103,6 +103,59 @@ async def upload_result(url_hash: str, result: StepwiseResult) -> str:
         raise StorageError(f"Failed to upload result to R2: {e}") from e
 
 
+def _video_key(url_hash: str) -> str:
+    """Build the R2 object key for a video file."""
+    return f"{url_hash}/video.mp4"
+
+
+async def upload_video(url_hash: str, video_path: str) -> str:
+    """Upload a video file to R2.
+
+    Args:
+        url_hash: SHA-256 hash of the canonical URL.
+        video_path: Local path to the video file.
+
+    Returns:
+        The R2 object key.
+
+    Raises:
+        StorageError: If upload fails.
+    """
+    try:
+        client = _get_r2_client()
+        key = _video_key(url_hash)
+
+        with open(video_path, "rb") as f:
+            client.put_object(
+                Bucket=BUCKET_NAME,
+                Key=key,
+                Body=f,
+                ContentType="video/mp4",
+            )
+
+        return key
+
+    except Exception as e:
+        raise StorageError(f"Failed to upload video to R2: {e}") from e
+
+
+async def get_video_signed_url(url_hash: str, expires_in: int = 86400) -> str:
+    """Generate a pre-signed URL for a video file (24h expiry by default)."""
+    try:
+        client = _get_r2_client()
+        key = _video_key(url_hash)
+
+        url = client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": BUCKET_NAME, "Key": key},
+            ExpiresIn=expires_in,
+        )
+        return url
+
+    except Exception as e:
+        raise StorageError(f"Failed to generate video signed URL: {e}") from e
+
+
 async def get_signed_url(url_hash: str, expires_in: int = 3600) -> str:
     """Generate a pre-signed URL for downloading a result.
 

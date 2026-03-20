@@ -133,11 +133,11 @@ async def download_video(url: str, output_dir: str | None = None) -> VideoInfo:
             f"Video is {duration:.1f}s, max allowed is {MAX_DURATION_SECONDS}s"
         )
 
-    # Download video — use simpler format selection for TikTok compatibility
+    # Download video at max 1080p — good quality for viewing, reasonable file size
     # TikTok videos are single-stream (no separate video+audio merge needed)
     dl_cmd = [
         "yt-dlp",
-        "-f", "best[ext=mp4]/best",
+        "-f", "best[height<=1080][ext=mp4]/best[ext=mp4]/best",
         "-o", video_path,
         "--no-check-certificates",
         "--socket-timeout", "30",
