@@ -86,10 +86,53 @@ export interface ProcessResponse {
   jobId: string;
 }
 
+// SMPL-X body model parameters (v2)
+export interface SmplxParams {
+  betas: number[];        // body shape (10 values)
+  body_pose: number[];    // joint rotations (63 values = 21 joints x 3)
+  left_hand_pose: number[];  // left hand joints (45 values = 15 joints x 3)
+  right_hand_pose: number[]; // right hand joints (45 values = 15 joints x 3)
+  global_orient: number[];   // root orientation (3 values)
+  transl: number[];          // root translation (3 values)
+}
+
+export interface PersonPose {
+  person_id: number;
+  frame: number;
+  timestamp: number;
+  smplx_params: SmplxParams;
+}
+
+export interface BodyPartScores {
+  arms: number;  // 0-1
+  legs: number;  // 0-1
+  core: number;  // 0-1
+}
+
+export interface BodyPartDifficultyFrame {
+  frame: number;
+  overall: number;  // 0-1
+  body_parts: BodyPartScores;
+}
+
+export interface BodyPartDifficulty {
+  overall: number;
+  per_frame: BodyPartDifficultyFrame[];
+}
+
+export interface StepwiseResultV2 extends Omit<StepwiseResult, "version"> {
+  version: "2.0";
+  person_count: number;
+  person_poses: PersonPose[];
+  body_part_difficulty: BodyPartDifficulty;
+}
+
 export interface StatusResponse {
-  status: "processing" | "complete" | "error";
+  status: "processing" | "skeleton_ready" | "upgrading" | "mannequin_ready" | "complete" | "error";
   step?: string;
   result_url?: string;
+  skeleton_result_url?: string;
+  mannequin_result_url?: string;
   error_message?: string;
   error?: string;
 }
