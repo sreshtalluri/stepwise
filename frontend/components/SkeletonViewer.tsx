@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useMemo } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { useRef, useMemo, useEffect } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import {
@@ -253,6 +253,16 @@ function FootIndicator({
   );
 }
 
+// Component to set camera lookAt on mount and when angle changes
+function CameraSetup({ target }: { target: [number, number, number] }) {
+  const { camera } = useThree();
+  useEffect(() => {
+    camera.lookAt(target[0], target[1], target[2]);
+    camera.updateProjectionMatrix();
+  }, [camera, target]);
+  return null;
+}
+
 function Scene({
   frames,
   currentFrame,
@@ -267,14 +277,19 @@ function Scene({
   if (!frame) return null;
 
   const isMirror = mirrored !== undefined ? mirrored : angle === "mirror";
-  const cameraPos = CAMERA_POSITIONS[angle] || CAMERA_POSITIONS.front;
   const orbitIsEnabled = orbitEnabled !== undefined ? orbitEnabled : true;
+
+  // Look-at target: center of the skeleton (approximate chest height)
+  const lookTarget: [number, number, number] = groundToFloor ? [0, 1.0, 0] : [0, 0, 0];
 
   return (
     <>
       <ambientLight intensity={0.4} />
       <pointLight position={[2, 3, 2]} intensity={0.8} />
       <pointLight position={[-2, 3, -2]} intensity={0.3} />
+
+      {/* Ensure camera looks at the skeleton center */}
+      <CameraSetup target={lookTarget} />
 
       {/* Ground grid — hidden when not grounding to floor */}
       {groundToFloor && (
@@ -292,15 +307,13 @@ function Scene({
         groundToFloor={groundToFloor}
       />
 
-      {groundToFloor ? (
-        <OrbitControls
-          target={[0, 1.0, 0]}
-          enablePan={false}
-          minDistance={1.5}
-          maxDistance={6}
-          enabled={orbitIsEnabled}
-        />
-      ) : null}
+      <OrbitControls
+        target={lookTarget}
+        enablePan={false}
+        minDistance={1.5}
+        maxDistance={6}
+        enabled={groundToFloor ? orbitIsEnabled : false}
+      />
     </>
   );
 }
@@ -309,6 +322,12 @@ export function SkeletonViewer(props: SkeletonViewerProps) {
   const { groundToFloor = true } = props;
   const cameraPos = CAMERA_POSITIONS[props.angle] || CAMERA_POSITIONS.front;
 
+  // For ghost overlay: use a tighter camera that better fills the frame
+  // to align with the dancer in the video
+  const fov = groundToFloor ? 50 : 60;
+  const ghostCameraPos: [number, number, number] = [0, 0, 2];
+  const finalCameraPos = groundToFloor ? cameraPos : ghostCameraPos;
+
   return (
     <div
       className="w-full h-full r3f-canvas"
@@ -316,8 +335,8 @@ export function SkeletonViewer(props: SkeletonViewerProps) {
     >
       <Canvas
         camera={{
-          position: cameraPos,
-          fov: 50,
+          position: finalCameraPos,
+          fov,
           near: 0.1,
           far: 100,
         }}
