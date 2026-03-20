@@ -338,18 +338,22 @@ function GhostCameraSetup() {
   useEffect(() => {
     const cam = camera as THREE.OrthographicCamera;
     const aspect = size.width / size.height;
-    // The pipeline maps X: [-0.9, 0.9] and Y: [0, 1.8] approximately
-    // Use a vertical extent of GHOST_SCALE and center vertically at GHOST_SCALE/2
-    const halfH = GHOST_SCALE / 2;
-    const halfW = halfH * aspect;
+    // Pipeline maps: x = (lm.x - 0.5) * SCALE → X ∈ [-0.9, 0.9]
+    //                y = (1 - lm.y) * SCALE   → Y ∈ [0, 1.8]
+    // The canvas now matches the video's aspect ratio (via GhostOverlay),
+    // so we set the camera to cover exactly the pipeline's coordinate range.
+    const halfW = GHOST_SCALE / 2; // 0.9 — matches pipeline X range
+    const halfH = halfW / aspect;  // vertical extent from aspect ratio
     cam.left = -halfW;
     cam.right = halfW;
-    cam.top = GHOST_SCALE;
-    cam.bottom = 0;
+    // Center vertically: pipeline Y range is [0, SCALE], camera covers [centerY - halfH, centerY + halfH]
+    const centerY = GHOST_SCALE / 2;
+    cam.top = centerY + halfH;
+    cam.bottom = centerY - halfH;
     cam.near = 0.1;
     cam.far = 100;
-    cam.position.set(0, GHOST_SCALE / 2, 5);
-    cam.lookAt(0, GHOST_SCALE / 2, 0);
+    cam.position.set(0, centerY, 5);
+    cam.lookAt(0, centerY, 0);
     cam.updateProjectionMatrix();
   }, [camera, size]);
   return null;

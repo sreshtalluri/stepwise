@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { ViewPreset, PoseFrame } from "@/lib/types";
 import { SkeletonViewer } from "./SkeletonViewer";
 
@@ -12,6 +12,8 @@ function VideoPanel({
   isPaused,
   playbackSpeed = 1.0,
   className,
+  onVideoMeta,
+  videoRef: externalVideoRef,
 }: {
   videoUrl?: string;
   currentFrame: number;
@@ -20,8 +22,21 @@ function VideoPanel({
   isPaused: boolean;
   playbackSpeed?: number;
   className?: string;
+  onVideoMeta?: (width: number, height: number) => void;
+  videoRef?: React.RefObject<HTMLVideoElement>;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const internalVideoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = externalVideoRef || internalVideoRef;
+
+  // Report video natural dimensions when metadata loads
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !onVideoMeta) return;
+    const handler = () => onVideoMeta(video.videoWidth, video.videoHeight);
+    if (video.videoWidth > 0) handler();
+    video.addEventListener("loadedmetadata", handler);
+    return () => video.removeEventListener("loadedmetadata", handler);
+  }, [videoRef, onVideoMeta]);
 
   // Sync video playback with skeleton frame and speed
   useEffect(() => {
@@ -78,6 +93,127 @@ function VideoPanel({
         preload="auto"
         crossOrigin="anonymous"
       />
+    </div>
+  );
+}
+
+/** Compute where object-contain places the video inside a container */
+function computeContainedRect(
+  containerW: number,
+  containerH: number,
+  videoW: number,
+  videoH: number
+) {
+  const containerAspect = containerW / containerH;
+  const videoAspect = videoW / videoH;
+  let renderW: number, renderH: number, offsetX: number, offsetY: number;
+  if (videoAspect > containerAspect) {
+    // Video is wider — letterboxed (bars top/bottom)
+    renderW = containerW;
+    renderH = containerW / videoAspect;
+    offsetX = 0;
+    offsetY = (containerH - renderH) / 2;
+  } else {
+    // Video is taller — pillarboxed (bars left/right)
+    renderH = containerH;
+    renderW = containerH * videoAspect;
+    offsetX = (containerW - renderW) / 2;
+    offsetY = 0;
+  }
+  return { renderW, renderH, offsetX, offsetY };
+}
+
+function GhostOverlay({
+  videoUrl,
+  currentFrame,
+  totalFrames,
+  duration,
+  isPaused,
+  playbackSpeed,
+  frames,
+  showHands,
+  showFeet,
+}: {
+  videoUrl?: string;
+  currentFrame: number;
+  totalFrames: number;
+  duration: number;
+  isPaused: boolean;
+  playbackSpeed: number;
+  frames: PoseFrame[];
+  showHands: boolean;
+  showFeet: boolean;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const ghostVideoRef = useRef<HTMLVideoElement>(null!);
+
+  const [videoNatural, setVideoNatural] = useState<{ w: number; h: number } | null>(null);
+  const [containerSize, setContainerSize] = useState<{ w: number; h: number } | null>(null);
+
+  const handleVideoMeta = useCallback((w: number, h: number) => {
+    setVideoNatural({ w, h });
+  }, []);
+
+  // Track container size
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      setContainerSize({ w: width, h: height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Compute skeleton rect to match video's rendered area
+  const skeletonStyle = (() => {
+    if (!videoNatural || !containerSize) {
+      return { position: "absolute" as const, inset: 0 };
+    }
+    const { renderW, renderH, offsetX, offsetY } = computeContainedRect(
+      containerSize.w,
+      containerSize.h,
+      videoNatural.w,
+      videoNatural.h
+    );
+    return {
+      position: "absolute" as const,
+      left: offsetX,
+      top: offsetY,
+      width: renderW,
+      height: renderH,
+    };
+  })();
+
+  return (
+    <div ref={containerRef} className="relative w-full h-full bg-black">
+      {/* Video layer — dimmed so skeleton is clearly visible */}
+      <div className="absolute inset-0" style={{ opacity: 0.35 }}>
+        <VideoPanel
+          videoUrl={videoUrl}
+          currentFrame={currentFrame}
+          totalFrames={totalFrames}
+          duration={duration}
+          isPaused={isPaused}
+          playbackSpeed={playbackSpeed}
+          className="w-full h-full"
+          onVideoMeta={handleVideoMeta}
+          videoRef={ghostVideoRef}
+        />
+      </div>
+      {/* Skeleton overlay — positioned to match the video's rendered area */}
+      <div style={skeletonStyle}>
+        <SkeletonViewer
+          frames={frames}
+          currentFrame={currentFrame}
+          angle="front"
+          showHands={showHands}
+          showFeet={showFeet}
+          groundToFloor={false}
+          orbitEnabled={false}
+        />
+      </div>
     </div>
   );
 }
@@ -189,32 +325,17 @@ export function ViewLayout({
     // Preset 5: Ghost Overlay — dimmed video with bright skeleton on top
     case 5:
       return (
-        <div className="relative w-full h-full bg-black">
-          {/* Video layer — dimmed so skeleton is clearly visible */}
-          <div className="absolute inset-0" style={{ opacity: 0.35 }}>
-            <VideoPanel
-              videoUrl={videoUrl}
-              currentFrame={currentFrame}
-              totalFrames={totalFrames}
-              duration={duration}
-              isPaused={isPaused}
-              playbackSpeed={playbackSpeed}
-              className="w-full h-full"
-            />
-          </div>
-          {/* Skeleton overlay — full brightness, transparent canvas bg */}
-          <div className="absolute inset-0">
-            <SkeletonViewer
-              frames={frames}
-              currentFrame={currentFrame}
-              angle="front"
-              showHands={showHands}
-              showFeet={showFeet}
-              groundToFloor={false}
-              orbitEnabled={false}
-            />
-          </div>
-        </div>
+        <GhostOverlay
+          videoUrl={videoUrl}
+          currentFrame={currentFrame}
+          totalFrames={totalFrames}
+          duration={duration}
+          isPaused={isPaused}
+          playbackSpeed={playbackSpeed}
+          frames={frames}
+          showHands={showHands}
+          showFeet={showFeet}
+        />
       );
 
     // Preset 6: Video + PiP — video fullscreen, small skeleton in bottom-right
