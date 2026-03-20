@@ -88,66 +88,63 @@ export default function ViewerPage() {
     return () => clearInterval(interval);
   }, [jobId, viewState]);
 
-  // Animation loop
+  // Use refs for mutable values so the animation loop doesn't restart on speed/loop changes
+  const playbackSpeedRef = useRef(playbackSpeed);
+  const loopStartRef = useRef(loopStart);
+  const loopEndRef = useRef(loopEnd);
+
+  useEffect(() => { playbackSpeedRef.current = playbackSpeed; }, [playbackSpeed]);
+  useEffect(() => { loopStartRef.current = loopStart; }, [loopStart]);
+  useEffect(() => { loopEndRef.current = loopEnd; }, [loopEnd]);
+
+  // Time-based animation loop — smooth like a video player
+  // Uses continuous time tracking instead of frame-counting to avoid jitter
   useEffect(() => {
     if (!isPlaying || !result || viewState !== "ready") return;
 
-    const fps = result.fps;
     const totalFrames = result.frames.length;
-    const frameDuration = 1000 / (fps * playbackSpeed);
+    const duration = result.duration;
+    let playbackTime = (currentFrame / Math.max(totalFrames - 1, 1)) * duration;
+    let lastTimestamp = performance.now();
 
-    let lastTime = performance.now();
+    const animate = (now: number) => {
+      const deltaMs = now - lastTimestamp;
+      lastTimestamp = now;
 
-    const animate = (time: number) => {
-      const delta = time - lastTime;
+      // Advance playback time by delta * speed (continuous, not frame-stepped)
+      playbackTime += (deltaMs / 1000) * playbackSpeedRef.current;
 
-      if (delta >= frameDuration) {
-        lastTime = time - (delta % frameDuration);
-
-        setCurrentFrame((prev) => {
-          let next = prev + 1;
-
-          // Handle looping
-          if (loopStart !== null && loopEnd !== null && result) {
-            const loopStartFrame = Math.round(
-              (loopStart / result.duration) * (totalFrames - 1)
-            );
-            const loopEndFrame = Math.round(
-              (loopEnd / result.duration) * (totalFrames - 1)
-            );
-
-            if (next > loopEndFrame) {
-              next = loopStartFrame;
-              // Increment loop iteration and ramp speed
-              setLoopIteration((prev) => {
-                const newIter = prev + 1;
-                const newSpeed = Math.min(
-                  SPEED_RAMP.maxSpeed,
-                  SPEED_RAMP.initialSpeed +
-                    SPEED_RAMP.increment * newIter
-                );
-                setPlaybackSpeed(newSpeed);
-                return newIter;
-              });
-            }
-          } else if (next >= totalFrames) {
-            next = 0;
-          }
-
-          return next;
+      // Handle looping
+      const ls = loopStartRef.current;
+      const le = loopEndRef.current;
+      if (ls !== null && le !== null && playbackTime > le) {
+        playbackTime = ls;
+        setLoopIteration((prev) => {
+          const newIter = prev + 1;
+          const newSpeed = Math.min(
+            SPEED_RAMP.maxSpeed,
+            SPEED_RAMP.initialSpeed + SPEED_RAMP.increment * newIter
+          );
+          setPlaybackSpeed(newSpeed);
+          return newIter;
         });
+      } else if (playbackTime >= duration) {
+        playbackTime = 0;
       }
+
+      // Convert continuous time to frame index
+      const frame = Math.round((playbackTime / duration) * (totalFrames - 1));
+      setCurrentFrame(Math.max(0, Math.min(frame, totalFrames - 1)));
 
       animationRef.current = requestAnimationFrame(animate);
     };
 
     animationRef.current = requestAnimationFrame(animate);
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
     };
-  }, [isPlaying, result, viewState, playbackSpeed, loopStart, loopEnd]);
+    // Only restart the loop when play state or data changes — NOT on speed/loop changes
+  }, [isPlaying, result, viewState]);
 
   // Sync audio with current frame
   useEffect(() => {

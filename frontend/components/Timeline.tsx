@@ -127,15 +127,7 @@ export function Timeline({
           </button>
         )}
 
-        {/* Speed badge */}
-        <div
-          className={`
-            text-xs font-mono px-2 py-1 rounded-button border border-border
-            ${loopIteration > 0 ? "speed-pulse text-accent border-accent" : "text-text-secondary"}
-          `}
-        >
-          {playbackSpeed.toFixed(1)}x
-        </div>
+        {/* Speed badge removed — SpeedControl component in controls row handles this */}
       </div>
 
       {/* Timeline bar */}
