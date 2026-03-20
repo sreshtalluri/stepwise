@@ -200,6 +200,8 @@ export function ViewLayout({
               showHands={showHands}
               showFeet={showFeet}
               opacity={0.5}
+              groundToFloor={false}
+              orbitEnabled={false}
             />
           </div>
         </div>

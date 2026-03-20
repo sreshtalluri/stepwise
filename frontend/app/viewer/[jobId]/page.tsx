@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams } from "next/navigation";
 import {
   StepwiseResult,
@@ -13,6 +13,8 @@ import { ProcessingStatus } from "@/components/ProcessingStatus";
 import { ViewPresetBar } from "@/components/ViewPresetBar";
 import { ViewLayout } from "@/components/ViewLayout";
 import { Timeline } from "@/components/Timeline";
+import { LoopControls } from "@/components/LoopControls";
+import { SpeedControl } from "@/components/SpeedControl";
 
 type ViewState = "loading" | "processing" | "revealing" | "ready" | "error";
 
@@ -40,6 +42,7 @@ export default function ViewerPage() {
 
   const animationRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   // Poll for status
   useEffect(() => {
@@ -146,6 +149,29 @@ export default function ViewerPage() {
     };
   }, [isPlaying, result, viewState, playbackSpeed, loopStart, loopEnd]);
 
+  // Sync audio with current frame
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !result) return;
+
+    const targetTime = (currentFrame / Math.max(result.frames.length - 1, 1)) * result.duration;
+
+    // Only seek if >0.15s out of sync
+    if (Math.abs(audio.currentTime - targetTime) > 0.15) {
+      audio.currentTime = targetTime;
+    }
+
+    // Mute when a VideoPanel is visible (presets 3, 5, 6) to avoid double audio
+    const videoPresets = [3, 5, 6];
+    audio.muted = videoPresets.includes(activePreset);
+
+    if (!isPlaying && !audio.paused) {
+      audio.pause();
+    } else if (isPlaying && audio.paused) {
+      audio.play().catch(() => {});
+    }
+  }, [currentFrame, isPlaying, activePreset, result]);
+
   // Select view preset
   const selectPreset = useCallback((preset: ViewPreset) => {
     setActivePreset(preset);
@@ -208,6 +234,45 @@ export default function ViewerPage() {
     setPlaybackSpeed(1.0);
   }, []);
 
+  // Speed change
+  const handleSpeedChange = useCallback((speed: number) => {
+    setPlaybackSpeed(speed);
+  }, []);
+
+  // Prev beat navigation
+  const handlePrevBeat = useCallback(() => {
+    if (!result) return;
+    const currentTime = (currentFrame / Math.max(result.frames.length - 1, 1)) * result.duration;
+    const prevBeat = [...(result.beats || [])].reverse().find(b => b.timestamp < currentTime - 0.05);
+    if (prevBeat) {
+      const frame = Math.round((prevBeat.timestamp / result.duration) * (result.frames.length - 1));
+      setCurrentFrame(frame);
+    }
+  }, [result, currentFrame]);
+
+  // Next beat navigation
+  const handleNextBeat = useCallback(() => {
+    if (!result) return;
+    const currentTime = (currentFrame / Math.max(result.frames.length - 1, 1)) * result.duration;
+    const nextBeat = (result.beats || []).find(b => b.timestamp > currentTime + 0.05);
+    if (nextBeat) {
+      const frame = Math.round((nextBeat.timestamp / result.duration) * (result.frames.length - 1));
+      setCurrentFrame(frame);
+    }
+  }, [result, currentFrame]);
+
+  // Compute active beat index
+  const activeBeatIndex = useMemo(() => {
+    if (!result?.beats?.length) return -1;
+    const currentTime = (currentFrame / Math.max(result.frames.length - 1, 1)) * result.duration;
+    let idx = -1;
+    for (let i = 0; i < result.beats.length; i++) {
+      if (result.beats[i].timestamp <= currentTime + 0.05) idx = i;
+      else break;
+    }
+    return idx;
+  }, [result, currentFrame]);
+
   // Processing or loading state
   if (viewState === "loading" || viewState === "processing") {
     const stepIndex = PROCESSING_STEPS.findIndex((s) => s === step);
@@ -268,6 +333,19 @@ export default function ViewerPage() {
         />
       </div>
 
+      {/* Hidden audio element for skeleton-only presets */}
+      <audio
+        ref={audioRef}
+        src={result.video_url || undefined}
+        preload="auto"
+      />
+
+      {/* Controls row */}
+      <div className="flex items-center justify-between px-4 py-1 bg-surface border-t border-border">
+        <LoopControls loopStart={loopStart} loopEnd={loopEnd} onClearLoop={handleClearLoop} duration={result.duration} />
+        <SpeedControl speed={playbackSpeed} loopIteration={loopIteration} onSpeedChange={handleSpeedChange} />
+      </div>
+
       {/* Timeline */}
       <Timeline
         currentFrame={currentFrame}
@@ -284,6 +362,9 @@ export default function ViewerPage() {
         onClearLoop={handleClearLoop}
         playbackSpeed={playbackSpeed}
         loopIteration={loopIteration}
+        onPrevBeat={handlePrevBeat}
+        onNextBeat={handleNextBeat}
+        activeBeatIndex={activeBeatIndex}
       />
     </div>
   );

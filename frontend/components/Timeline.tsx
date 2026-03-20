@@ -18,6 +18,9 @@ interface TimelineProps {
   onClearLoop: () => void;
   playbackSpeed: number;
   loopIteration: number;
+  onPrevBeat?: () => void;
+  onNextBeat?: () => void;
+  activeBeatIndex?: number;
 }
 
 function difficultyColor(score: number): string {
@@ -41,6 +44,9 @@ export function Timeline({
   onClearLoop,
   playbackSpeed,
   loopIteration,
+  onPrevBeat,
+  onNextBeat,
+  activeBeatIndex,
 }: TimelineProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const progress = totalFrames > 0 ? currentFrame / (totalFrames - 1) : 0;
@@ -68,6 +74,15 @@ export function Timeline({
     <div className="bg-surface border-t border-border px-4 py-3">
       {/* Controls row */}
       <div className="flex items-center gap-3 mb-2">
+        {/* Prev beat */}
+        <button
+          onClick={onPrevBeat}
+          className="w-8 h-8 flex items-center justify-center rounded-button text-accent hover:bg-accent-glow transition-colors"
+          title="Previous beat"
+        >
+          <span className="text-sm">&#9664;</span>
+        </button>
+
         {/* Play/Pause */}
         <button
           onClick={onTogglePlay}
@@ -83,6 +98,15 @@ export function Timeline({
               <path d="M2 1l11 6-11 6V1z" />
             </svg>
           )}
+        </button>
+
+        {/* Next beat */}
+        <button
+          onClick={onNextBeat}
+          className="w-8 h-8 flex items-center justify-center rounded-button text-accent hover:bg-accent-glow transition-colors"
+          title="Next beat"
+        >
+          <span className="text-sm">&#9654;</span>
         </button>
 
         {/* Time display */}
@@ -154,10 +178,15 @@ export function Timeline({
         {/* Beat markers */}
         {(beats || []).map((beat, i) => {
           const left = (beat.timestamp / duration) * 100;
+          const isActive = i === activeBeatIndex;
           return (
             <div
               key={i}
-              className="absolute top-0 bottom-0 w-px bg-text-secondary/40 hover:bg-accent cursor-pointer transition-colors"
+              className={`absolute top-0 bottom-0 cursor-pointer transition-colors ${
+                isActive
+                  ? "bg-accent w-[2px] shadow-[0_0_6px_rgba(0,212,255,0.6)]"
+                  : "w-px bg-text-secondary/40 hover:bg-accent"
+              }`}
               style={{ left: `${left}%` }}
               onClick={(e) => {
                 e.stopPropagation();

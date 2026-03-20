@@ -65,3 +65,33 @@ Let users choose skeleton visual style: neon wireframe, realistic mannequin, min
 - **Effort:** S (human: ~2 days / CC: ~20 min)
 - **Depends on:** Core Three.js rendering working
 - **Context:** Deferred from CEO plan review (2026-03-18). Different Three.js materials/meshes for the same skeleton data.
+
+
+
+
+
+Current flow:
+yt-dlp downloads video → processes locally on Modal → saves pose JSON to
+R2 → discards video file
+
+Production flow:
+yt-dlp downloads video → processes locally on Modal → saves pose JSON to
+R2 → ALSO uploads video MP4 to R2 → frontend plays video from R2 signed
+URL
+
+What needs to change:
+1. storage.py — add an upload_video() function (same R2 bucket, key
+pattern: {url_hash}/video.mp4)
+2. app.py — after processing, upload the video file to R2 and include the
+signed URL in the result
+3. Frontend — already set up to receive video_url, no changes needed
+
+Cost: R2 has no egress fees. Storage is $0.015/GB/month. A 15-second
+TikTok video is ~1.5MB. You'd need 700 videos to hit 1GB ($0.015/month).
+Basically free.
+
+Time to implement: ~15 minutes with CC.
+
+One consideration: You'd want a TTL/cleanup job eventually (delete videos
+older than 30 days, same as pose data). But that's a future
+optimization, not a blocker.

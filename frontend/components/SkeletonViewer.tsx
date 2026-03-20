@@ -24,6 +24,7 @@ interface SkeletonViewerProps {
   mirrored?: boolean;
   orbitEnabled?: boolean;
   opacity?: number;
+  groundToFloor?: boolean;
 }
 
 // Camera positions for different angles
@@ -38,23 +39,28 @@ function Skeleton({
   mirror,
   showHands,
   showFeet,
+  groundToFloor = true,
 }: {
   frame: PoseFrame;
   mirror: boolean;
   showHands: boolean;
   showFeet: boolean;
+  groundToFloor?: boolean;
 }) {
   const groupRef = useRef<THREE.Group>(null);
 
   const jointPositions = useMemo(() => {
-    // First pass: collect all Y values to find the lowest point (feet)
-    const allJoints = Object.values(frame.joints);
-    const minY = allJoints.length > 0
-      ? Math.min(...allJoints.map((j) => j.y))
-      : 0;
+    let yOffset = 0;
+    if (groundToFloor) {
+      // First pass: collect all Y values to find the lowest point (feet)
+      const allJoints = Object.values(frame.joints);
+      const minY = allJoints.length > 0
+        ? Math.min(...allJoints.map((j) => j.y))
+        : 0;
 
-    // Offset so the lowest joint (feet) sits on the ground plane (Y=0)
-    const yOffset = -minY;
+      // Offset so the lowest joint (feet) sits on the ground plane (Y=0)
+      yOffset = -minY;
+    }
 
     const positions: Record<string, THREE.Vector3> = {};
     for (const [name, joint] of Object.entries(frame.joints)) {
@@ -62,7 +68,7 @@ function Skeleton({
       positions[name] = new THREE.Vector3(x, joint.y + yOffset, joint.z);
     }
     return positions;
-  }, [frame, mirror]);
+  }, [frame, mirror, groundToFloor]);
 
   // Build bone geometry
   const boneLines = useMemo(() => {
@@ -255,6 +261,7 @@ function Scene({
   showFeet,
   mirrored,
   orbitEnabled,
+  groundToFloor = true,
 }: SkeletonViewerProps) {
   const frame = frames[currentFrame] || frames[0];
   if (!frame) return null;
@@ -269,31 +276,37 @@ function Scene({
       <pointLight position={[2, 3, 2]} intensity={0.8} />
       <pointLight position={[-2, 3, -2]} intensity={0.3} />
 
-      {/* Ground grid */}
-      <gridHelper
-        args={[4, 20, "#222222", "#1a1a1a"]}
-        position={[0, 0, 0]}
-      />
+      {/* Ground grid — hidden when not grounding to floor */}
+      {groundToFloor && (
+        <gridHelper
+          args={[4, 20, "#222222", "#1a1a1a"]}
+          position={[0, 0, 0]}
+        />
+      )}
 
       <Skeleton
         frame={frame}
         mirror={isMirror}
         showHands={showHands}
         showFeet={showFeet}
+        groundToFloor={groundToFloor}
       />
 
-      <OrbitControls
-        target={[0, 1.0, 0]}
-        enablePan={false}
-        minDistance={1.5}
-        maxDistance={6}
-        enabled={orbitIsEnabled}
-      />
+      {groundToFloor ? (
+        <OrbitControls
+          target={[0, 1.0, 0]}
+          enablePan={false}
+          minDistance={1.5}
+          maxDistance={6}
+          enabled={orbitIsEnabled}
+        />
+      ) : null}
     </>
   );
 }
 
 export function SkeletonViewer(props: SkeletonViewerProps) {
+  const { groundToFloor = true } = props;
   const cameraPos = CAMERA_POSITIONS[props.angle] || CAMERA_POSITIONS.front;
 
   return (
@@ -308,9 +321,9 @@ export function SkeletonViewer(props: SkeletonViewerProps) {
           near: 0.1,
           far: 100,
         }}
-        gl={{ antialias: true }}
+        gl={{ antialias: true, ...(groundToFloor ? {} : { alpha: true }) }}
       >
-        <color attach="background" args={["#0a0a0a"]} />
+        {groundToFloor && <color attach="background" args={["#0a0a0a"]} />}
         <Scene {...props} />
       </Canvas>
     </div>
