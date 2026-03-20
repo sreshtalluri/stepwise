@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef, useEffect } from "react";
-import { ViewPreset, PoseFrame } from "@/lib/types";
-import { SkeletonViewer } from "./SkeletonViewer";
+import { ViewPreset, PoseFrame, PersonPose } from "@/lib/types";
+import { PoseViewer } from "./PoseViewer";
 
 function VideoPanel({
   videoUrl,
@@ -92,6 +92,10 @@ interface ViewLayoutProps {
   videoUrl?: string;
   duration?: number;
   playbackSpeed?: number;
+  personPoses?: PersonPose[];
+  focusedPersonId?: number;
+  xrayMode?: boolean;
+  beatPulse?: boolean;
 }
 
 export function ViewLayout({
@@ -104,19 +108,33 @@ export function ViewLayout({
   videoUrl,
   duration = 0,
   playbackSpeed = 1.0,
+  personPoses,
+  focusedPersonId = 0,
+  xrayMode = true,
+  beatPulse = false,
 }: ViewLayoutProps) {
   const totalFrames = frames.length;
+
+  // Common props passed to every PoseViewer instance
+  const mannequinProps = {
+    personPoses,
+    focusedPersonId,
+    xrayMode,
+    beatPulse,
+  };
+
   switch (activePreset) {
     // Preset 1: Front — full-screen front view
     case 1:
       return (
         <div className="w-full h-full">
-          <SkeletonViewer
+          <PoseViewer
             frames={frames}
             currentFrame={currentFrame}
             angle="front"
             showHands={showHands}
             showFeet={showFeet}
+            {...mannequinProps}
           />
         </div>
       );
@@ -125,13 +143,14 @@ export function ViewLayout({
     case 2:
       return (
         <div className="w-full h-full">
-          <SkeletonViewer
+          <PoseViewer
             frames={frames}
             currentFrame={currentFrame}
             angle="front"
             showHands={showHands}
             showFeet={showFeet}
             mirrored={true}
+            {...mannequinProps}
           />
         </div>
       );
@@ -150,12 +169,13 @@ export function ViewLayout({
             className="w-1/2 h-full border-r border-border"
           />
           <div className="w-1/2 h-full">
-            <SkeletonViewer
+            <PoseViewer
               frames={frames}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
+              {...mannequinProps}
             />
           </div>
         </div>
@@ -166,21 +186,23 @@ export function ViewLayout({
       return (
         <div className="flex w-full h-full">
           <div className="w-1/2 h-full border-r border-border">
-            <SkeletonViewer
+            <PoseViewer
               frames={frames}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
+              {...mannequinProps}
             />
           </div>
           <div className="w-1/2 h-full">
-            <SkeletonViewer
+            <PoseViewer
               frames={frames}
               currentFrame={currentFrame}
               angle="back"
               showHands={showHands}
               showFeet={showFeet}
+              {...mannequinProps}
             />
           </div>
         </div>
@@ -204,7 +226,7 @@ export function ViewLayout({
           </div>
           {/* Skeleton overlay — full brightness, transparent canvas bg */}
           <div className="absolute inset-0">
-            <SkeletonViewer
+            <PoseViewer
               frames={frames}
               currentFrame={currentFrame}
               angle="front"
@@ -212,6 +234,7 @@ export function ViewLayout({
               showFeet={showFeet}
               groundToFloor={false}
               orbitEnabled={false}
+              {...mannequinProps}
             />
           </div>
         </div>
@@ -242,12 +265,13 @@ export function ViewLayout({
               borderRadius: "12px",
             }}
           >
-            <SkeletonViewer
+            <PoseViewer
               frames={frames}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
+              {...mannequinProps}
             />
           </div>
         </div>
@@ -257,13 +281,14 @@ export function ViewLayout({
     case 7:
       return (
         <div className="relative w-full h-full">
-          <SkeletonViewer
+          <PoseViewer
             frames={frames}
             currentFrame={currentFrame}
             angle="front"
             showHands={showHands}
             showFeet={showFeet}
             orbitEnabled={isPaused}
+            {...mannequinProps}
           />
           {isPaused && (
             <div
@@ -285,23 +310,25 @@ export function ViewLayout({
       return (
         <div className="flex w-full h-full">
           <div className="w-1/2 h-full border-r border-border">
-            <SkeletonViewer
+            <PoseViewer
               frames={frames}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
               mirrored={false}
+              {...mannequinProps}
             />
           </div>
           <div className="w-1/2 h-full">
-            <SkeletonViewer
+            <PoseViewer
               frames={frames}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
               mirrored={true}
+              {...mannequinProps}
             />
           </div>
         </div>
