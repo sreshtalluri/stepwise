@@ -11,27 +11,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-try:
-    from pipeline.models.schema import PersonPose, SmplxParams
-except ImportError:
-    # Temporary: these will be in schema.py after Task 1 completes
-    from pydantic import BaseModel, Field
-
-    class SmplxParams(BaseModel):  # type: ignore[no-redef]
-        """SMPL-X body model parameters for one person in one frame."""
-        betas: list[float] = Field(min_length=10, max_length=10)
-        body_pose: list[float] = Field(min_length=63, max_length=63)
-        left_hand_pose: list[float] = Field(min_length=45, max_length=45)
-        right_hand_pose: list[float] = Field(min_length=45, max_length=45)
-        global_orient: list[float] = Field(min_length=3, max_length=3)
-        transl: list[float] = Field(min_length=3, max_length=3)
-
-    class PersonPose(BaseModel):  # type: ignore[no-redef]
-        """SMPL-X params for one person in one frame."""
-        person_id: int = Field(ge=0)
-        frame: int = Field(ge=0)
-        timestamp: float = Field(ge=0)
-        smplx_params: SmplxParams
+from pipeline.models.schema import PersonPose, SmplxParams
 
 
 @dataclass

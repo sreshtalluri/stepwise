@@ -9,27 +9,14 @@ from __future__ import annotations
 
 import math
 
-from pipeline.models.schema import Difficulty, DifficultyFrame, FramePose
-
-try:
-    from pipeline.models.schema import BodyPartDifficulty, BodyPartDifficultyFrame, BodyPartScores
-except ImportError:
-    # Temporary: will be imported from schema.py after Task 1 completes
-    from pydantic import BaseModel, Field
-
-    class BodyPartScores(BaseModel):  # type: ignore[no-redef]
-        arms: float = Field(ge=0, le=1)
-        legs: float = Field(ge=0, le=1)
-        core: float = Field(ge=0, le=1)
-
-    class BodyPartDifficultyFrame(BaseModel):  # type: ignore[no-redef]
-        frame: int = Field(ge=0)
-        overall: float = Field(ge=0, le=1)
-        body_parts: BodyPartScores
-
-    class BodyPartDifficulty(BaseModel):  # type: ignore[no-redef]
-        overall: float = Field(ge=0, le=1)
-        per_frame: list[BodyPartDifficultyFrame]
+from pipeline.models.schema import (
+    BodyPartDifficulty,
+    BodyPartDifficultyFrame,
+    BodyPartScores,
+    Difficulty,
+    DifficultyFrame,
+    FramePose,
+)
 
 
 def _joint_velocity_magnitude(
