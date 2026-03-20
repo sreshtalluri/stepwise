@@ -253,13 +253,20 @@ function FootIndicator({
   );
 }
 
-// Component to set camera lookAt on mount and when angle changes
-function CameraSetup({ target }: { target: [number, number, number] }) {
+// Component to set camera position AND lookAt when angle changes
+function CameraSetup({
+  position,
+  target,
+}: {
+  position: [number, number, number];
+  target: [number, number, number];
+}) {
   const { camera } = useThree();
   useEffect(() => {
+    camera.position.set(position[0], position[1], position[2]);
     camera.lookAt(target[0], target[1], target[2]);
     camera.updateProjectionMatrix();
-  }, [camera, target]);
+  }, [camera, position, target]);
   return null;
 }
 
@@ -278,6 +285,7 @@ function Scene({
 
   const isMirror = mirrored !== undefined ? mirrored : angle === "mirror";
   const orbitIsEnabled = orbitEnabled !== undefined ? orbitEnabled : true;
+  const cameraPos = CAMERA_POSITIONS[angle] || CAMERA_POSITIONS.front;
 
   // Look-at target: center of the skeleton (approximate chest height)
   const lookTarget: [number, number, number] = groundToFloor ? [0, 1.0, 0] : [0, 0, 0];
@@ -288,8 +296,8 @@ function Scene({
       <pointLight position={[2, 3, 2]} intensity={0.8} />
       <pointLight position={[-2, 3, -2]} intensity={0.3} />
 
-      {/* Ensure camera looks at the skeleton center */}
-      <CameraSetup target={lookTarget} />
+      {/* Update camera position AND lookAt when angle changes */}
+      <CameraSetup position={cameraPos} target={lookTarget} />
 
       {/* Ground grid — hidden when not grounding to floor */}
       {groundToFloor && (
