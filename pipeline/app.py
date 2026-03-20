@@ -72,9 +72,11 @@ class AsyncProcessResponse(BaseModel):
 
 
 class JobStatusResponse(BaseModel):
-    status: str  # "processing" | "complete" | "error"
+    status: str  # "processing" | "skeleton_ready" | "upgrading" | "mannequin_ready" | "complete" | "error"
     step: str | None = None
     result_url: str | None = None
+    skeleton_result_url: str | None = None
+    mannequin_result_url: str | None = None
     error: str | None = None
 
 
@@ -226,6 +228,8 @@ async def process_video(request: ProcessRequest):
         "status": "processing",
         "step": "Downloading video...",
         "result_url": None,
+        "skeleton_result_url": None,
+        "mannequin_result_url": None,
         "error": None,
     }
 
@@ -246,6 +250,8 @@ async def get_job_status(job_id: str):
         status=job["status"],
         step=job.get("step"),
         result_url=job.get("result_url"),
+        skeleton_result_url=job.get("skeleton_result_url"),
+        mannequin_result_url=job.get("mannequin_result_url"),
         error=job.get("error"),
     )
 
