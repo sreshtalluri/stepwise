@@ -10,9 +10,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from pipeline.models.schema import StepwiseResult
+from pipeline.models.schema import StepwiseResult, StepwiseResultV2
 from pipeline.services.beat_detector import detect_beats
-from pipeline.services.difficulty import compute_difficulty
+from pipeline.services.difficulty import compute_body_part_difficulty, compute_difficulty
+from pipeline.services.smplx_extractor import extract_smplx
 from pipeline.services.downloader import (
     DownloadError,
     VideoTooLongError,
@@ -88,7 +89,11 @@ _jobs: dict[str, dict] = {}
 
 
 async def _run_pipeline(job_id: str, url: str) -> None:
-    """Run the full processing pipeline in the background, updating job status."""
+    """Run the progressive enhancement pipeline.
+
+    Pass 1 (fast): MediaPipe -> skeleton data -> upload v1 -> status: skeleton_ready
+    Pass 2 (slow): SMPL-X -> mannequin data -> upload v2 -> status: mannequin_ready
+    """
     job = _jobs[job_id]
 
     try:
@@ -111,16 +116,17 @@ async def _run_pipeline(job_id: str, url: str) -> None:
             job["error"] = str(e)
             return
 
-        # 2. Check cache
+        # 2. Check cache (v2 first, fall back to v1)
         try:
             cached = await check_cache(computed_hash)
             if cached is not None:
                 signed_url = await get_signed_url(computed_hash)
                 job["status"] = "complete"
                 job["result_url"] = signed_url
+                job["skeleton_result_url"] = signed_url
                 return
         except Exception:
-            pass  # Cache errors should not block processing
+            pass
 
         # 3. Download video
         try:
@@ -134,7 +140,9 @@ async def _run_pipeline(job_id: str, url: str) -> None:
             job["error"] = str(e)
             return
 
-        # 4. Run independent steps in parallel
+        # =====================================================================
+        # PASS 1: MediaPipe fast pass -> skeleton (v1)
+        # =====================================================================
         job["step"] = "Extracting poses..."
 
         poses_task = extract_poses(
@@ -151,15 +159,10 @@ async def _run_pipeline(job_id: str, url: str) -> None:
             poses_task, hands_task, beats_task
         )
 
-        job["step"] = "Detecting beats..."
-
-        # 5. Compute derived data from poses
-        job["step"] = "Almost ready..."
         foot_contacts = compute_foot_contacts(poses, video_info.fps)
         difficulty = compute_difficulty(poses, video_info.fps)
 
-        # 6. Build result
-        result = StepwiseResult(
+        result_v1 = StepwiseResult(
             version="1.0",
             video_id=video_info.video_id,
             url_hash=computed_hash,
@@ -175,18 +178,85 @@ async def _run_pipeline(job_id: str, url: str) -> None:
             processed_at=datetime.now(timezone.utc),
         )
 
-        # 7. Upload to R2
+        # Upload v1 skeleton result
         try:
-            await upload_result(computed_hash, result)
-            signed_url = await get_signed_url(computed_hash)
-            job["result_url"] = signed_url
+            await upload_result(computed_hash, result_v1)
+            skeleton_url = await get_signed_url(computed_hash)
+            job["skeleton_result_url"] = skeleton_url
+            job["result_url"] = skeleton_url
         except Exception:
-            # If upload fails, we can't provide a URL
             job["status"] = "error"
-            job["error"] = "Failed to upload result"
+            job["error"] = "Failed to upload skeleton result"
             return
 
-        job["status"] = "complete"
+        # Upload video to R2
+        try:
+            await upload_video(computed_hash, str(video_info.video_path))
+        except Exception:
+            pass  # Video upload failure shouldn't block
+
+        job["status"] = "skeleton_ready"
+        job["step"] = "Enhancing with SMPL-X..."
+
+        # =====================================================================
+        # PASS 2: SMPL-X full pass -> mannequin (v2)
+        # =====================================================================
+        try:
+            smplx_result = await extract_smplx(
+                video_info.video_path,
+                video_info.total_frames,
+                video_info.fps,
+            )
+
+            job["status"] = "upgrading"
+            job["step"] = "Analyzing movement detail..."
+
+            body_part_diff = compute_body_part_difficulty(poses, video_info.fps)
+
+            result_v2 = StepwiseResultV2(
+                version="2.0",
+                video_id=video_info.video_id,
+                url_hash=computed_hash,
+                source_url=url,
+                duration_seconds=video_info.duration_seconds,
+                fps=video_info.fps,
+                total_frames=video_info.total_frames,
+                body_poses=poses,
+                hand_states=hand_states,
+                foot_contacts=foot_contacts,
+                beats=beats,
+                difficulty=difficulty,
+                person_count=smplx_result.person_count,
+                person_poses=smplx_result.person_poses,
+                body_part_difficulty=body_part_diff,
+                processed_at=datetime.now(timezone.utc),
+            )
+
+            # Upload v2 with a different R2 key so v1 is preserved
+            from pipeline.services.storage import _get_r2_client, BUCKET_NAME
+            v2_key = f"{computed_hash}/v2.0.json"
+            client = _get_r2_client()
+            client.put_object(
+                Bucket=BUCKET_NAME,
+                Key=v2_key,
+                Body=result_v2.model_dump_json(indent=2),
+                ContentType="application/json",
+            )
+            mannequin_url = client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": BUCKET_NAME, "Key": v2_key},
+                ExpiresIn=3600,
+            )
+            job["mannequin_result_url"] = mannequin_url
+            job["result_url"] = mannequin_url
+            job["status"] = "mannequin_ready"
+
+        except NotImplementedError:
+            # Real SMPL-X not available yet — stay on skeleton
+            job["status"] = "skeleton_ready"
+        except Exception:
+            # SMPL-X failed — stay on skeleton, which is already available
+            job["status"] = "skeleton_ready"
 
     except Exception as e:
         job["status"] = "error"
