@@ -25,7 +25,37 @@ interface SkeletonViewerProps {
   orbitEnabled?: boolean;
   opacity?: number;
   groundToFloor?: boolean;
+  renderMode?: "wireframe" | "capsule";
 }
+
+// Limb thickness map — thicker for torso/thighs, thinner for forearms/shins
+const LIMB_RADIUS: Record<string, number> = {
+  // Torso
+  "pelvis-spine": 0.045,
+  "spine-neck": 0.04,
+  "neck-head": 0.025,
+  "head-nose": 0.015,
+  // Left arm
+  "neck-left_shoulder": 0.03,
+  "left_shoulder-left_elbow": 0.025,
+  "left_elbow-left_wrist": 0.02,
+  "left_wrist-left_hand": 0.015,
+  // Right arm
+  "neck-right_shoulder": 0.03,
+  "right_shoulder-right_elbow": 0.025,
+  "right_elbow-right_wrist": 0.02,
+  "right_wrist-right_hand": 0.015,
+  // Left leg
+  "pelvis-left_hip": 0.035,
+  "left_hip-left_knee": 0.035,
+  "left_knee-left_ankle": 0.028,
+  "left_ankle-left_foot": 0.02,
+  // Right leg
+  "pelvis-right_hip": 0.035,
+  "right_hip-right_knee": 0.035,
+  "right_knee-right_ankle": 0.028,
+  "right_ankle-right_foot": 0.02,
+};
 
 // Camera positions for different angles
 const CAMERA_POSITIONS: Record<string, [number, number, number]> = {
@@ -40,12 +70,14 @@ function Skeleton({
   showHands,
   showFeet,
   groundToFloor = true,
+  renderMode = "capsule",
 }: {
   frame: PoseFrame;
   mirror: boolean;
   showHands: boolean;
   showFeet: boolean;
   groundToFloor?: boolean;
+  renderMode?: "wireframe" | "capsule";
 }) {
   const groupRef = useRef<THREE.Group>(null);
 
@@ -85,23 +117,39 @@ function Skeleton({
 
   return (
     <group ref={groupRef}>
-      {/* Bones as line segments */}
+      {/* Bones */}
       {BONE_CONNECTIONS.map(([a, b], i) => {
         const posA = jointPositions[a];
         const posB = jointPositions[b];
         if (!posA || !posB) return null;
-        return <BoneLine key={i} start={posA} end={posB} />;
+        if (renderMode === "wireframe") {
+          return <BoneLine key={i} start={posA} end={posB} />;
+        }
+        const limbKey = `${a}-${b}`;
+        const radius = LIMB_RADIUS[limbKey] ?? 0.02;
+        return <CapsuleBone key={i} start={posA} end={posB} radius={radius} />;
       })}
 
       {/* Joint spheres */}
       {Object.entries(jointPositions).map(([name, pos]) => (
         <mesh key={name} position={pos}>
-          <sphereGeometry args={[0.015, 8, 8]} />
-          <meshStandardMaterial
-            color="#00d4ff"
-            emissive="#00d4ff"
-            emissiveIntensity={0.5}
-          />
+          <sphereGeometry args={[renderMode === "capsule" ? 0.025 : 0.015, 8, 8]} />
+          {renderMode === "capsule" ? (
+            <meshPhysicalMaterial
+              color="#0a1a2a"
+              emissive="#00d4ff"
+              emissiveIntensity={0.3}
+              roughness={0.4}
+              transparent
+              opacity={0.85}
+            />
+          ) : (
+            <meshStandardMaterial
+              color="#00d4ff"
+              emissive="#00d4ff"
+              emissiveIntensity={0.5}
+            />
+          )}
         </mesh>
       ))}
 
@@ -160,6 +208,47 @@ function BoneLine({
       </bufferGeometry>
       <lineBasicMaterial color="#00d4ff" linewidth={2} transparent opacity={0.8} />
     </line>
+  );
+}
+
+function CapsuleBone({
+  start,
+  end,
+  radius = 0.02,
+}: {
+  start: THREE.Vector3;
+  end: THREE.Vector3;
+  radius?: number;
+}) {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  const { position, quaternion, length } = useMemo(() => {
+    const direction = new THREE.Vector3().subVectors(end, start);
+    const length = direction.length();
+    const position = new THREE.Vector3()
+      .addVectors(start, end)
+      .multiplyScalar(0.5);
+
+    // Cylinder is along Y axis by default, rotate to align with bone direction
+    const quaternion = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    quaternion.setFromUnitVectors(up, direction.clone().normalize());
+
+    return { position, quaternion, length };
+  }, [start, end]);
+
+  return (
+    <mesh ref={meshRef} position={position} quaternion={quaternion}>
+      <cylinderGeometry args={[radius, radius, length, 8]} />
+      <meshPhysicalMaterial
+        color="#0a1a2a"
+        emissive="#00d4ff"
+        emissiveIntensity={0.2}
+        roughness={0.4}
+        transparent
+        opacity={0.85}
+      />
+    </mesh>
   );
 }
 
@@ -279,6 +368,7 @@ function Scene({
   mirrored,
   orbitEnabled,
   groundToFloor = true,
+  renderMode = "capsule",
 }: SkeletonViewerProps) {
   const frame = frames[currentFrame] || frames[0];
   if (!frame) return null;
@@ -313,6 +403,7 @@ function Scene({
         showHands={showHands}
         showFeet={showFeet}
         groundToFloor={groundToFloor}
+        renderMode={renderMode}
       />
 
       {groundToFloor && (
