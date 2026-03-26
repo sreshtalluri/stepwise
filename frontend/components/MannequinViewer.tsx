@@ -6,7 +6,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, VRM, VRMHumanBoneName } from "@pixiv/three-vrm";
 import { PersonPose, CameraAngle } from "@/lib/types";
-import { getJointRotation, axisAngleToQuaternion } from "@/lib/rotation-utils";
+import { getJointRotation, axisAngleToQuaternion, getBodyJointCount } from "@/lib/rotation-utils";
 import {
   SMPL_TO_VRM_BONE_MAP,
   SMPL_HAND_TO_VRM,
@@ -72,8 +72,9 @@ function VRMMannequin({
       hipsBone.position.set(mirror ? -tx : tx, ty, tz);
     }
 
-    // Apply body pose rotations (21 joints)
-    for (let i = 0; i < 21; i++) {
+    // Apply body pose rotations (SMPL: 23 joints, SMPL-X: 21 joints)
+    const jointCount = getBodyJointCount(smplx_params.body_pose);
+    for (let i = 0; i < jointCount; i++) {
       const vrmBoneName = SMPL_TO_VRM_BONE_MAP[i];
       if (!vrmBoneName) continue;
       const bone = vrm.humanoid?.getNormalizedBoneNode(
@@ -90,34 +91,40 @@ function VRMMannequin({
       }
     }
 
-    // Apply hand poses
-    for (let i = 0; i < 15; i++) {
-      const leftBoneName = SMPL_HAND_TO_VRM[i];
-      if (!leftBoneName) continue;
+    // Apply hand poses (SMPL-X only; SMPL has empty hand pose arrays)
+    if (smplx_params.left_hand_pose.length > 0 || smplx_params.right_hand_pose.length > 0) {
+      for (let i = 0; i < 15; i++) {
+        const leftBoneName = SMPL_HAND_TO_VRM[i];
+        if (!leftBoneName) continue;
 
-      // Left hand
-      const leftBone = vrm.humanoid?.getNormalizedBoneNode(
-        leftBoneName as VRMHumanBoneName
-      );
-      if (leftBone) {
-        const [qx, qy, qz, qw] = getJointRotation(
-          smplx_params.left_hand_pose,
-          i
-        );
-        leftBone.quaternion.set(qx, qy, qz, qw);
-      }
+        // Left hand
+        if (smplx_params.left_hand_pose.length > 0) {
+          const leftBone = vrm.humanoid?.getNormalizedBoneNode(
+            leftBoneName as VRMHumanBoneName
+          );
+          if (leftBone) {
+            const [qx, qy, qz, qw] = getJointRotation(
+              smplx_params.left_hand_pose,
+              i
+            );
+            leftBone.quaternion.set(qx, qy, qz, qw);
+          }
+        }
 
-      // Right hand
-      const rightBoneName = getRightHandBoneName(leftBoneName);
-      const rightBone = vrm.humanoid?.getNormalizedBoneNode(
-        rightBoneName as VRMHumanBoneName
-      );
-      if (rightBone) {
-        const [qx, qy, qz, qw] = getJointRotation(
-          smplx_params.right_hand_pose,
-          i
-        );
-        rightBone.quaternion.set(qx, qy, qz, qw);
+        // Right hand
+        if (smplx_params.right_hand_pose.length > 0) {
+          const rightBoneName = getRightHandBoneName(leftBoneName);
+          const rightBone = vrm.humanoid?.getNormalizedBoneNode(
+            rightBoneName as VRMHumanBoneName
+          );
+          if (rightBone) {
+            const [qx, qy, qz, qw] = getJointRotation(
+              smplx_params.right_hand_pose,
+              i
+            );
+            rightBone.quaternion.set(qx, qy, qz, qw);
+          }
+        }
       }
     }
 

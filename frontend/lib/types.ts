@@ -87,12 +87,12 @@ export interface ProcessResponse {
   jobId: string;
 }
 
-// SMPL-X body model parameters (v2)
+// SMPL/SMPL-X body model parameters (v2)
 export interface SmplxParams {
   betas: number[];        // body shape (10 values)
-  body_pose: number[];    // joint rotations (63 values = 21 joints x 3)
-  left_hand_pose: number[];  // left hand joints (45 values = 15 joints x 3)
-  right_hand_pose: number[]; // right hand joints (45 values = 15 joints x 3)
+  body_pose: number[];    // joint rotations: SMPL 69 (23×3) or SMPL-X 63 (21×3)
+  left_hand_pose: number[];  // SMPL-X: 45 values (15 joints × 3), SMPL: empty
+  right_hand_pose: number[]; // SMPL-X: 45 values (15 joints × 3), SMPL: empty
   global_orient: number[];   // root orientation (3 values)
   transl: number[];          // root translation (3 values)
 }
