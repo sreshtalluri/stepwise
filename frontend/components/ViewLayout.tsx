@@ -39,18 +39,25 @@ function VideoPanel({
     return () => video.removeEventListener("loadedmetadata", handler);
   }, [videoRef, onVideoMeta]);
 
-  // Sync video playback with skeleton frame and speed
+  // Set playback rate only when it actually changes (not every frame)
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    // Only touch playbackRate when it changes — avoids browser decode stutter
+    if (Math.abs(video.playbackRate - playbackSpeed) > 0.01) {
+      video.playbackRate = Math.min(playbackSpeed, 2.0); // cap at 2x
+    }
+  }, [playbackSpeed, videoRef]);
+
+  // Sync video position with skeleton frame
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !duration) return;
 
-    // Set playback rate for smooth speed changes (browser handles interpolation)
-    video.playbackRate = playbackSpeed;
-
     const targetTime = (currentFrame / Math.max(totalFrames - 1, 1)) * duration;
 
-    // Only seek if we're more than 0.1s out of sync
-    if (Math.abs(video.currentTime - targetTime) > 0.1) {
+    // Only seek if we're more than 0.15s out of sync (wider threshold to avoid constant seeking)
+    if (Math.abs(video.currentTime - targetTime) > 0.15) {
       video.currentTime = targetTime;
     }
 
