@@ -177,7 +177,7 @@ export default function ViewerPage() {
     } else if (isPlaying && audio.paused) {
       audio.play().catch(() => {});
     }
-  }, [currentFrame, isPlaying, activePreset, result, playbackSpeed]);
+  }, [currentFrame, isPlaying, activePreset, result]);
 
   // Select view preset
   const selectPreset = useCallback((preset: ViewPreset) => {

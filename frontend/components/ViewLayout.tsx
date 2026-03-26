@@ -40,14 +40,12 @@ function VideoPanel({
   }, [videoRef, onVideoMeta]);
 
   // Set playback rate only when it actually changes (not every frame)
-  const lastRateRef = useRef(1.0);
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     // Only touch playbackRate when it changes — avoids browser decode stutter
     if (Math.abs(video.playbackRate - playbackSpeed) > 0.01) {
       video.playbackRate = Math.min(playbackSpeed, 2.0); // cap at 2x
-      lastRateRef.current = playbackSpeed;
     }
   }, [playbackSpeed, videoRef]);
 
