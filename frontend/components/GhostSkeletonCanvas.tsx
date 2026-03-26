@@ -48,15 +48,6 @@ export function GhostSkeletonCanvas({
     const frame = frames[currentFrame] || frames[0];
     if (!frame) return;
 
-    // Debug: log coordinate ranges on first frame
-    if (currentFrame === 0) {
-      const allJoints = Object.entries(frame.joints);
-      const ys = allJoints.map(([, j]) => j.y);
-      const xs = allJoints.map(([, j]) => j.x);
-      console.log(`[Ghost Debug] Y:[${Math.min(...ys).toFixed(3)}, ${Math.max(...ys).toFixed(3)}] X:[${Math.min(...xs).toFixed(3)}, ${Math.max(...xs).toFixed(3)}] canvas:${width}x${height}`);
-      console.log(`[Ghost Debug] Head Y:${frame.joints.head?.y.toFixed(3)} Pelvis Y:${frame.joints.pelvis?.y.toFixed(3)} Foot Y:${frame.joints.left_foot?.y.toFixed(3)}`);
-    }
-
     // Handle high-DPI displays
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
