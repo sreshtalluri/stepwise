@@ -20,6 +20,7 @@ class FramePose(BaseModel):
     frame: int = Field(ge=0)
     timestamp: float = Field(ge=0)
     joints: list[Joint3D] = Field(min_length=24, max_length=24)
+    joints_3d: list[Joint3D] | None = Field(default=None, min_length=24, max_length=24)
 
 
 class GestureType(str, Enum):

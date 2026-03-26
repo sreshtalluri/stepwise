@@ -287,26 +287,8 @@ function Scene({
   const orbitIsEnabled = orbitEnabled !== undefined ? orbitEnabled : true;
   const baseCameraPos = CAMERA_POSITIONS[angle] || CAMERA_POSITIONS.front;
 
-  // For ghost mode: compute skeleton center from actual joint positions
-  // so the camera follows the dancer
-  const skeletonCenter = useMemo(() => {
-    if (groundToFloor || !frame?.joints) return null;
-    const joints = Object.values(frame.joints);
-    if (joints.length === 0) return null;
-    const avgX = joints.reduce((s, j) => s + j.x, 0) / joints.length;
-    const avgY = joints.reduce((s, j) => s + j.y, 0) / joints.length;
-    const avgZ = joints.reduce((s, j) => s + j.z, 0) / joints.length;
-    return [avgX, avgY, avgZ] as [number, number, number];
-  }, [frame, groundToFloor]);
-
-  const lookTarget: [number, number, number] = groundToFloor
-    ? [0, 1.0, 0]
-    : skeletonCenter || [0, 0, 0];
-
-  // Camera position: for ghost mode, position relative to skeleton center
-  const cameraPos: [number, number, number] = groundToFloor
-    ? baseCameraPos
-    : [lookTarget[0], lookTarget[1], lookTarget[2] + 2.5];
+  const lookTarget: [number, number, number] = [0, 1.0, 0];
+  const cameraPos: [number, number, number] = baseCameraPos;
 
   return (
     <>
@@ -314,8 +296,8 @@ function Scene({
       <pointLight position={[2, 3, 2]} intensity={0.8} />
       <pointLight position={[-2, 3, -2]} intensity={0.3} />
 
-      {/* Update camera position AND lookAt when angle changes */}
-      <CameraSetup position={cameraPos} target={lookTarget} />
+      {/* Update camera position AND lookAt when angle changes (perspective modes only) */}
+      {groundToFloor && <CameraSetup position={cameraPos} target={lookTarget} />}
 
       {/* Ground grid — hidden when not grounding to floor */}
       {groundToFloor && (
@@ -333,26 +315,72 @@ function Scene({
         groundToFloor={groundToFloor}
       />
 
-      <OrbitControls
-        target={lookTarget}
-        enablePan={false}
-        minDistance={1.5}
-        maxDistance={6}
-        enabled={groundToFloor ? orbitIsEnabled : false}
-      />
+      {groundToFloor && (
+        <OrbitControls
+          target={lookTarget}
+          enablePan={false}
+          minDistance={1.5}
+          maxDistance={6}
+          enabled={orbitIsEnabled}
+        />
+      )}
     </>
   );
+}
+
+// Orthographic camera setup for ghost mode — matches the pipeline's
+// image-space coordinate system (_SCALE=1.8) so the skeleton position
+// in the viewport corresponds to the dancer's position in the video.
+const GHOST_SCALE = 1.8; // must match pipeline _SCALE
+
+function GhostCameraSetup() {
+  const { camera } = useThree();
+  useEffect(() => {
+    const cam = camera as THREE.OrthographicCamera;
+    // Pipeline maps: x = (lm.x - 0.5) * SCALE → X ∈ [-0.9, 0.9]
+    //                y = (1 - lm.y) * SCALE   → Y ∈ [0, 1.8]
+    // The canvas matches the video's aspect ratio (via GhostOverlay),
+    // so fixed bounds map skeleton coordinates directly to video pixels.
+    // Non-uniform scaling is intentional — pipeline coords are image-normalized.
+    cam.left = -GHOST_SCALE / 2;   // -0.9
+    cam.right = GHOST_SCALE / 2;   //  0.9
+    cam.bottom = 0;
+    cam.top = GHOST_SCALE;          //  1.8
+    cam.near = 0.1;
+    cam.far = 100;
+    cam.position.set(0, GHOST_SCALE / 2, 5);
+    cam.lookAt(0, GHOST_SCALE / 2, 0);
+    cam.updateProjectionMatrix();
+  }, [camera]);
+  return null;
 }
 
 export function SkeletonViewer(props: SkeletonViewerProps) {
   const { groundToFloor = true } = props;
   const cameraPos = CAMERA_POSITIONS[props.angle] || CAMERA_POSITIONS.front;
 
-  // For ghost overlay: use a tighter camera that better fills the frame
-  // to align with the dancer in the video
-  const fov = groundToFloor ? 50 : 60;
-  const ghostCameraPos: [number, number, number] = [0, 0, 2];
-  const finalCameraPos = groundToFloor ? cameraPos : ghostCameraPos;
+  if (!groundToFloor) {
+    // Ghost overlay mode: orthographic camera matching video coordinate space
+    return (
+      <div
+        className="w-full h-full r3f-canvas"
+        style={props.opacity !== undefined ? { opacity: props.opacity } : undefined}
+      >
+        <Canvas
+          orthographic
+          camera={{
+            position: [0, GHOST_SCALE / 2, 5] as [number, number, number],
+            near: 0.1,
+            far: 100,
+          }}
+          gl={{ antialias: true, alpha: true }}
+        >
+          <GhostCameraSetup />
+          <Scene {...props} />
+        </Canvas>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -361,14 +389,14 @@ export function SkeletonViewer(props: SkeletonViewerProps) {
     >
       <Canvas
         camera={{
-          position: finalCameraPos,
-          fov,
+          position: cameraPos,
+          fov: 50,
           near: 0.1,
           far: 100,
         }}
-        gl={{ antialias: true, ...(groundToFloor ? {} : { alpha: true }) }}
+        gl={{ antialias: true }}
       >
-        {groundToFloor && <color attach="background" args={["#0a0a0a"]} />}
+        <color attach="background" args={["#0a0a0a"]} />
         <Scene {...props} />
       </Canvas>
     </div>

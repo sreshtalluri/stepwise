@@ -17,6 +17,7 @@ function transformResult(pipeline: Record<string, unknown>): Record<string, unkn
     frame: number;
     timestamp: number;
     joints: Array<{ name: string; x: number; y: number; z: number }>;
+    joints_3d?: Array<{ name: string; x: number; y: number; z: number }> | null;
   }>;
 
   const handStates = pipeline.hand_states as Array<{
@@ -64,9 +65,19 @@ function transformResult(pipeline: Record<string, unknown>): Record<string, unkn
       joints[j.name] = { x: j.x, y: j.y, z: j.z, confidence: 1.0 };
     }
 
+    // Convert 3D joints if available (world-blended, for perspective views)
+    let joints3d: Record<string, { x: number; y: number; z: number; confidence: number }> | undefined;
+    if (pose.joints_3d) {
+      joints3d = {};
+      for (const j of pose.joints_3d) {
+        joints3d[j.name] = { x: j.x, y: j.y, z: j.z, confidence: 1.0 };
+      }
+    }
+
     const frame: Record<string, unknown> = {
       timestamp: pose.timestamp,
       joints,
+      ...(joints3d && { joints_3d: joints3d }),
     };
 
     // Inline hand annotations

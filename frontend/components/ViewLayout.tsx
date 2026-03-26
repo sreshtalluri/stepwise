@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useEffect } from "react";
-import { ViewPreset, PoseFrame, PersonPose } from "@/lib/types";
-import { PoseViewer } from "./PoseViewer";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import { ViewPreset, PoseFrame } from "@/lib/types";
+import { SkeletonViewer } from "./SkeletonViewer";
+import { GhostSkeletonCanvas } from "./GhostSkeletonCanvas";
 
 function VideoPanel({
   videoUrl,
@@ -12,6 +13,8 @@ function VideoPanel({
   isPaused,
   playbackSpeed = 1.0,
   className,
+  onVideoMeta,
+  videoRef: externalVideoRef,
 }: {
   videoUrl?: string;
   currentFrame: number;
@@ -20,8 +23,21 @@ function VideoPanel({
   isPaused: boolean;
   playbackSpeed?: number;
   className?: string;
+  onVideoMeta?: (width: number, height: number) => void;
+  videoRef?: React.RefObject<HTMLVideoElement>;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const internalVideoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = externalVideoRef || internalVideoRef;
+
+  // Report video natural dimensions when metadata loads
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !onVideoMeta) return;
+    const handler = () => onVideoMeta(video.videoWidth, video.videoHeight);
+    if (video.videoWidth > 0) handler();
+    video.addEventListener("loadedmetadata", handler);
+    return () => video.removeEventListener("loadedmetadata", handler);
+  }, [videoRef, onVideoMeta]);
 
   // Sync video playback with skeleton frame and speed
   useEffect(() => {
@@ -82,6 +98,137 @@ function VideoPanel({
   );
 }
 
+function ViewLabel({ label }: { label: string }) {
+  return (
+    <div
+      className="absolute top-2 left-2 z-10 pointer-events-none select-none"
+      style={{
+        fontFamily: "var(--font-geist-mono, 'Geist Mono', monospace)",
+        fontSize: "11px",
+        color: "rgba(255,255,255,0.5)",
+        backgroundColor: "rgba(0,0,0,0.4)",
+        padding: "2px 6px",
+        borderRadius: "4px",
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
+/** Compute where object-contain places the video inside a container */
+function computeContainedRect(
+  containerW: number,
+  containerH: number,
+  videoW: number,
+  videoH: number
+) {
+  const containerAspect = containerW / containerH;
+  const videoAspect = videoW / videoH;
+  let renderW: number, renderH: number, offsetX: number, offsetY: number;
+  if (videoAspect > containerAspect) {
+    renderW = containerW;
+    renderH = containerW / videoAspect;
+    offsetX = 0;
+    offsetY = (containerH - renderH) / 2;
+  } else {
+    renderH = containerH;
+    renderW = containerH * videoAspect;
+    offsetX = (containerW - renderW) / 2;
+    offsetY = 0;
+  }
+  return { renderW, renderH, offsetX, offsetY };
+}
+
+function GhostOverlay({
+  videoUrl,
+  currentFrame,
+  totalFrames,
+  duration,
+  isPaused,
+  playbackSpeed,
+  frames,
+}: {
+  videoUrl?: string;
+  currentFrame: number;
+  totalFrames: number;
+  duration: number;
+  isPaused: boolean;
+  playbackSpeed: number;
+  frames: PoseFrame[];
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const ghostVideoRef = useRef<HTMLVideoElement>(null!);
+  const [videoNatural, setVideoNatural] = useState<{ w: number; h: number } | null>(null);
+  const [containerSize, setContainerSize] = useState<{ w: number; h: number } | null>(null);
+
+  const handleVideoMeta = useCallback((w: number, h: number) => {
+    setVideoNatural({ w, h });
+  }, []);
+
+  // Track container size
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      setContainerSize({ w: width, h: height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Compute where the video content is rendered (object-contain positioning)
+  const videoRect = (() => {
+    if (!videoNatural || !containerSize) return null;
+    return computeContainedRect(
+      containerSize.w,
+      containerSize.h,
+      videoNatural.w,
+      videoNatural.h
+    );
+  })();
+
+  return (
+    <div ref={containerRef} className="relative w-full h-full bg-black">
+      <ViewLabel label="Ghost" />
+      {/* Video layer — dimmed so skeleton is clearly visible */}
+      <div className="absolute inset-0" style={{ opacity: 0.35 }}>
+        <VideoPanel
+          videoUrl={videoUrl}
+          currentFrame={currentFrame}
+          totalFrames={totalFrames}
+          duration={duration}
+          isPaused={isPaused}
+          playbackSpeed={playbackSpeed}
+          className="w-full h-full"
+          onVideoMeta={handleVideoMeta}
+          videoRef={ghostVideoRef}
+        />
+      </div>
+      {/* 2D skeleton overlay — positioned to match the video's rendered area */}
+      {videoRect && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            left: videoRect.offsetX,
+            top: videoRect.offsetY,
+            width: videoRect.renderW,
+            height: videoRect.renderH,
+          }}
+        >
+          <GhostSkeletonCanvas
+            frames={frames}
+            currentFrame={currentFrame}
+            width={videoRect.renderW}
+            height={videoRect.renderH}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ViewLayoutProps {
   activePreset: ViewPreset;
   frames: PoseFrame[];
@@ -92,10 +239,6 @@ interface ViewLayoutProps {
   videoUrl?: string;
   duration?: number;
   playbackSpeed?: number;
-  personPoses?: PersonPose[];
-  focusedPersonId?: number;
-  xrayMode?: boolean;
-  beatPulse?: boolean;
 }
 
 export function ViewLayout({
@@ -108,33 +251,31 @@ export function ViewLayout({
   videoUrl,
   duration = 0,
   playbackSpeed = 1.0,
-  personPoses,
-  focusedPersonId = 0,
-  xrayMode = true,
-  beatPulse = false,
 }: ViewLayoutProps) {
   const totalFrames = frames.length;
 
-  // Common props passed to every PoseViewer instance
-  const mannequinProps = {
-    personPoses,
-    focusedPersonId,
-    xrayMode,
-    beatPulse,
-  };
+  // For 3D perspective views, prefer world-blended joints (correct proportions).
+  // Falls back to image-space joints if 3D not available.
+  const frames3d = useMemo(
+    () =>
+      frames.map((f) =>
+        f.joints_3d ? { ...f, joints: f.joints_3d } : f
+      ),
+    [frames]
+  );
 
   switch (activePreset) {
     // Preset 1: Front — full-screen front view
     case 1:
       return (
-        <div className="w-full h-full">
-          <PoseViewer
-            frames={frames}
+        <div className="relative w-full h-full">
+          <ViewLabel label="Front" />
+          <SkeletonViewer
+            frames={frames3d}
             currentFrame={currentFrame}
             angle="front"
             showHands={showHands}
             showFeet={showFeet}
-            {...mannequinProps}
           />
         </div>
       );
@@ -142,15 +283,15 @@ export function ViewLayout({
     // Preset 2: Mirror — full-screen mirrored view
     case 2:
       return (
-        <div className="w-full h-full">
-          <PoseViewer
-            frames={frames}
+        <div className="relative w-full h-full">
+          <ViewLabel label="Mirror" />
+          <SkeletonViewer
+            frames={frames3d}
             currentFrame={currentFrame}
             angle="front"
             showHands={showHands}
             showFeet={showFeet}
             mirrored={true}
-            {...mannequinProps}
           />
         </div>
       );
@@ -159,61 +300,8 @@ export function ViewLayout({
     case 3:
       return (
         <div className="flex w-full h-full">
-          <VideoPanel
-            videoUrl={videoUrl}
-            currentFrame={currentFrame}
-            totalFrames={totalFrames}
-            duration={duration}
-            isPaused={isPaused}
-            playbackSpeed={playbackSpeed}
-            className="w-1/2 h-full border-r border-border"
-          />
-          <div className="w-1/2 h-full">
-            <PoseViewer
-              frames={frames}
-              currentFrame={currentFrame}
-              angle="front"
-              showHands={showHands}
-              showFeet={showFeet}
-              {...mannequinProps}
-            />
-          </div>
-        </div>
-      );
-
-    // Preset 4: Front + Back — front left, back right
-    case 4:
-      return (
-        <div className="flex w-full h-full">
-          <div className="w-1/2 h-full border-r border-border">
-            <PoseViewer
-              frames={frames}
-              currentFrame={currentFrame}
-              angle="front"
-              showHands={showHands}
-              showFeet={showFeet}
-              {...mannequinProps}
-            />
-          </div>
-          <div className="w-1/2 h-full">
-            <PoseViewer
-              frames={frames}
-              currentFrame={currentFrame}
-              angle="back"
-              showHands={showHands}
-              showFeet={showFeet}
-              {...mannequinProps}
-            />
-          </div>
-        </div>
-      );
-
-    // Preset 5: Ghost Overlay — dimmed video with bright skeleton on top
-    case 5:
-      return (
-        <div className="relative w-full h-full bg-black">
-          {/* Video layer — dimmed so skeleton is clearly visible */}
-          <div className="absolute inset-0" style={{ opacity: 0.35 }}>
+          <div className="relative w-1/2 h-full border-r border-border">
+            <ViewLabel label="Original" />
             <VideoPanel
               videoUrl={videoUrl}
               currentFrame={currentFrame}
@@ -224,26 +312,65 @@ export function ViewLayout({
               className="w-full h-full"
             />
           </div>
-          {/* Skeleton overlay — full brightness, transparent canvas bg */}
-          <div className="absolute inset-0">
-            <PoseViewer
-              frames={frames}
+          <div className="relative w-1/2 h-full">
+            <ViewLabel label="Front" />
+            <SkeletonViewer
+              frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
-              groundToFloor={false}
-              orbitEnabled={false}
-              {...mannequinProps}
             />
           </div>
         </div>
+      );
+
+    // Preset 4: Front + Back — front left, back right
+    case 4:
+      return (
+        <div className="flex w-full h-full">
+          <div className="relative w-1/2 h-full border-r border-border">
+            <ViewLabel label="Front" />
+            <SkeletonViewer
+              frames={frames3d}
+              currentFrame={currentFrame}
+              angle="front"
+              showHands={showHands}
+              showFeet={showFeet}
+            />
+          </div>
+          <div className="relative w-1/2 h-full">
+            <ViewLabel label="Back" />
+            <SkeletonViewer
+              frames={frames3d}
+              currentFrame={currentFrame}
+              angle="back"
+              showHands={showHands}
+              showFeet={showFeet}
+            />
+          </div>
+        </div>
+      );
+
+    // Preset 5: Ghost Overlay — dimmed video with bright skeleton on top
+    case 5:
+      return (
+        <GhostOverlay
+          videoUrl={videoUrl}
+          currentFrame={currentFrame}
+          totalFrames={totalFrames}
+          duration={duration}
+          isPaused={isPaused}
+          playbackSpeed={playbackSpeed}
+          frames={frames}
+        />
       );
 
     // Preset 6: Video + PiP — video fullscreen, small skeleton in bottom-right
     case 6:
       return (
         <div className="relative w-full h-full">
+          <ViewLabel label="Original" />
           {/* Full video */}
           <VideoPanel
             videoUrl={videoUrl}
@@ -265,13 +392,13 @@ export function ViewLayout({
               borderRadius: "12px",
             }}
           >
-            <PoseViewer
-              frames={frames}
+            <ViewLabel label="Front" />
+            <SkeletonViewer
+              frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
-              {...mannequinProps}
             />
           </div>
         </div>
@@ -281,14 +408,14 @@ export function ViewLayout({
     case 7:
       return (
         <div className="relative w-full h-full">
-          <PoseViewer
-            frames={frames}
+          <ViewLabel label={isPaused ? "Freeze — drag to orbit" : "Freeze"} />
+          <SkeletonViewer
+            frames={frames3d}
             currentFrame={currentFrame}
             angle="front"
             showHands={showHands}
             showFeet={showFeet}
             orbitEnabled={isPaused}
-            {...mannequinProps}
           />
           {isPaused && (
             <div
@@ -309,26 +436,26 @@ export function ViewLayout({
     case 8:
       return (
         <div className="flex w-full h-full">
-          <div className="w-1/2 h-full border-r border-border">
-            <PoseViewer
-              frames={frames}
+          <div className="relative w-1/2 h-full border-r border-border">
+            <ViewLabel label="Front" />
+            <SkeletonViewer
+              frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
               mirrored={false}
-              {...mannequinProps}
             />
           </div>
-          <div className="w-1/2 h-full">
-            <PoseViewer
-              frames={frames}
+          <div className="relative w-1/2 h-full">
+            <ViewLabel label="Mirror" />
+            <SkeletonViewer
+              frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
               mirrored={true}
-              {...mannequinProps}
             />
           </div>
         </div>
