@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { ViewPreset, PoseFrame } from "@/lib/types";
 import { SkeletonViewer } from "./SkeletonViewer";
+import { GhostSkeletonCanvas } from "./GhostSkeletonCanvas";
 
 function VideoPanel({
   videoUrl,
@@ -126,13 +127,11 @@ function computeContainedRect(
   const videoAspect = videoW / videoH;
   let renderW: number, renderH: number, offsetX: number, offsetY: number;
   if (videoAspect > containerAspect) {
-    // Video is wider — letterboxed (bars top/bottom)
     renderW = containerW;
     renderH = containerW / videoAspect;
     offsetX = 0;
     offsetY = (containerH - renderH) / 2;
   } else {
-    // Video is taller — pillarboxed (bars left/right)
     renderH = containerH;
     renderW = containerH * videoAspect;
     offsetX = (containerW - renderW) / 2;
@@ -149,8 +148,6 @@ function GhostOverlay({
   isPaused,
   playbackSpeed,
   frames,
-  showHands,
-  showFeet,
 }: {
   videoUrl?: string;
   currentFrame: number;
@@ -159,12 +156,9 @@ function GhostOverlay({
   isPaused: boolean;
   playbackSpeed: number;
   frames: PoseFrame[];
-  showHands: boolean;
-  showFeet: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const ghostVideoRef = useRef<HTMLVideoElement>(null!);
-
   const [videoNatural, setVideoNatural] = useState<{ w: number; h: number } | null>(null);
   const [containerSize, setContainerSize] = useState<{ w: number; h: number } | null>(null);
 
@@ -184,24 +178,15 @@ function GhostOverlay({
     return () => ro.disconnect();
   }, []);
 
-  // Compute skeleton rect to match video's rendered area
-  const skeletonStyle = (() => {
-    if (!videoNatural || !containerSize) {
-      return { position: "absolute" as const, inset: 0 };
-    }
-    const { renderW, renderH, offsetX, offsetY } = computeContainedRect(
+  // Compute where the video content is rendered (object-contain positioning)
+  const videoRect = (() => {
+    if (!videoNatural || !containerSize) return null;
+    return computeContainedRect(
       containerSize.w,
       containerSize.h,
       videoNatural.w,
       videoNatural.h
     );
-    return {
-      position: "absolute" as const,
-      left: offsetX,
-      top: offsetY,
-      width: renderW,
-      height: renderH,
-    };
   })();
 
   return (
@@ -221,18 +206,25 @@ function GhostOverlay({
           videoRef={ghostVideoRef}
         />
       </div>
-      {/* Skeleton overlay — positioned to match the video's rendered area */}
-      <div style={skeletonStyle}>
-        <SkeletonViewer
-          frames={frames}
-          currentFrame={currentFrame}
-          angle="front"
-          showHands={showHands}
-          showFeet={showFeet}
-          groundToFloor={false}
-          orbitEnabled={false}
-        />
-      </div>
+      {/* 2D skeleton overlay — positioned to match the video's rendered area */}
+      {videoRect && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            left: videoRect.offsetX,
+            top: videoRect.offsetY,
+            width: videoRect.renderW,
+            height: videoRect.renderH,
+          }}
+        >
+          <GhostSkeletonCanvas
+            frames={frames}
+            currentFrame={currentFrame}
+            width={videoRect.renderW}
+            height={videoRect.renderH}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -261,6 +253,17 @@ export function ViewLayout({
   playbackSpeed = 1.0,
 }: ViewLayoutProps) {
   const totalFrames = frames.length;
+
+  // For 3D perspective views, prefer world-blended joints (correct proportions).
+  // Falls back to image-space joints if 3D not available.
+  const frames3d = useMemo(
+    () =>
+      frames.map((f) =>
+        f.joints_3d ? { ...f, joints: f.joints_3d } : f
+      ),
+    [frames]
+  );
+
   switch (activePreset) {
     // Preset 1: Front — full-screen front view
     case 1:
@@ -268,7 +271,7 @@ export function ViewLayout({
         <div className="relative w-full h-full">
           <ViewLabel label="Front" />
           <SkeletonViewer
-            frames={frames}
+            frames={frames3d}
             currentFrame={currentFrame}
             angle="front"
             showHands={showHands}
@@ -283,7 +286,7 @@ export function ViewLayout({
         <div className="relative w-full h-full">
           <ViewLabel label="Mirror" />
           <SkeletonViewer
-            frames={frames}
+            frames={frames3d}
             currentFrame={currentFrame}
             angle="front"
             showHands={showHands}
@@ -312,7 +315,7 @@ export function ViewLayout({
           <div className="relative w-1/2 h-full">
             <ViewLabel label="Front" />
             <SkeletonViewer
-              frames={frames}
+              frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
@@ -329,7 +332,7 @@ export function ViewLayout({
           <div className="relative w-1/2 h-full border-r border-border">
             <ViewLabel label="Front" />
             <SkeletonViewer
-              frames={frames}
+              frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
@@ -339,7 +342,7 @@ export function ViewLayout({
           <div className="relative w-1/2 h-full">
             <ViewLabel label="Back" />
             <SkeletonViewer
-              frames={frames}
+              frames={frames3d}
               currentFrame={currentFrame}
               angle="back"
               showHands={showHands}
@@ -360,8 +363,6 @@ export function ViewLayout({
           isPaused={isPaused}
           playbackSpeed={playbackSpeed}
           frames={frames}
-          showHands={showHands}
-          showFeet={showFeet}
         />
       );
 
@@ -393,7 +394,7 @@ export function ViewLayout({
           >
             <ViewLabel label="Front" />
             <SkeletonViewer
-              frames={frames}
+              frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
@@ -409,7 +410,7 @@ export function ViewLayout({
         <div className="relative w-full h-full">
           <ViewLabel label={isPaused ? "Freeze — drag to orbit" : "Freeze"} />
           <SkeletonViewer
-            frames={frames}
+            frames={frames3d}
             currentFrame={currentFrame}
             angle="front"
             showHands={showHands}
@@ -438,7 +439,7 @@ export function ViewLayout({
           <div className="relative w-1/2 h-full border-r border-border">
             <ViewLabel label="Front" />
             <SkeletonViewer
-              frames={frames}
+              frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
@@ -449,7 +450,7 @@ export function ViewLayout({
           <div className="relative w-1/2 h-full">
             <ViewLabel label="Mirror" />
             <SkeletonViewer
-              frames={frames}
+              frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}

@@ -51,6 +51,7 @@ export interface FootAnnotation {
 export interface PoseFrame {
   timestamp: number;
   joints: Record<JointName, Joint>;
+  joints_3d?: Record<JointName, Joint>;
   hands?: HandAnnotation[];
   feet?: FootAnnotation[];
 }

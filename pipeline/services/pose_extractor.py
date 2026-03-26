@@ -251,6 +251,7 @@ def _extract_poses_mediapipe(video_path: str, total_frames: int, fps: float) -> 
 
     frames: list[FramePose] = []
     last_joints: list[Joint3D] | None = None
+    last_joints_3d: list[Joint3D] | None = None
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -273,20 +274,42 @@ def _extract_poses_mediapipe(video_path: str, total_frames: int, fps: float) -> 
             result = landmarker.detect_for_video(mp_image, timestamp_ms)
 
             if result.pose_landmarks and len(result.pose_landmarks) > 0:
-                # Use image-space landmarks exclusively. These map directly to
-                # the dancer's position in the video frame, which is critical for
-                # ghost overlay alignment and gives dancers the proportions they
-                # expect to see (matching the camera's perspective).
+                # Image-space joints: map directly to video pixels (for ghost overlay)
                 joints = _landmarks_to_smpl_joints(result.pose_landmarks[0], world=False)
+
+                # World-blended joints: correct 3D proportions (for perspective views)
+                joints_3d = None
+                if result.pose_world_landmarks and len(result.pose_world_landmarks) > 0:
+                    img_lms = result.pose_landmarks[0]
+                    world_lms = result.pose_world_landmarks[0]
+                    img_pelvis_x = (img_lms[_MP_LEFT_HIP].x + img_lms[_MP_RIGHT_HIP].x) / 2
+                    img_pelvis_y = (img_lms[_MP_LEFT_HIP].y + img_lms[_MP_RIGHT_HIP].y) / 2
+                    global_x = (img_pelvis_x - 0.5) * _SCALE
+                    global_y = (1.0 - img_pelvis_y) * _SCALE
+                    world_joints = _landmarks_to_smpl_joints(world_lms, world=True)
+                    joints_3d = [
+                        Joint3D(
+                            name=wj.name,
+                            x=round(wj.x + global_x, 4),
+                            y=round(wj.y + global_y, 4),
+                            z=round(wj.z, 4),
+                        )
+                        for wj in world_joints
+                    ]
+
                 last_joints = joints
+                last_joints_3d = joints_3d
             elif last_joints is not None:
                 joints = last_joints
+                joints_3d = last_joints_3d
             else:
                 joints = _default_tpose_joints()
+                joints_3d = None
                 last_joints = joints
+                last_joints_3d = None
 
             timestamp = round(frame_idx / fps, 4)
-            frames.append(FramePose(frame=frame_idx, timestamp=timestamp, joints=joints))
+            frames.append(FramePose(frame=frame_idx, timestamp=timestamp, joints=joints, joints_3d=joints_3d))
             frame_idx += 1
 
     cap.release()
@@ -296,7 +319,7 @@ def _extract_poses_mediapipe(video_path: str, total_frames: int, fps: float) -> 
         if last_joints is None:
             last_joints = _default_tpose_joints()
         timestamp = round(len(frames) / fps, 4)
-        frames.append(FramePose(frame=len(frames), timestamp=timestamp, joints=last_joints))
+        frames.append(FramePose(frame=len(frames), timestamp=timestamp, joints=last_joints, joints_3d=last_joints_3d))
 
     return frames
 
