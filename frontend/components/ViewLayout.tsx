@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
-import { ViewPreset, PoseFrame } from "@/lib/types";
-import { SkeletonViewer } from "./SkeletonViewer";
+import { ViewPreset, PoseFrame, PersonPose } from "@/lib/types";
+import { PoseViewer } from "./PoseViewer";
 import { GhostSkeletonCanvas } from "./GhostSkeletonCanvas";
 
 function VideoPanel({
@@ -239,6 +239,10 @@ interface ViewLayoutProps {
   videoUrl?: string;
   duration?: number;
   playbackSpeed?: number;
+  personPoses?: PersonPose[];
+  focusedPersonId?: number;
+  xrayMode?: boolean;
+  beatPulse?: boolean;
 }
 
 export function ViewLayout({
@@ -251,8 +255,15 @@ export function ViewLayout({
   videoUrl,
   duration = 0,
   playbackSpeed = 1.0,
+  personPoses,
+  focusedPersonId = 0,
+  xrayMode = false,
+  beatPulse = false,
 }: ViewLayoutProps) {
   const totalFrames = frames.length;
+
+  // Common mannequin props passed through to every PoseViewer
+  const mannequinProps = { personPoses, focusedPersonId, xrayMode, beatPulse };
 
   // For 3D perspective views, prefer world-blended joints (correct proportions).
   // Falls back to image-space joints if 3D not available.
@@ -270,12 +281,13 @@ export function ViewLayout({
       return (
         <div className="relative w-full h-full">
           <ViewLabel label="Front" />
-          <SkeletonViewer
+          <PoseViewer
             frames={frames3d}
             currentFrame={currentFrame}
             angle="front"
             showHands={showHands}
             showFeet={showFeet}
+            {...mannequinProps}
           />
         </div>
       );
@@ -285,13 +297,14 @@ export function ViewLayout({
       return (
         <div className="relative w-full h-full">
           <ViewLabel label="Mirror" />
-          <SkeletonViewer
+          <PoseViewer
             frames={frames3d}
             currentFrame={currentFrame}
             angle="front"
             showHands={showHands}
             showFeet={showFeet}
             mirrored={true}
+            {...mannequinProps}
           />
         </div>
       );
@@ -314,12 +327,13 @@ export function ViewLayout({
           </div>
           <div className="relative w-1/2 h-full">
             <ViewLabel label="Front" />
-            <SkeletonViewer
+            <PoseViewer
               frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
+              {...mannequinProps}
             />
           </div>
         </div>
@@ -331,22 +345,24 @@ export function ViewLayout({
         <div className="flex w-full h-full">
           <div className="relative w-1/2 h-full border-r border-border">
             <ViewLabel label="Front" />
-            <SkeletonViewer
+            <PoseViewer
               frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
+              {...mannequinProps}
             />
           </div>
           <div className="relative w-1/2 h-full">
             <ViewLabel label="Back" />
-            <SkeletonViewer
+            <PoseViewer
               frames={frames3d}
               currentFrame={currentFrame}
               angle="back"
               showHands={showHands}
               showFeet={showFeet}
+              {...mannequinProps}
             />
           </div>
         </div>
@@ -393,12 +409,13 @@ export function ViewLayout({
             }}
           >
             <ViewLabel label="Front" />
-            <SkeletonViewer
+            <PoseViewer
               frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
+              {...mannequinProps}
             />
           </div>
         </div>
@@ -409,13 +426,14 @@ export function ViewLayout({
       return (
         <div className="relative w-full h-full">
           <ViewLabel label={isPaused ? "Freeze — drag to orbit" : "Freeze"} />
-          <SkeletonViewer
+          <PoseViewer
             frames={frames3d}
             currentFrame={currentFrame}
             angle="front"
             showHands={showHands}
             showFeet={showFeet}
             orbitEnabled={isPaused}
+            {...mannequinProps}
           />
           {isPaused && (
             <div
@@ -438,24 +456,26 @@ export function ViewLayout({
         <div className="flex w-full h-full">
           <div className="relative w-1/2 h-full border-r border-border">
             <ViewLabel label="Front" />
-            <SkeletonViewer
+            <PoseViewer
               frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
               mirrored={false}
+              {...mannequinProps}
             />
           </div>
           <div className="relative w-1/2 h-full">
             <ViewLabel label="Mirror" />
-            <SkeletonViewer
+            <PoseViewer
               frames={frames3d}
               currentFrame={currentFrame}
               angle="front"
               showHands={showHands}
               showFeet={showFeet}
               mirrored={true}
+              {...mannequinProps}
             />
           </div>
         </div>
