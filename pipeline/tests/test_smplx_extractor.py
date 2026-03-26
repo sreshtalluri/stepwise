@@ -44,9 +44,9 @@ class TestMockSmplxExtraction:
         for person_pose in result.person_poses:
             p = person_pose.smplx_params
             assert len(p.betas) == 10
-            assert len(p.body_pose) == 63
-            assert len(p.left_hand_pose) == 45
-            assert len(p.right_hand_pose) == 45
+            assert len(p.body_pose) == 69  # SMPL: 23 joints x 3
+            assert p.left_hand_pose == []  # SMPL has no hand poses
+            assert p.right_hand_pose == []
             assert len(p.global_orient) == 3
             assert len(p.transl) == 3
 
