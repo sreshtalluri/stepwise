@@ -80,11 +80,11 @@ class Difficulty(BaseModel):
 
 
 class SmplxParams(BaseModel):
-    """SMPL-X body model parameters for one person in one frame."""
+    """SMPL/SMPL-X body model parameters for one person in one frame."""
     betas: list[float] = Field(min_length=10, max_length=10)
-    body_pose: list[float] = Field(min_length=63, max_length=63)
-    left_hand_pose: list[float] = Field(min_length=45, max_length=45)
-    right_hand_pose: list[float] = Field(min_length=45, max_length=45)
+    body_pose: list[float] = Field(min_length=63, max_length=69)  # SMPL: 69, SMPL-X: 63
+    left_hand_pose: list[float] = Field(default_factory=list)  # SMPL-X only, empty for SMPL
+    right_hand_pose: list[float] = Field(default_factory=list)  # SMPL-X only, empty for SMPL
     global_orient: list[float] = Field(min_length=3, max_length=3)
     transl: list[float] = Field(min_length=3, max_length=3)
 

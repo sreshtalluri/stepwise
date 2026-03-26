@@ -9,3 +9,4 @@ boto3>=1.29.0
 httpx>=0.25.0
 modal>=0.56.0
 opencv-python-headless>=4.8.0
+scipy>=1.11.0

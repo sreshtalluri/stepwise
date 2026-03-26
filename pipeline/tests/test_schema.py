@@ -161,6 +161,7 @@ class TestStepwiseResultValidation:
 
 class TestSmplxParams:
     def test_valid_smplx_params(self):
+        """SMPL-X format: 63-value body_pose with hand poses."""
         params = SmplxParams(
             betas=[0.0] * 10,
             body_pose=[0.0] * 63,
@@ -172,13 +173,32 @@ class TestSmplxParams:
         assert len(params.betas) == 10
         assert len(params.body_pose) == 63
 
+    def test_valid_smpl_params(self):
+        """SMPL format: 69-value body_pose, no hand poses."""
+        params = SmplxParams(
+            betas=[0.0] * 10,
+            body_pose=[0.0] * 69,
+            global_orient=[0.0, 0.0, 0.0],
+            transl=[0.0, 0.95, 0.0],
+        )
+        assert len(params.body_pose) == 69
+        assert params.left_hand_pose == []
+        assert params.right_hand_pose == []
+
+    def test_rejects_wrong_body_pose_length(self):
+        with pytest.raises(Exception):
+            SmplxParams(
+                betas=[0.0] * 10,
+                body_pose=[0.0] * 50,  # wrong: need 63-69
+                global_orient=[0.0, 0.0, 0.0],
+                transl=[0.0, 0.0, 0.0],
+            )
+
     def test_rejects_wrong_betas_length(self):
         with pytest.raises(Exception):
             SmplxParams(
                 betas=[0.0] * 5,  # wrong: need 10
                 body_pose=[0.0] * 63,
-                left_hand_pose=[0.0] * 45,
-                right_hand_pose=[0.0] * 45,
                 global_orient=[0.0, 0.0, 0.0],
                 transl=[0.0, 0.0, 0.0],
             )
