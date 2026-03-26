@@ -147,18 +147,24 @@ export default function ViewerPage() {
     };
   }, [isPlaying, result, viewState]);
 
-  // Sync audio with current frame + playback speed
+  // Set audio playback rate only when speed actually changes
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (Math.abs(audio.playbackRate - playbackSpeed) > 0.01) {
+      audio.playbackRate = Math.min(playbackSpeed, 2.0); // cap at 2x
+    }
+  }, [playbackSpeed]);
+
+  // Sync audio position with current frame
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !result) return;
 
     const targetTime = (currentFrame / Math.max(result.frames.length - 1, 1)) * result.duration;
 
-    // Set playback rate to match skeleton speed — this is how browsers do smooth speed changes
-    audio.playbackRate = playbackSpeed;
-
-    // Only seek if >0.15s out of sync
-    if (Math.abs(audio.currentTime - targetTime) > 0.15) {
+    // Only seek if >0.2s out of sync (wider threshold to reduce stutter)
+    if (Math.abs(audio.currentTime - targetTime) > 0.2) {
       audio.currentTime = targetTime;
     }
 
