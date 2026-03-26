@@ -1,8 +1,8 @@
 /**
  * Maps SMPL body_pose joint indices to VRM humanoid bone names.
  *
- * SMPL body_pose has 21 joints (indices 0-20), excluding the root (pelvis).
- * The root orientation comes from global_orient instead.
+ * Supports both SMPL (23 joints, indices 0-22) and SMPL-X (21 joints, indices 0-20).
+ * The root orientation comes from global_orient, not body_pose.
  *
  * VRM humanoid bones follow the VRM specification:
  * https://github.com/vrm-c/vrm-specification/blob/master/specification/VRMC_vrm-1.0/humanoid.md
@@ -31,7 +31,9 @@ export const SMPL_TO_VRM_BONE_MAP: Record<number, string | null> = {
   17: "rightUpperArm",    // SMPL: right_shoulder
   18: "leftLowerArm",     // SMPL: left_elbow
   19: "rightLowerArm",    // SMPL: right_elbow
-  20: null,               // SMPL: left_wrist -> VRM leftHand (handled separately via hand_pose)
+  20: "leftHand",         // SMPL: left_wrist → VRM leftHand
+  21: "rightHand",        // SMPL: right_wrist → VRM rightHand
+  22: null,               // SMPL: extra joint (jaw/unused)
 };
 
 /**
