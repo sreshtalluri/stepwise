@@ -23,10 +23,19 @@ export function axisAngleToQuaternion(
 }
 
 /**
+ * Get the number of body joints based on body_pose array length.
+ * SMPL: 69 values = 23 joints x 3
+ * SMPL-X: 63 values = 21 joints x 3
+ */
+export function getBodyJointCount(bodyPose: number[]): number {
+  return Math.floor(bodyPose.length / 3);
+}
+
+/**
  * Extract a single joint's axis-angle rotation from the body_pose array.
  *
- * body_pose is 63 floats: joints 0-20, each with 3 axis-angle values.
- * Joint index i starts at body_pose[i * 3].
+ * body_pose is 63 or 69 floats (SMPL-X: 21 joints, SMPL: 23 joints),
+ * each with 3 axis-angle values. Joint index i starts at body_pose[i * 3].
  */
 export function getJointRotation(
   bodyPose: number[],
