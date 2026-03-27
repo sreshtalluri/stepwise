@@ -37,3 +37,6 @@ pipeline/models/mediapipe/
 
 # random
 flow.txt.claude/worktrees/
+
+# status
+STATUS.md
