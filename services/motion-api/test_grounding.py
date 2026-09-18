@@ -223,6 +223,36 @@ def test_a_replacement_contact_detector_drops_in():
     assert abs(result.grounding["floor_plane"]["point"][1] - origin[1]) < 0.02
 
 
+def test_refused_clips_still_hand_over_their_evidence():
+    """A "none" verdict refuses a product claim, not a number. The follow-on
+    world-placement solve (OPEN-DECISIONS E6) must not have to re-derive the
+    plane, the contacts or the visibility mask -- every real clip is refused
+    today, so the refused path is the one that has to carry them."""
+    track, times, _, _ = synth_clip(n_frames=300, drift_after=45)
+    result = g.solve_grounding([track], times)
+    assert result.grounding["status"] == "none"
+    ev = result.evidence
+    assert ev["plane"] is not None and ev["plane"].rms_m < 0.02
+    assert len(ev["contact_weights"]) == 1 and ev["contact_weights"][0].shape == (300, 2)
+    assert (ev["contact_weights"][0] > 0).any()
+    assert ev["contact_points"][0].shape == (300, 2, 3)
+    assert ev["foot_valid"][0].shape == (300, 2)
+
+
+def test_intrinsics_are_read_not_guessed():
+    clip = {
+        "per_frame": [{}, {7: {"focal_length": np.float32(1174.8838)}}, {7: {"focal_length": np.float32(1174.8838)}}],
+        "frame_width": 576,
+        "frame_height": 1024,
+    }
+    got = g.camera_intrinsics_from_clip(clip)
+    assert got["fx"] == got["fy"] and abs(got["fx"] - 1174.8838) < 1e-3
+    assert (got["cx"], got["cy"]) == (288.0, 512.0)  # image centre: verified at 0.00 px reprojection
+    assert (got["reference_width_px"], got["reference_height_px"]) == (576, 1024)
+    # No frame size recorded (pre-W4 npz) -> say nothing rather than guess.
+    assert g.camera_intrinsics_from_clip({"per_frame": clip["per_frame"]}) is None
+
+
 # --------------------------------------------------------------------------- real data
 
 REAL_NPZ = os.environ.get("STEPWISE_NPZ", "/tmp/stepwise-grounding/solo-01.npz")

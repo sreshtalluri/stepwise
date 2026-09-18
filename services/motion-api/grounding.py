@@ -346,11 +346,27 @@ def fit_floor_plane(
 class GroundingResult:
     grounding: dict  # the MotionResult.grounding fragment, contract-shaped
     diagnostics: dict  # everything measured, for logs and reports -- NOT in the contract
+    evidence: dict  # raw arrays for a follow-on world-placement solve (see below)
+    """`evidence` exists so the next piece of work -- placing the dancer in the
+    room, which this deliberately does NOT do (OPEN-DECISIONS E6) -- does not
+    have to re-derive any of it:
+
+        plane            the PlaneFit, PRESENT EVEN WHEN THE VERDICT IS "none".
+                         A refused plane is still the best floor estimate
+                         available; it is refused as a product claim, not as a
+                         number. None only if no plane could be fitted at all.
+        contact_weights  list of (F, 2) arrays, one per track, index-aligned
+                         with the `tracks` argument: per-frame, per-foot
+                         contact weight in [0, 1].
+        contact_points   list of (F, 2, 3) arrays, the points those weights
+                         refer to, in the same world space as the plane.
+        foot_valid       list of (F, 2) bool arrays: was this foot visible.
+    """
 
 
-def _none(reason: str, diagnostics: dict) -> GroundingResult:
+def _none(reason: str, diagnostics: dict, evidence: dict) -> GroundingResult:
     diagnostics["reason"] = reason
-    return GroundingResult({"status": "none", "floor_plane": None}, diagnostics)
+    return GroundingResult({"status": "none", "floor_plane": None}, diagnostics, evidence)
 
 
 def solve_grounding(
@@ -403,17 +419,26 @@ def solve_grounding(
         n_both_feet_visible_frames=n_both_visible,
         foot_visible_fraction=round(visible_fraction, 4),
     )
-    if visible_fraction < min_visible_fraction:
-        return _none("feet_not_visible_enough", diagnostics)
-
+    # Built before the first gate returns, so a refused clip still hands a
+    # follow-on solve everything it measured (see GroundingResult.evidence).
+    evidence: dict = {
+        "plane": None,
+        "contact_weights": [],
+        "contact_points": [t.points for t in tracks],
+        "foot_valid": [t.valid for t in tracks],
+    }
     all_points, all_weights, all_times = [], [], []
     clip_seconds: set = set()
     for track in tracks:
         w = np.asarray(contact_detector(track.points, track.valid, times_s), dtype=np.float64)
+        evidence["contact_weights"].append(w)
         all_points.append(track.points.reshape(-1, 3))
         all_weights.append(w.reshape(-1))
         all_times.append(np.repeat(times_s, track.points.shape[1]))
         clip_seconds |= set(np.floor(times_s[track.reconstructed]).astype(int).tolist())
+
+    if visible_fraction < min_visible_fraction:
+        return _none("feet_not_visible_enough", diagnostics, evidence)
     points = np.concatenate(all_points) if all_points else np.zeros((0, 3))
     weights = np.concatenate(all_weights) if all_weights else np.zeros((0,))
     point_times = np.concatenate(all_times) if all_times else np.zeros((0,))
@@ -422,11 +447,14 @@ def solve_grounding(
         total_contact_weight=round(float(weights.sum()), 3),
     )
     if (weights > 0).sum() < 3:
-        return _none("no_contact_evidence", diagnostics)
+        return _none("no_contact_evidence", diagnostics, evidence)
 
     fit = fit_floor_plane(points, weights, tol_m=tol_m, max_tilt_deg=max_tilt_deg)
     if fit is None:
-        return _none("no_consensus_plane", diagnostics)
+        return _none("no_consensus_plane", diagnostics, evidence)
+    # Kept even if a gate below refuses it: a refused plane is still the best
+    # floor estimate there is, refused as a product claim rather than as a number.
+    evidence["plane"] = fit
 
     n_inliers = int(fit.inliers.sum())
     covered_seconds = set(np.floor(point_times[fit.inliers]).astype(int).tolist()) & clip_seconds
@@ -456,13 +484,13 @@ def solve_grounding(
         planted_frame_fraction=round(float((np.abs(gap) <= tol_m).mean()), 4) if gap.size else None,
     )
     if n_inliers < min_inliers:
-        return _none("too_few_contacts", diagnostics)
+        return _none("too_few_contacts", diagnostics, evidence)
     if fit.rms_m > max_rms_m:
-        return _none("fit_too_loose", diagnostics)
+        return _none("fit_too_loose", diagnostics, evidence)
     if fit.tilt_deg > max_tilt_deg:
-        return _none("implausible_tilt", diagnostics)
+        return _none("implausible_tilt", diagnostics, evidence)
     if coverage < min_time_coverage:
-        return _none("contacts_not_spread_over_clip", diagnostics)
+        return _none("contacts_not_spread_over_clip", diagnostics, evidence)
 
     diagnostics["reason"] = "grounded"
     return GroundingResult(
@@ -474,6 +502,7 @@ def solve_grounding(
             },
         },
         diagnostics,
+        evidence,
     )
 
 
@@ -548,6 +577,46 @@ def _ankle_scores(detection: dict, track_id: int, frame_width: int, frame_height
             score = 0.0
         out.append(float(score))
     return (out[0], out[1])
+
+
+def camera_intrinsics_from_clip(npz_data) -> Optional[dict]:
+    """The clip's real pinhole intrinsics, contract-shaped, or None.
+
+    Not used by the floor solve (which works in the metric character-local
+    frame and never touches the camera). It lives here because it is the one
+    thing a follow-on world-placement solve needs that nobody had written down,
+    and because the projection model below was established by measurement:
+
+        u = fx * X / Z + cx,  v = fy * Y / Z + cy,  (cx, cy) = image centre
+
+    reproduces the estimator's own `pred_keypoints_2d` from
+    `pred_keypoints_3d + pred_cam_t` with a **median error of 0.00 px** on real
+    solo-07 output -- and 277.78 px if the principal point is taken at the crop
+    bbox centre, which is the obvious wrong guess. `focal_length` in the npz is
+    the pipeline's own FOV estimate, exactly constant per clip (one unique
+    value across all 291 solo-01 / 436 solo-07 person records), so it is a
+    per-clip calibration and not a per-frame wobble.
+    """
+    focals = [
+        float(person["focal_length"])
+        for frame in npz_data["per_frame"]
+        if isinstance(frame, dict)
+        for person in frame.values()
+        if "focal_length" in person
+    ]
+    width = int(npz_data["frame_width"]) if "frame_width" in npz_data else 0
+    height = int(npz_data["frame_height"]) if "frame_height" in npz_data else 0
+    if not focals or not width or not height:
+        return None
+    focal = float(np.median(focals))
+    return {
+        "fx": focal,
+        "fy": focal,
+        "cx": width / 2.0,
+        "cy": height / 2.0,
+        "reference_width_px": width,
+        "reference_height_px": height,
+    }
 
 
 def solve_grounding_for_clip(npz_data, joint_names: Sequence[str], **kwargs) -> GroundingResult:

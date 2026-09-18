@@ -84,6 +84,20 @@ It reports `none` far more often than you would expect, and
 `docs/GATE-REPORT.md`'s grounding addendum explains exactly why with numbers —
 read it before assuming the solve is broken.
 
+`camera_intrinsics_from_clip()` also lives here: the clip's real focal length
+plus the pinhole model that was verified against real output at 0.00 px
+reprojection error. `api.py` uses it for `camera.intrinsics`, replacing a
+placeholder that was 12.8% off.
+
+**If you are picking up world placement** (making the dancer travel instead of
+dancing in place — OPEN-DECISIONS E6), start from `GroundingResult.evidence`.
+It carries the fitted plane, per-frame per-foot contact weights, the contact
+points and the foot visibility mask, and it is populated **even when the
+verdict is `none`** — which is every real clip so far. Read E6 and the
+addendum's world-placement section first: three plausible approaches were
+already tried and measured, and the reason they failed is not the one you would
+guess.
+
 See `api.py`'s module docstring for the object-storage decision (Modal
 Volumes, not S3) and the known scope boundary in `_build_motion_result`
 (per-joint visibility/suppression and true world-space root placement are
