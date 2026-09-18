@@ -63,6 +63,159 @@ base_image = (
 )
 
 
+VENDOR_DIR = os.path.join(os.path.dirname(__file__), "vendor", "fast-sam-3d-body")
+
+# Real CV image (stage 4+). CUDA *devel* base, not debian_slim: Detectron2
+# compiles a CUDA extension at install time and needs nvcc + CUDA_HOME, which
+# a runtime-only base image does not have. TORCH_CUDA_ARCH_LIST is set
+# explicitly (L40S = compute capability 8.9) so the compile does not need a
+# GPU attached to the build step -- it would otherwise call
+# torch.cuda.get_device_capability(), which fails with no GPU visible.
+#
+# Pins from docs/PRD.md G3: Python 3.11, torch 2.5.1+cu124 -- Detectron2's
+# pinned commit compiles against exactly that CUDA toolkit version. Do NOT
+# install pymomentum here (needs Python 3.12/3.13 + torch 2.8); glTF export
+# is a separate image (see gltf_image).
+cv_image = (
+    modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11")
+    .apt_install("git", "wget", "ffmpeg", "libgl1", "libglib2.0-0", "build-essential", "ninja-build")
+    .env({"CUDA_HOME": "/usr/local/cuda", "TORCH_CUDA_ARCH_LIST": "8.9"})
+    .pip_install("setuptools", "wheel")  # needed for --no-build-isolation installs below
+    .pip_install(
+        "torch==2.5.1+cu124",
+        "torchvision==0.20.1+cu124",
+        extra_index_url="https://download.pytorch.org/whl/cu124",
+    )
+    .pip_install(
+        # From setup_env.sh's Step 4, minus smplx/chumpy (unused -- no SMPL-X
+        # path in this pipeline) and pyzmq/pyrealsense2 (realtime RealSense
+        # streaming, unused for a batch clip pipeline). See PROVENANCE.md.
+        "pytorch-lightning",
+        "pyrender",
+        "opencv-python-headless",
+        "yacs",
+        "scikit-image",
+        "einops",
+        "timm",
+        "dill",
+        "pandas",
+        "rich",
+        "hydra-core",
+        "hydra-submitit-launcher",
+        "hydra-colorlog",
+        "pyrootutils",
+        "webdataset",
+        "chump",
+        "networkx==3.2.1",
+        "roma",
+        "joblib",
+        "seaborn",
+        "wandb",
+        "appdirs",
+        "cython",
+        "jsonlines",
+        "pytest",
+        "xtcocotools",
+        "loguru",
+        "optree",
+        "fvcore",
+        "black",
+        "pycocotools",
+        "tensorboard",
+        "huggingface_hub",
+    )
+    .pip_install(
+        # RTMO detection stack (replaces ultralytics -- see G2). No
+        # tensorrt-cu12*: rtmlib has no TensorRT branch and G4 skips
+        # TensorRT in the gate entirely.
+        "onnx",
+        "onnxruntime-gpu",
+        "rtmlib",
+    )
+    .pip_install(
+        # The published PyPI release of bytetracker (0.3.2) pins lap==0.4.0,
+        # whose C extension does not build on Python 3.11 (uses removed
+        # CPython internals -- longintrepr.h) or against this image's numpy
+        # (AVX-512 FP16 intrinsics gcc here doesn't support). Current
+        # upstream `main` already fixed this by switching to lapx (a
+        # maintained, prebuilt-wheel drop-in for lap, still MIT) -- install
+        # from source instead of the stale PyPI release.
+        "git+https://github.com/kadirnar/bytetrack-pip.git",
+    )
+    .run_commands(
+        # --no-build-isolation: needs torch already installed to compile
+        # against. --no-deps: its own requirements.txt pulls in stale pins
+        # that fight the ones above.
+        "pip install 'git+https://github.com/facebookresearch/detectron2.git@a1ce2f9' "
+        "--no-build-isolation --no-deps",
+    )
+    # Mounted at container start, not baked into the image layer -- editing
+    # the adapter doesn't force a rebuild of everything above it.
+    .add_local_dir(VENDOR_DIR, remote_path="/app/fast-sam-3d-body")
+)
+
+
+@app.function(image=cv_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights}, timeout=1800)
+def verify_cv_stack():
+    """Stage 4: does the real CV image actually work end to end?
+
+    Cheaper and more diagnostic than jumping straight to a full clip: proves
+    Detectron2 imports (compiled correctly against CUDA_HOME), RTMO actually
+    runs on CUDAExecutionProvider (not silently on CPU), and ByteTrack tracks
+    across a couple of synthetic frames -- before spending GPU time on a real
+    clip.
+    """
+    import time
+
+    import cv2
+    import numpy as np
+    import onnxruntime as ort
+    import torch
+
+    print(f"torch {torch.__version__}, cuda available: {torch.cuda.is_available()}")
+    assert torch.cuda.is_available(), "CUDA not available in cv_image"
+
+    print("\n--- detectron2 ---")
+    import detectron2
+
+    print(f"detectron2 {detectron2.__version__}, compiled ok (import succeeded)")
+
+    print("\n--- onnxruntime providers ---")
+    print(ort.get_available_providers())
+    assert "CUDAExecutionProvider" in ort.get_available_providers(), (
+        "onnxruntime-gpu did not register CUDAExecutionProvider -- would silently "
+        "fall back to CPU"
+    )
+
+    print("\n--- RTMO + ByteTrack on a synthetic frame ---")
+    import sys
+
+    sys.path.insert(0, "/app/fast-sam-3d-body")
+    from tools.rtmo_detector import RTMODetector
+
+    detector = RTMODetector(device="cuda:0")  # default onnx_model is RTMO-m/body7@640x640
+    # Verify the ONNXRuntime session it built is actually on CUDA, not CPU.
+    providers = detector.rtmo.session.get_providers()
+    print(f"RTMO session providers: {providers}")
+    assert providers[0] == "CUDAExecutionProvider", f"RTMO fell back to {providers}"
+
+    frame = (np.random.rand(480, 640, 3) * 255).astype(np.uint8)
+    t0 = time.time()
+    result = detector.run_human_detection(frame)
+    dt = time.time() - t0
+    print(f"one frame: {dt * 1000:.1f}ms, boxes={result['boxes'].shape}, "
+          f"keypoints={result['keypoints'].shape}")
+    assert result["boxes"].shape[1] == 4
+    assert result["keypoints"].shape[1:] == (17, 3)
+
+    return {
+        "torch": torch.__version__,
+        "cuda": torch.version.cuda,
+        "ort_providers": ort.get_available_providers(),
+        "one_frame_ms": round(dt * 1000, 1),
+    }
+
+
 @app.function(image=base_image, gpu=GPU_TIER, timeout=600)
 def verify_gpu():
     """Stage 1: does CUDA actually work on the card we plan to rent?
@@ -205,6 +358,69 @@ def inspect_mhr():
     print([m for m in dir(obj) if not m.startswith("_")])
 
     return {"loaded": True}
+
+
+# glTF export image (G6). Separate from cv_image on purpose (docs/PRD.md E5):
+# pymomentum-gpu's wheels are cp312/cp313 only and pin torch==2.8 -- verified
+# against its real PyPI metadata, not assumed from the PRD. Exchanges plain
+# arrays (npz) with cv_image's output, never a live Python object.
+gltf_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .pip_install("torch==2.8.0")
+    .pip_install("pymomentum-gpu==0.1.114.post0")
+    .pip_install("numpy", "trimesh")
+)
+
+
+@app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights}, timeout=600)
+def inspect_pymomentum():
+    """Stage 6a: what does pymomentum-gpu's Character / glTF export API
+    actually look like, empirically -- the PRD's function name
+    (save_gltf_from_skel_states) was renamed upstream to
+    save_gltf_with_skel_states in Sep 2025 (facebookresearch/momentum#569),
+    which is exactly the kind of drift 'measure, don't trust' exists to catch.
+    Also: does loading one of the LOD fbx files from the separate assets.zip
+    actually work, and what does the resulting Character expose (joint count/
+    names) -- needed to check it lines up with the bundled mhr_model.pt's
+    127-joint skeleton before trusting our estimator's skel_state output is
+    compatible with it.
+    """
+    import pymomentum.geometry as pym_geo
+
+    print("pymomentum.geometry members:")
+    print([m for m in dir(pym_geo) if not m.startswith("_")])
+
+    print("\nCharacter members:")
+    print([m for m in dir(pym_geo.Character) if not m.startswith("_")])
+
+    save_fn = getattr(pym_geo, "save_gltf_with_skel_states", None) or getattr(
+        pym_geo, "save_gltf_from_skel_states", None
+    )
+    print(f"\nsave_gltf function found: {save_fn}")
+    if save_fn is not None:
+        print(f"docstring: {save_fn.__doc__}")
+
+    lod_path = f"{WEIGHTS_DIR}/mhr-assets/lod3.fbx"
+    print(f"\nloading Character from {lod_path}")
+    load_fn = None
+    for candidate in ("load_fbx", "load_fbx_character", "load_gltf", "load_gltf_character"):
+        if hasattr(pym_geo, candidate):
+            load_fn = getattr(pym_geo, candidate)
+            print(f"using loader: {candidate}")
+            break
+    if load_fn is None:
+        return {"error": "no obvious fbx/gltf loader on pymomentum.geometry", "members": dir(pym_geo)}
+
+    character = load_fn(lod_path)
+    skeleton = character.skeleton
+    print(f"joint count: {skeleton.size}")
+    print(f"joint names (first 20): {list(skeleton.joint_names)[:20]}")
+
+    return {
+        "save_fn_name": save_fn.__name__ if save_fn else None,
+        "load_fn_name": load_fn.__name__,
+        "joint_count": skeleton.size,
+    }
 
 
 @app.local_entrypoint()

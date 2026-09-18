@@ -49,6 +49,14 @@ from rtmlib.tools.pose_estimation.rtmo import RTMO
 DEFAULT_SCORE_THR = 0.1
 DEFAULT_NMS_THR = 0.45
 
+# RTMO-m/body7 @ 640x640, per docs/PRD.md's pipeline table. This is rtmlib's
+# own Body.RTMO_MODE["balanced"]["pose"] URL (openmmlab-hosted, Apache-2.0) --
+# rtmlib takes a URL or local path here, not a bare alias like "rtmo-m".
+RTMO_M_BODY7_URL = (
+    "https://download.openmmlab.com/mmpose/v1/projects/rtmo/onnx_sdk/"
+    "rtmo-m_16xb16-600e_body7-640x640-39e78cc4_20231211.zip"
+)
+
 _EMPTY_BOXES = np.zeros((0, 4), dtype=np.float32)
 
 
@@ -110,11 +118,18 @@ def _iou_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.where(union > 0, inter / union, 0.0)
 
 
-def associate_tracks(tracked_boxes, boxes, keypoints, kpt_scores, num_kpts, iou_thr=0.1):
+def associate_tracks(tracked_boxes, boxes, keypoints, kpt_scores, num_kpts, track_ids=None, iou_thr=0.1):
     """Re-attach this frame's keypoints to ByteTrack's (box-only) output by
-    nearest IoU. Pure numpy, split out for unit testing."""
+    nearest IoU. Pure numpy, split out for unit testing.
+
+    track_ids, if given, is (len(tracked_boxes),) and is filtered/returned
+    alongside boxes/keypoints -- multiple dancers are in scope (docs/PRD.md
+    section 5, 2026-09-18 revision), so callers need a stable per-person id,
+    not just "however many boxes this frame happened to have".
+    """
+    empty_ids = np.zeros((0,), dtype=np.int64)
     if len(tracked_boxes) == 0 or len(boxes) == 0:
-        return _EMPTY_BOXES.copy(), np.zeros((0, num_kpts, 3), dtype=np.float32)
+        return _EMPTY_BOXES.copy(), np.zeros((0, num_kpts, 3), dtype=np.float32), empty_ids
 
     iou = _iou_matrix(tracked_boxes, boxes)
     best = iou.argmax(axis=1)
@@ -124,7 +139,8 @@ def associate_tracks(tracked_boxes, boxes, keypoints, kpt_scores, num_kpts, iou_
     out_keypoints = np.concatenate(
         [keypoints[best[matched]], kpt_scores[best[matched], :, None]], axis=-1
     )
-    return out_boxes, out_keypoints.astype(np.float32)
+    out_ids = track_ids[matched] if track_ids is not None else empty_ids
+    return out_boxes, out_keypoints.astype(np.float32), out_ids
 
 
 class RTMODetector:
@@ -139,7 +155,7 @@ class RTMODetector:
 
     def __init__(
         self,
-        onnx_model: str,
+        onnx_model: str = RTMO_M_BODY7_URL,
         device: str = "cuda",
         model_input_size: tuple = (640, 640),
         score_thr: float = DEFAULT_SCORE_THR,
@@ -177,7 +193,7 @@ class RTMODetector:
         default_to_full_image: bool = False,
         **kwargs,
     ) -> dict:
-        num_kpts = self.rtmo.model_input_size and 17  # COCO-17, to_openpose=False
+        num_kpts = 17  # COCO-17, to_openpose=False
         boxes, scores, keypoints, kpt_scores = self.rtmo(
             img, nms_thr=nms_thr, score_thr=bbox_thr
         )
@@ -192,7 +208,12 @@ class RTMODetector:
         )
         tracked = self.tracker.update(dets)
         tracked_boxes = tracked[:, :4].astype(np.float32) if len(tracked) else tracked
-        out_boxes, out_keypoints = associate_tracks(
-            tracked_boxes, boxes, keypoints, kpt_scores, num_kpts
+        track_ids = tracked[:, 4].astype(np.int64) if len(tracked) else None
+        out_boxes, out_keypoints, out_ids = associate_tracks(
+            tracked_boxes, boxes, keypoints, kpt_scores, num_kpts, track_ids=track_ids
         )
-        return {"boxes": out_boxes, "keypoints": out_keypoints}
+        # "track_ids" is an extra key beyond the {"boxes","keypoints"} contract
+        # HumanDetector/sam_3d_body_estimator.py read -- harmless there, and
+        # this is what process_clip.py uses to key per-dancer output across
+        # frames (docs/PRD.md section 5's multi-dancer MVP).
+        return {"boxes": out_boxes, "keypoints": out_keypoints, "track_ids": out_ids}

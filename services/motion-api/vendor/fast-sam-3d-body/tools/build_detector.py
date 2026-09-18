@@ -38,7 +38,11 @@ class HumanDetector:
             from tools.rtmo_detector import RTMODetector
 
             model_path = kwargs.pop("model", None) or kwargs.pop("path", None)
-            self.detector = RTMODetector(model_path, device=device, **kwargs)
+            self.detector = (
+                RTMODetector(device=device, **kwargs)
+                if not model_path
+                else RTMODetector(model_path, device=device, **kwargs)
+            )
             self.detector_func = lambda detector, img, **kw: detector.run_human_detection(img, **kw)
         else:
             raise NotImplementedError(f"Detector '{name}' not supported. Use 'vitdet', 'yolo', 'yolo_pose', or 'rtmo'.")

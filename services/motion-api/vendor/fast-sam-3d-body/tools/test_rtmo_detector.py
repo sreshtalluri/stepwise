@@ -102,10 +102,35 @@ def test_associate_tracks_reattaches_correct_keypoints():
 
     # tracked box for person B, slightly perturbed by the Kalman filter
     tracked_boxes = np.array([[302, 301, 349, 348]], dtype=np.float32)
+    track_ids = np.array([7], dtype=np.int64)
 
-    out_boxes, out_kpts = associate_tracks(tracked_boxes, boxes, keypoints, kpt_scores, num_kpts=17)
+    out_boxes, out_kpts, out_ids = associate_tracks(
+        tracked_boxes, boxes, keypoints, kpt_scores, num_kpts=17, track_ids=track_ids
+    )
     assert len(out_boxes) == 1
     assert tuple(out_kpts[0, 9, :2]) == (320.0, 320.0), "must match person B, not person A"
+    assert out_ids[0] == 7
+
+
+def test_associate_tracks_keeps_two_dancers_separate():
+    # 2026-09-18 scope revision: multiple dancers are in the MVP (docs/PRD.md
+    # section 5) -- both tracks must come back with their own box/keypoints/id.
+    boxes = np.array([[100, 100, 150, 150], [300, 300, 350, 350]], dtype=np.float32)
+    keypoints = np.zeros((2, 17, 2), dtype=np.float32)
+    keypoints[0, 9] = [120, 120]
+    keypoints[1, 9] = [320, 320]
+    kpt_scores = np.full((2, 17), 0.9, dtype=np.float32)
+    tracked_boxes = np.array([[101, 101, 149, 149], [301, 301, 349, 349]], dtype=np.float32)
+    track_ids = np.array([3, 8], dtype=np.int64)
+
+    out_boxes, out_kpts, out_ids = associate_tracks(
+        tracked_boxes, boxes, keypoints, kpt_scores, num_kpts=17, track_ids=track_ids
+    )
+    assert len(out_boxes) == 2
+    assert set(out_ids.tolist()) == {3, 8}
+    by_id = dict(zip(out_ids.tolist(), out_kpts))
+    assert tuple(by_id[3][9, :2]) == (120.0, 120.0)
+    assert tuple(by_id[8][9, :2]) == (320.0, 320.0)
 
 
 def test_associate_tracks_drops_unmatched_track():
@@ -113,8 +138,12 @@ def test_associate_tracks_drops_unmatched_track():
     boxes = np.array([[0, 0, 50, 50]], dtype=np.float32)
     keypoints = np.zeros((1, 17, 2), dtype=np.float32)
     kpt_scores = np.zeros((1, 17), dtype=np.float32)
-    out_boxes, out_kpts = associate_tracks(tracked_boxes, boxes, keypoints, kpt_scores, num_kpts=17)
+    track_ids = np.array([1], dtype=np.int64)
+    out_boxes, out_kpts, out_ids = associate_tracks(
+        tracked_boxes, boxes, keypoints, kpt_scores, num_kpts=17, track_ids=track_ids
+    )
     assert len(out_boxes) == 0
+    assert len(out_ids) == 0
 
 
 if __name__ == "__main__":
