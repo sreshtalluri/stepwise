@@ -49,6 +49,8 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "packages" / "motion-contract" / "python"))
 from motion_contract import validate_job_status, validate_motion_result  # noqa: E402
 
+from grounding import solve_grounding_for_clip  # noqa: E402 -- same directory, pure numpy
+
 APP_NAME = "stepwise-motion"
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # generous; PRD's real limit is 60s of video, not a byte count
 JOINT_HIERARCHY = json.loads((Path(__file__).resolve().parent / "mhr_joint_hierarchy.json").read_text())
@@ -323,6 +325,16 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
 
     width = int(data["frame_width"]) if "frame_width" in data else 0
     height = int(data["frame_height"]) if "frame_height" in data else 0
+
+    # One floor per clip, from every dancer's foot contacts pooled. The
+    # diagnostics are deliberately NOT put in the document (Grounding is
+    # additionalProperties: false, and they are engineering numbers, not a
+    # product claim) -- they go to the log so a "none" is explainable without
+    # re-running the job.
+    solved = solve_grounding_for_clip(data, [j["name"] for j in joints_def])
+    grounding = solved.grounding
+    print(f"[grounding] {clip_id}: {grounding['status']} -- {json.dumps(solved.diagnostics)}")
+
     doc = {
         "schema_version": "1.0.0",
         "job_id": job_id,
@@ -353,9 +365,11 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
             },
             "camera_to_world": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
         },
-        # Never fake a plane (DESIGN.md §10) -- floor fitting isn't built yet,
-        # so "none" is the honest state, not a guessed floor at y=0.
-        "grounding": {"status": "none", "floor_plane": None},
+        # Real floor solve (grounding.py). Still returns "none" whenever the
+        # evidence does not earn a plane -- DESIGN.md §10 forbids faking one,
+        # and the solve's own diagnostics (logged above) say which gate
+        # refused and what it measured.
+        "grounding": grounding,
         "accent_color": {"hex": DANCER_FALLBACK_COLORS[0], "source": "fallback"},  # E4 sampling not built here
         "joint_hierarchy": JOINT_HIERARCHY,
         "persons": persons,

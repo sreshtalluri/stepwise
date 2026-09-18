@@ -23,7 +23,7 @@ Status key: **OPEN** · **LEANING** (a recommendation exists) · **DEFER** (safe
 |---|---|---|---|
 | B1 | Upload rejected — too long / wrong format / no dancer found | OPEN | Must say what to do next, not just what failed. "No dancer found" needs care — it may be the model's fault, not the video's. |
 | B2 | Reconstruction partly failed | OPEN | Some counts good, some unusable. Show the lesson with gaps marked? Refuse it? This will happen often. |
-| B3 | Feet cropped for most of the clip → no floor | LEANING | `DESIGN.md` says the body floats with a one-line note. Needs a drawn mockup — a floating body may look broken rather than honest. |
+| B3 | Feet cropped for most of the clip → no floor | LEANING, **now urgent** | `DESIGN.md` says the body floats with a one-line note. Needs a drawn mockup — a floating body may look broken rather than honest. Promoted from edge case to default: with E6 unresolved, the floor solve honestly returns `none` for *every* real clip measured so far, so the floorless state is what every lesson currently renders. Its one-line note also needs new copy — "feet not visible in clip" is wrong when the feet are perfectly visible and it is the depth that is not trustworthy. |
 | B4 | Very long dance (32+ counts) | OPEN | The overview bar at 64 counts: do part ticks still read? Does the count strip page, scroll, or zoom? |
 | B5 | Slow network / large upload on phone data | OPEN | Progress, resumability, and what happens if they background the app mid-upload. |
 | B6 | First run — how does anyone learn they can orbit? | LEANING | The moving contact shadow is the affordance. But it needs a first-run moment — a slow auto-orbit on load, once, then stop? Needs deciding. |
@@ -59,6 +59,7 @@ Status key: **OPEN** · **LEANING** (a recommendation exists) · **DEFER** (safe
 | E3 | Mesh-region masking | OPEN | Hiding a bone does not hide its skinned surface. Need per-region drawable meshes or vertex masks — affects the export format, so decide before the contract freezes. |
 | E4 | Accent sampling from the clip | LEANING | Nice idea, unproven. Median hue of the middle third, clamped. If it produces mud on real clips, fall back to the fixed dancer palette. Test in week 1 with the eval clips. |
 | E5 | Two-environment split | SETTLED (architecture) | SAM inference on Python 3.11/Torch 2.5.1; glTF export on a separate env; arrays over the boundary. Recorded in the PRD. |
+| E6 | **Global vertical placement of the body** | OPEN | **Blocks grounding entirely** (measured, `GATE-REPORT.md`'s grounding addendum). `skel_state`'s root translation is constant for every frame, so the exported GLB pins the pelvis at a fixed height and the feet move instead — no static floor plane can be right for a whole clip. `pred_cam_t` is the only other source and its per-crop depth is worse (correlates -0.93 with bbox height, 3.2→10.9 m swing on solo-01); placing the body on its view ray at a constant depth was tried and measured worse still. The real options are a proper per-frame world placement (joint depth/scale + floor optimisation, WHAM/GVHMR-shaped) or accepting a floorless product. Needs a decision before grounding can ship as anything but `none`, and it touches the export, not just the solve. |
 
 ---
 

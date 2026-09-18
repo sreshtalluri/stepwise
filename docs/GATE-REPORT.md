@@ -355,3 +355,65 @@ still marked OPEN there. The `CONFIDENT_MIN_FRAMES` threshold and the
 job-status "refused → failed" mapping are implementation judgment calls
 within the existing contract, not new product/design decisions of the kind
 OPEN-DECISIONS.md tracks — flagged above rather than silently assumed.
+
+## Grounding addendum (2026-09-18): the floor solve, and why it says `none`
+
+Branch `grounding` off `w4-jobservice`. Real Modal GPU session this pass:
+`solo-07` (the `floor-work` clip) was run end to end for the first time, and
+`solo-01`'s existing npz was re-read. Every number below is measured.
+
+**What was built.** `services/motion-api/grounding.py` — two deliberately
+separate, independently replaceable functions plus the honesty decision around
+them, wired into `api.py::_build_motion_result` in place of the hardcoded
+`{"status": "none", "floor_plane": null}`. 13 tests in
+`services/motion-api/test_grounding.py`, no GPU needed.
+
+**The measured result: both real clips honestly report `none`.** Not because
+the solve failed — it fits a tight plane on both — but because of what the
+plane turns out to describe.
+
+| | solo-01 (baseline) | solo-07 (floor work) |
+|---|---|---|
+| reconstructed frames | 291 / 296 | 436 (4 track ids) |
+| both feet visible | 96.2% | 97.9% |
+| contact candidates → inliers | 39 → 27 | 222 → 192 |
+| inlier RMS | **1.45 cm** | **1.25 cm** |
+| fitted floor height | 0.053 m | 0.109 m |
+| fitted tilt from +Y | 9.2° | 10.5° |
+| contact evidence covers | **7 of 20 s (0.35)** | **12 of 24 s (0.50)** |
+| lowest foot's median gap to that plane | **0.125 m** | **0.578 m** |
+| frames with a foot within 3 cm of it | 16.1% | 28.1% |
+| verdict | `none` (`contacts_not_spread_over_clip`) | `none` (same) |
+
+**Root cause, and it is structural, not statistical.** `skel_state`'s root
+translation is **constant for every frame of every clip** — `(0, 92.399, 0)` cm
+on solo-01, all 291 frames — and `body_world` is identity. So in the only frame
+the renderer and the pipeline share (the exported GLB's), the pelvis is pinned
+at a fixed height and the vertical datum rides the body: a plié lifts the whole
+skeleton off its own floor. Confirmed against an independent observable: the
+reconstruction's lowest-foot height correlates **-0.52** with the detector's
+image-space ankle position on solo-01 (i.e. when the model says the foot went
+up, the video says it went down) and **-0.89** with detector bbox height on
+solo-07 — the "float" tracks the crop box, not the dancer.
+
+**The obvious fix was tried and measured worse.** Placing the body on its own
+view ray at a clip-constant depth (`pred_cam_t * Z0/z`, justified by the MVP's
+static-camera assumption) widens the lowest-quartile spread of the floor
+estimate from 0.117 m to 0.284 m on solo-01 and 0.174 m to 0.210 m on solo-07.
+Raw `pred_cam_t` is worse still: its z swings 3.18→10.93 m on solo-01 and
+correlates -0.93 with bbox height, putting every foot point on one viewing ray
+(y/z correlation 0.98) — a degenerate configuration for plane fitting. **The
+character-local frame is the best vertical datum currently available, and it is
+still not good enough for a whole clip.**
+
+**The solve is not merely cautious.** On solo-01 frames 0–45 (3.0 s, dancer
+upright, pelvis near canonical height) it returns `grounded`: floor at 0.038 m,
+1.22 cm RMS, 5.3° tilt, coverage 0.67, and the lowest foot within 3 cm of the
+plane in 47.5% of frames with a 3.4 cm median gap. That document validates
+against the frozen contract. The gate is discriminating, not refusing.
+
+**What this blocks.** Grounding cannot become `grounded` for a whole real clip
+until the pipeline produces a per-frame global vertical placement for the body
+(see `docs/OPEN-DECISIONS.md` E6). Until then, every lesson renders floorless,
+which makes `OPEN-DECISIONS.md` B3 (what a floating body actually looks like)
+the live design question rather than an edge case.

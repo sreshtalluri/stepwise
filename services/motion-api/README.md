@@ -66,6 +66,24 @@ assembled, schema-validated `MotionResult`), `POST /jobs/{job_id}/retry`
 (only for `retryable: true` failures), `GET /assets/{asset_id}` (resolves a
 `source_video.asset_id` / `AnimationRef.glb_asset_id` to bytes).
 
+## The floor solve (`grounding.py`)
+
+Pure numpy, no GPU, no Modal. `api.py` calls it once per clip to fill
+`MotionResult.grounding`. Two swappable seams — `detect_foot_contacts`
+(which samples are contact evidence, as weights in [0,1]) and
+`fit_floor_plane` (weighted RANSAC) — plus `solve_grounding`, which owns the
+`grounded`-vs-`none` decision and its thresholds. A learned foot-contact model
+drops in as `solve_grounding(..., contact_detector=...)`.
+
+```sh
+python3 -m pytest test_grounding.py -q        # 13 tests, no GPU
+python3 grounding.py /path/to/clip.npz        # measure one real clip
+```
+
+It reports `none` far more often than you would expect, and
+`docs/GATE-REPORT.md`'s grounding addendum explains exactly why with numbers —
+read it before assuming the solve is broken.
+
 See `api.py`'s module docstring for the object-storage decision (Modal
 Volumes, not S3) and the known scope boundary in `_build_motion_result`
 (per-joint visibility/suppression and true world-space root placement are
