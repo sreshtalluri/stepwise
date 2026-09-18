@@ -362,6 +362,13 @@ Branch `grounding` off `w4-jobservice`. Real Modal GPU session this pass:
 `solo-07` (the `floor-work` clip) was run end to end for the first time, and
 `solo-01`'s existing npz was re-read. Every number below is measured.
 
+**Reproducibility note.** `solo-01` was re-run end to end on current code at
+the end of this pass (its stored npz predated W4 and had no frame size). The
+floor numbers reproduce to the digit — floor 0.0529 m, RMS 0.01454, planted
+fraction 0.1607, tilt 9.18° vs 9.20° — off a fresh reconstruction, so none of
+this is an artefact of one stale run. Note the ByteTrack id changed (4 → 1)
+between runs; nothing in the solve depends on it.
+
 **What was built.** `services/motion-api/grounding.py` — two deliberately
 separate, independently replaceable functions plus the honesty decision around
 them, wired into `api.py::_build_motion_result` in place of the hardcoded
