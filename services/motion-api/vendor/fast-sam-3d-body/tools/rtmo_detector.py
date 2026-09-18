@@ -40,14 +40,17 @@ import onnxruntime as ort
 from rtmlib.tools.object_detection.post_processings import nms
 from rtmlib.tools.pose_estimation.rtmo import RTMO
 
-# rtmlib's BaseTool creates the ORT session directly and never calls this, so
-# CUDAExecutionProvider silently vanishes from get_available_providers() even
-# though torch's own pip-installed CUDA/cuDNN are right there on disk -- ORT
-# >=1.21 needs an explicit preload (onnxruntime.ai/docs/execution-providers/
-# CUDA-ExecutionProvider.html) rather than relying on ldconfig/LD_LIBRARY_PATH
-# discovery. Must run before any InferenceSession is constructed, so it goes
-# here at import time rather than inside RTMODetector.__init__.
-ort.preload_dlls()
+# rtmlib's BaseTool creates the ORT session directly and never calls this.
+# ORT >=1.21 needs an explicit preload (onnxruntime.ai/docs/execution-
+# providers/CUDA-ExecutionProvider.html) rather than relying on
+# ldconfig/LD_LIBRARY_PATH discovery of torch's pip-installed CUDA/cuDNN.
+# Pinned onnxruntime-gpu here is 1.20.2 (see modal_app.py's cv_image -- newer
+# releases require CUDA 13, incompatible with this image's CUDA 12.4), which
+# predates preload_dlls and doesn't need it (ldconfig registration in
+# modal_app.py's image covers discovery instead) -- guarded for whichever
+# version actually ends up installed.
+if hasattr(ort, "preload_dlls"):
+    ort.preload_dlls()
 
 # Lower than rtmlib's RTMO default of 0.7. ByteTrack's own two-tier matching
 # (high-confidence detections spawn/confirm tracks; low-confidence ones only

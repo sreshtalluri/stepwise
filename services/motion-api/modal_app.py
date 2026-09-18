@@ -227,8 +227,10 @@ def verify_cv_stack():
     print(f"onnxruntime {ort.__version__}")
     # rtmlib's BaseTool never calls this, so it also happens at import time in
     # tools/rtmo_detector.py -- called again here so this check is accurate
-    # even if that import hasn't happened yet in this process.
-    ort.preload_dlls()
+    # even if that import hasn't happened yet in this process. Guarded: pinned
+    # onnxruntime-gpu==1.20.2 predates preload_dlls (added in 1.21).
+    if hasattr(ort, "preload_dlls"):
+        ort.preload_dlls()
     print(ort.get_available_providers())
     assert "CUDAExecutionProvider" in ort.get_available_providers(), (
         "onnxruntime-gpu did not register CUDAExecutionProvider -- would silently "
