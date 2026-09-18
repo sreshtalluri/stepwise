@@ -138,7 +138,24 @@ clips:
       and the learner is shown a video crop instead. A confident wrong hand is
       worse than an honest unknown.
     rights: untested
-    notes: ""
+    notes: >
+      STILL NOT SOURCED as of 2026-09-18 (branch `hands`). The expected outcome
+      above was CONFIRMED by measurement on solo-01/solo-07 instead -- MHR's
+      finger knuckles span only ~22 deg over a whole clip (elbows span ~140),
+      and against an independent hand landmarker the predicted hand shape is
+      indistinguishable from randomly paired frames. Full numbers in
+      docs/GATE-REPORT.md's hands addendum. But those are INCIDENTAL hand poses:
+      nobody in either clip is deliberately making a shape, so this entry is
+      still needed. What to film: deliberate, held, distinguishable shapes
+      (fist / flat palm / point / two-finger), 1080p or better so the hand crop
+      lands above 200px, front-on, each shape held ~0.5s+ so motion blur is not
+      the dominant error. Filming it at the builder's dance school also solves
+      the `rights:` problem that blocks every scraped clip.
+      One correction to the `why:` above: the hand is not the binding
+      constraint at ~30px. Measured hand crops are 110-121px median even on
+      576x1024 source; the landmarker still mislabels which hand it is looking
+      at 20-34% of the time at EVERY crop size, so blur and compression are the
+      real limit, not pixel count.
 
   - id: stress-footwork
     url: ""

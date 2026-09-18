@@ -250,11 +250,19 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
         root_traj = []
         n_observed = 0
         shape_vec = None
+        # branch `hands`: crop rects are computed in the GPU stage (they need the
+        # detector keypoints and the real post-rotation frame size, both of which
+        # only exist there) and carried per-person in the npz, same as
+        # bone_length_confidence. Here they are only collected, never invented --
+        # a frame the pipeline did not localize stays None.
+        hand_rects, foot_rects = [], []
 
         for i in range(n_samples):
             frame = per_frame[i]
             person = frame.get(track_id) if isinstance(frame, dict) else None
             observed = person is not None and "skel_state" in person
+            hand_rects.append(person.get("hand_crop_rect") if person is not None else None)
+            foot_rects.append(person.get("foot_crop_rect") if person is not None else None)
             if observed:
                 held = np.asarray(person["skel_state"], dtype=np.float64)
                 n_observed += 1
@@ -318,7 +326,7 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
             },
             "root_trajectory": root_traj,
             "samples": samples_out,
-            "crop_rects": {"hands": [None] * n_samples, "feet": [None] * n_samples},  # Milestone B, not built here
+            "crop_rects": {"hands": hand_rects, "feet": foot_rects},
         })
 
     width = int(data["frame_width"]) if "frame_width" in data else 0

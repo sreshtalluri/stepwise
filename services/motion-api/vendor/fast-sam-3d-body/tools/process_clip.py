@@ -146,6 +146,7 @@ def process_clip(
     from sam_3d_body import load_sam_3d_body, SAM3DBodyEstimator
     from tools.build_detector import HumanDetector
     from tools.skeleton_constraints import constrain_clip  # branch: bone-constraints
+    from tools.hand_crops import annotate_clip  # branch: hands
 
     _emit(on_progress, "loading", "Loading the motion model", 0.0)
     device = torch.device("cuda")
@@ -287,9 +288,24 @@ def process_clip(
               f"{r['n_frames']} frames carry an uncertain joint")
     # -----------------------------------------------------------------------
 
+    # ---- hand/foot video crops + per-hand confidence (branch `hands`) -------
+    # Runs after the bone constraint because it reads that stage's per-joint
+    # `bone_length_confidence` at the wrist. Rects come from the detector's own
+    # wrist/ankle keypoints and are normalized to [0,1] against the real
+    # post-rotation frame size. See tools/hand_crops.py for why the answer to
+    # "articulated 3D hands" is measured-no and the crop is the product.
+    crop_report = annotate_clip(
+        per_frame, raw_detections, sorted(confident_track_ids), frame_width, frame_height
+    )
+    for tid, r in crop_report.items():
+        print(f"  crops, track {tid}: hands {r['n_hand_rects']}/{r['n_frames']} frames, "
+              f"feet {r['n_foot_rects']}/{r['n_frames']} frames")
+    # -----------------------------------------------------------------------
+
     return {
         "refused": False,
         "bone_length_report": bone_report,
+        "crop_report": crop_report,
         "sample_times_s": np.array(sample_times_s, dtype=np.float64),
         "per_frame": per_frame,  # list of {track_id: person_dict}, one per sample time
         "raw_detections": raw_detections,
