@@ -40,6 +40,16 @@ app = modal.App(APP_NAME)
 weights = modal.Volume.from_name("stepwise-weights", create_if_missing=True)
 WEIGHTS_DIR = "/weights"
 
+# evaluation/clips.yaml is the manifest (versioned); the actual video bytes
+# live only here, fetched by evaluation/fetch.py. See evaluation/README.md.
+eval_clips = modal.Volume.from_name("stepwise-eval", create_if_missing=True)
+CLIPS_DIR = "/clips"
+
+# Pipeline output (npz per clip) -- separate from weights/eval so a results
+# wipe never risks the multi-GB downloads.
+results = modal.Volume.from_name("stepwise-results", create_if_missing=True)
+RESULTS_DIR = "/results"
+
 # Modal resolves every Secret referenced anywhere in the app at load time, so a
 # missing 'huggingface' secret would block even functions that never touch it
 # (verify_gpu, for one). Degrade gracefully: stage 1 stays runnable before the
@@ -85,6 +95,18 @@ cv_image = (
         "torch==2.5.1+cu124",
         "torchvision==0.20.1+cu124",
         extra_index_url="https://download.pytorch.org/whl/cu124",
+    )
+    .run_commands(
+        # onnxruntime-gpu doesn't vendor cuDNN/cuBLAS itself -- it dlopens
+        # them at CUDA-session-creation time, and silently drops
+        # CUDAExecutionProvider from get_available_providers() if it can't
+        # find them (no error; verify_cv_stack's own assertion is what caught
+        # this). torch's pip install above already pulled in nvidia-cudnn-cu12
+        # etc. as its own dependencies, but pip doesn't put them on the
+        # system linker path -- register every nvidia-*-cu12 package's lib/
+        # dir with ldconfig so any process can find them, not just torch.
+        "python3 -c \"import glob; print('\\n'.join(glob.glob('/usr/local/lib/python3.11/site-packages/nvidia/*/lib')))\" "
+        "> /etc/ld.so.conf.d/nvidia-pip.conf && ldconfig",
     )
     .pip_install(
         # From setup_env.sh's Step 4, minus smplx/chumpy (unused -- no SMPL-X
@@ -145,8 +167,10 @@ cv_image = (
     .run_commands(
         # --no-build-isolation: needs torch already installed to compile
         # against. --no-deps: its own requirements.txt pulls in stale pins
-        # that fight the ones above.
-        "pip install 'git+https://github.com/facebookresearch/detectron2.git@a1ce2f9' "
+        # that fight the ones above. CC/CXX: same clang-autodetection issue
+        # as lap above -- this image only has gcc/g++.
+        "CC=gcc CXX=g++ pip install "
+        "'git+https://github.com/facebookresearch/detectron2.git@a1ce2f9' "
         "--no-build-isolation --no-deps",
     )
     # Mounted at container start, not baked into the image layer -- editing
@@ -213,6 +237,67 @@ def verify_cv_stack():
         "cuda": torch.version.cuda,
         "ort_providers": ort.get_available_providers(),
         "one_frame_ms": round(dt * 1000, 1),
+    }
+
+
+# Modal's published on-demand rates as of 2026-09 (docs/PRD.md G7: measure,
+# don't trust published FPS/cost figures -- this is our own input to that
+# math, not a vendor claim about the pipeline itself).
+GPU_HOURLY_USD = {"L40S": 1.95, "A10G": 1.10, "T4": 0.59}
+
+
+@app.function(
+    image=cv_image,
+    gpu=GPU_TIER,
+    volumes={WEIGHTS_DIR: weights, CLIPS_DIR: eval_clips, RESULTS_DIR: results},
+    timeout=3600,
+)
+def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1):
+    """Stage 5: the week-one deliverable. One real clip from evaluation/clips.yaml,
+    through RTMO+ByteTrack -> SAM3DBodyEstimator, all detected dancers (docs/PRD.md
+    section 5's multi-dancer MVP), saved to the results Volume for stage 6 (export).
+    """
+    import sys
+    import time
+
+    sys.path.insert(0, "/app/fast-sam-3d-body")
+    from process_clip import process_clip, save_clip_result
+
+    video_path = f"{CLIPS_DIR}/{clip_id}.mp4"
+    checkpoint_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/model.ckpt"
+    mhr_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
+
+    t0 = time.time()
+    result = process_clip(
+        video_path=video_path,
+        checkpoint_path=checkpoint_path,
+        mhr_path=mhr_path,
+        frames_dir=f"/tmp/{clip_id}_frames",
+        fps=fps,
+        max_seconds=max_seconds,
+        bbox_thr=bbox_thr,
+    )
+    wall_s = time.time() - t0
+
+    out_path = f"{RESULTS_DIR}/{clip_id}.npz"
+    save_clip_result(result, out_path)
+    results.commit()
+
+    cost = wall_s / 3600 * GPU_HOURLY_USD.get(GPU_TIER, 0.0)
+    print(
+        f"\nSAVED {out_path}\n"
+        f"wall clock: {wall_s:.1f}s  pipeline-internal: {result['elapsed_s']:.1f}s\n"
+        f"peak VRAM: {result['peak_vram_bytes'] / 1e9:.2f} GB\n"
+        f"frames: {result['n_frames_ok']}/{result['n_frames_total']} reconstructed\n"
+        f"estimated cost at ${GPU_HOURLY_USD.get(GPU_TIER, 0.0)}/hr ({GPU_TIER}): ${cost:.4f}\n"
+        "(warm compute only -- excludes cold start, storage, retries, idle billing; see PRD G7)"
+    )
+    return {
+        "wall_s": wall_s,
+        "peak_vram_gb": round(result["peak_vram_bytes"] / 1e9, 2),
+        "n_frames_ok": result["n_frames_ok"],
+        "n_frames_total": result["n_frames_total"],
+        "estimated_cost_usd": round(cost, 4),
     }
 
 
