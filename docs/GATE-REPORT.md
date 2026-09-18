@@ -460,3 +460,31 @@ decisions — both are documented with their measurements in
 `tools/hand_crops.py` rather than silently assumed. E2 (the uncertain-limb
 render) is unaffected but now has a concrete worst case to design against:
 hands are `uncertain` essentially always.
+
+### 6. Four-axis licence read on the one candidate evaluated
+
+`docs/research/grounding-models.md` is not on this branch, but its method is:
+check **code licence, weights licence, assets required at inference, and
+training-data terms**, from the actual files, not the README. MediaPipe Hands
+(`hand_landmarker`) was the obvious candidate and was the tool used for the
+independent measurements above. It is **not adopted and not a dependency of
+anything in this repo** — it was run locally as a measuring instrument only.
+Had it been adopted, this is what the four axes say:
+
+| Axis | Verdict | Evidence |
+|---|---|---|
+| Code licence | **Apache-2.0, clean.** | `mediapipe-1.0.1.dist-info/licenses/LICENSE` is the verbatim Apache 2.0 text; `License-File: LICENSE` in METADATA. |
+| Weights licence | **NOT ESTABLISHED.** | The `hand_landmarker.task` bundle contains exactly two files, `hand_detector.tflite` and `hand_landmarks_detector.tflite`, and **zero licence strings anywhere in either** (grepped the raw bytes). The task page states a licence only for the documentation and code samples, not the bundle. The commonly-cited "Apache-2.0 weights" comes from third-party mirrors. Upstream issue google-ai-edge/mediapipe#6355 is an open request for exactly this artifact-bound licence/provenance record. This is the Depth-Anything-V2 pattern the grounding survey warned about: permissive repo, unstated weights. |
+| Assets at inference | **Fetched from Google at runtime, not vendored.** | The wheel bundles no model; the `.task` comes from `storage.googleapis.com/mediapipe-models/...`. A shipping pipeline would have to vendor and pin it, which is precisely the act the unstated weights licence does not authorise. |
+| Training-data terms | **Unverifiable.** | Published description is ~30K images: a 6K in-the-wild set, an **in-house collected 10K gesture set**, and synthetic renders. The in-house set's collection and consent terms are not published — and `docs/OPEN-DECISIONS.md` D8 already makes consent-to-process a live obligation for this product. |
+
+One extra obligation that would have applied and is easy to miss, found in the
+distributed `NOTICE` rather than any README: *"MediaPipe Tasks APIs send metrics
+about the performance and utilization of the APIs in your app to Google... You
+are responsible for obtaining informed consent from your app users about
+Google's processing of MediaPipe metrics data as required by applicable law."*
+
+**Verdict: disqualified on axis 2 alone, independently of the measurements.**
+Even if the finger pose had improved, the weights could not be shipped on
+today's published terms. The measurements above mean that question does not
+arise.
