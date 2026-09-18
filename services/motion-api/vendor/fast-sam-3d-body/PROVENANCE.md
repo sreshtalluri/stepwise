@@ -68,3 +68,13 @@ demo scripts).
   `on_progress` callback for job-status wiring, and `select_confident_tracks`/
   `refusal_reason_for` as pure, independently-testable decision logic (see
   `test_process_clip.py`).
+
+## Bone constraints (branch `bone-constraints`)
+
+- `tools/skeleton_constraints.py`: new file, not upstream. Per-frame anatomical
+  bone-length constraint over MHR's 127-joint hierarchy, plus the per-joint
+  confidence signal the suppression stage consumes. Pure numpy, no torch/CV
+  dependency; `test_skeleton_constraints.py` is its self-check.
+- `tools/process_clip.py`: one marked block at the end of `process_clip`
+  calling `constrain_clip` over the finished `per_frame` data, and one import.
+  Nothing else in the file changed.
