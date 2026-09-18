@@ -355,3 +355,114 @@ still marked OPEN there. The `CONFIDENT_MIN_FRAMES` threshold and the
 job-status "refused → failed" mapping are implementation judgment calls
 within the existing contract, not new product/design decisions of the kind
 OPEN-DECISIONS.md tracks — flagged above rather than silently assumed.
+
+## Shape addendum (2026-09-18): the estimated body shape now reaches the GLB
+
+Branch `shape-params` off `w4-jobservice`. Every number below was measured on
+real Modal hardware against the real `solo-01.npz` and the real exported GLBs —
+nothing here is reasoned from the source alone.
+
+**The bug.** `SAM3DBodyEstimator.process_one_image` returns `shape_params` (45)
+and `scale_params` (28) per person per frame, `process_clip.py` saves them into
+the npz, and `export_clip_gltf` then built its character with
+`Character.load_fbx(lod3.fbx)` and drove it with `skel_state` only. The 45-dim
+shape estimate was never applied, so every dancer was exported with the mean
+MHR body.
+
+**How shape is baked (there is no "apply shape" call in pymomentum).**
+`pymomentum-gpu==0.1.114.post0` exposes `Character.with_blend_shape()`, but that
+attaches a basis for the *solver* to drive through model parameters, and the
+only export entry point, `Character.save_gltf_from_skel_states(path, character,
+fps, skel_states)`, has no parameter channel to carry shape. The supported route
+is to bake the displacement into the character's rest mesh, which is exactly
+MHR's own two-stage pipeline (shape → rest verts → LBS), verified rather than
+assumed:
+
+- `mhr_model.pt` buffers `character_torch.blend_shape.base_shape` (18439, 3) and
+  `.shape_vectors` (45, 18439, 3) reproduce the model's own forward shape path
+  to **3.8e-5 cm**, so no guess about the 204-dim `model_parameters` layout is
+  needed. `base_shape` equals the zero-parameter forward output to 4.6e-5 cm.
+- Shape moves **only the mesh**: at shape=0 vs shape=median the rest joint
+  positions differ by 0.0000 cm and the `skel_state` scale column stays 1.0000.
+  Baking into the rest mesh therefore cannot conflict with the per-frame pose.
+- The shipped LOD is decimated (lod3: 4899 verts, lod4: 2461; only these two are
+  in the `stepwise-weights` Volume) while the basis is on the 18439-vert mesh.
+  Both are the same body in the same rest pose and units (cm): lod3's vertices
+  sit **0.2957 cm mean / 1.79 max** off the full-res surface. The shape
+  displacement is transferred by nearest full-res vertex, and the transfer was
+  validated in rest space where no alignment is needed:
+
+  | lod3 rest mesh → nearest point on | mean | max |
+  |---|---|---|
+  | MHR neutral surface (decimation floor) | 0.2972 cm | 1.79 cm |
+  | MHR **shaped** surface, shape ignored (the bug) | 0.3904 cm | 2.33 cm |
+  | MHR **shaped** surface, after transfer | 0.2959 cm | 1.66 cm |
+
+  i.e. the transfer puts the LOD back on the estimated body to within the
+  decimation floor. A guard in `export_clip_gltf` refuses to export if that
+  nearest-neighbour mean ever exceeds 1.0 cm (mismatched asset or unit change).
+
+**Averaging: per-dim median, not mean.** Body shape is constant, so 291
+per-frame estimates are repeat measurements of one value, and they are noisy:
+per-dim std 0.199 mean / 0.459 max, per-frame L2 distance from the mean 1.42
+mean / 2.99 max against `||mean|| = 2.883` — the frame-to-frame scatter is about
+half the vector's own length, so averaging is doing real work (frame 0 alone
+would have been a coin flip). On this clip the estimator has no gross outliers:
+`||mean − median|| = 0.121` (4.2%) and `||mean − trimmed10%|| = 0.062`, so the
+three estimators agree. The median is used anyway: it costs the same, bounds any
+single partial-view or occluded frame's influence, and `solo-01` is the clean
+baseline clip — the frames this has to survive are on clips not yet run.
+
+**Measured effect, before → after (`solo-01`, track 4, 291/296 observed).**
+Same 4899 verts / 9794 tris / 206 nodes / 296 keyframes / 1,528,348 bytes:
+
+| | before | after |
+|---|---|---|
+| non-finite animation values (total / at frame 0) | 0 / 0 | **0 / 0** |
+| rest-mesh vertices moved > 0.1 mm | — | 67.3% |
+| rest-vertex displacement | — | mean 0.249 cm, median 0.086 cm, p99 1.88 cm, max 2.135 cm |
+| rest bbox span (m) | [1.30611, 1.72541, 0.39364] | [1.30611, 1.72920, 0.38405] |
+| chest slab depth (z span, y∈[1.2,1.4]) | 28.21 cm | 25.00 cm (−11.4%) |
+| hip slab depth (z span, y∈[0.9,1.1]) | 39.36 cm | 38.41 cm (−2.4%) |
+| vertex normals | — | recomputed; mean 1.29°, max 17.3° change |
+| animation channels (221,408 sampled values) | — | **max abs difference 0.000e+00** |
+
+The animation is bit-identical, which is the point: only the body changed. The
+GLB was re-loaded with trimesh (a third-party loader, not our own parser):
+4899 verts, 9794 faces, all finite, watertight. The NaN-frame-0 guard from
+`fix(export): NaN frame 0` is untouched and still passes — for contrast, the
+stale pre-fix `solo-01_track1.glb` still on the Volume has **384 non-finite
+values, all at frame 0**, which is what that bug looked like.
+
+**What this does NOT fix, stated plainly.** MHR's shape basis is a surface
+corrective: at this dancer's estimated shape it displaces the mesh 2.5 mm on
+average (2.1 cm max), and even a +3.0 on all 45 dimensions only reaches 1.4 cm
+mean / 13.2 cm max. Body *size* — limb lengths and overall scale — comes from
+the 28 `scale_params`, which are already inside the per-frame `skel_state` that
+was always exported (its scale column averages 0.9716, min 0.8925, so the
+skeleton is already dancer-scaled, and 118 of the GLB's animation channels are
+per-joint translations). So `scale_params` are deliberately **not** re-applied
+here: averaging and re-applying them on top of `skel_state` would double-count.
+
+That leaves a real, separate defect this pass did not fix and did not hide:
+because scale is re-estimated every frame, **bone lengths wobble frame to
+frame** — over the 291 observed frames, 65 bones longer than 5 cm have a
+coefficient of variation of 8.99% on average and 24.57% at worst (femur 42.29 cm
+± 1.51, foot 39.41 cm ± 1.75). A body does not change length while dancing, so
+a constant-size fit (averaged scale, per-frame pose) is the honest fix. It is
+not attempted here because it needs the MHR forward re-run with averaged scale
+plus per-frame pose, and the estimator does not expose the 204-dim
+`model_parameters` layout those would have to be packed into — inverting it by
+guess is exactly the "silently produces a warped mesh, not an error" failure
+this report exists to avoid. Flagged for a future pass, with the numbers above.
+
+**Contract.** No schema change. `MotionResult.persons[].shape_params` already
+means "one vector for the whole clip, estimated from well-observed frames"; the
+export now writes the exact baked vector into `{clip_id}.export-manifest.json`
+and `api.py` serves that instead of the first observed frame's sample, so the
+contract and the mesh can no longer disagree. The per-frame fallback remains for
+GLBs exported before this change.
+
+**OPEN-DECISIONS.md check.** Nothing here required deciding an item marked OPEN
+there. The frame-to-frame bone-length wobble above is a new measured finding,
+not one of its entries — reported, not silently assumed away.

@@ -259,6 +259,9 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
                 held = np.asarray(person["skel_state"], dtype=np.float64)
                 n_observed += 1
                 if shape_vec is None:
+                    # Fallback only, for GLBs exported before the shape bake: one
+                    # frame's estimate, which is a noisy sample of the body rather
+                    # than the clip-wide fit ShapeParams.source promises.
                     shape_vec = person["shape_params"].tolist()
 
             if held is None:
@@ -307,6 +310,10 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
 
             samples_out.append({"joints": joints_sample})
 
+        # Report the vector the exporter actually baked into this dancer's GLB
+        # (per-dim median over its observed frames) rather than a per-frame
+        # sample, so the contract and the mesh cannot disagree.
+        shape_vec = manifest.get("shape_params", {}).get(str(track_id), shape_vec)
         glb_name = manifest["glb_paths"].get(str(track_id))
         persons.append({
             "person_id": f"person_{track_id}",
