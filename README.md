@@ -47,13 +47,30 @@ fixture, so the frontend and the pipeline can be developed in parallel.
 
 ## Licensing
 
-This repository is **mixed-licence**. Code written here is MIT. It depends on
-Meta's SAM 3D Body, which is distributed under the **SAM License** — not an
-OSI-approved licence — and which carries obligations that pass through to
-anyone who receives this work, including restrictions on military/ITAR use and a
-citation requirement for research publications. Those materials live in a clearly
-marked directory with a verbatim copy of the agreement.
+This repository is **mixed-licence, and cannot be honestly labeled MIT or
+Apache-2.0 as a whole.** Code written here is MIT (`LICENSE`). It also depends
+on Meta's SAM 3D Body, distributed under the **SAM License** — a custom,
+non-OSI-approved licence, verbatim copy at `SAM Materials/LICENSE` — and the
+SAM-derived parts of this project stay under that licence forever, regardless
+of what licence the surrounding code carries. See `NOTICE` for the short
+version.
 
-`docs/LICENSES.md` maps every dependency. The detector is RTMO (Apache-2.0) via
-rtmlib, deliberately chosen over Ultralytics YOLO because AGPL-3.0 and the SAM
-License cannot be combined in one program.
+The SAM License carries obligations that pass through to anyone who receives
+this work:
+
+- It **prohibits** use for ITAR-controlled purposes or military/warfare,
+  nuclear, espionage, or illegal-weapons end uses.
+- It requires acknowledging the SAM Materials **if you publish research
+  results** produced using them — this applies to research papers, not to
+  running stepwise as a hosted product.
+- Meta may amend the licence unilaterally at any time; continued use counts
+  as accepting the amendment.
+
+Making this repository public is our choice, not something the licence
+requires.
+
+`docs/LICENSES.md` maps every dependency and its obligations in full,
+including the MHR body-model assets, whose licence has not yet been verified
+(it ships inside a separate `assets.zip` download). The detector is RTMO
+(Apache-2.0) via rtmlib, deliberately chosen over Ultralytics YOLO because
+AGPL-3.0 and the SAM License cannot be combined in one program.
