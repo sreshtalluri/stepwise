@@ -151,7 +151,13 @@ cv_image = (
         # tensorrt-cu12*: rtmlib has no TensorRT branch and G4 skips
         # TensorRT in the gate entirely.
         "onnx",
-        "onnxruntime-gpu",
+        # Pinned: unpinned (1.30.0 as of 2026-09) requires cuDNN 9 + CUDA 13.
+        # This image is pinned to CUDA 12.4 (G3 -- Detectron2 compiles
+        # against exactly that toolkit), so the newest onnxruntime-gpu fails
+        # at CUDA-session-creation time with "Require cuDNN 9.* and CUDA
+        # 13.*" and silently falls back to CPU. 1.20.2 is the last release
+        # in the CUDA-12 era.
+        "onnxruntime-gpu==1.20.2",
     )
     .pip_install(
         # --no-deps: rtmlib's own requires_dist lists plain "onnxruntime"

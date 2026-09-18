@@ -51,7 +51,10 @@ pip install 'git+https://github.com/facebookresearch/detectron2.git@a1ce2f9' \
 # Step 8: Install ONNX + ONNXRuntime CUDA (for RTMO; no TensorRT -- rtmlib has
 # no TensorRT branch, and G4 skips TensorRT in the gate entirely)
 echo "=== Installing ONNX + ONNXRuntime CUDA ==="
-pip install onnx onnxruntime-gpu
+# onnxruntime-gpu pinned: unpinned (1.30.0 as of 2026-09) requires cuDNN 9 +
+# CUDA 13, incompatible with this image's CUDA 12.4 (Detectron2 needs that
+# exact toolkit). 1.20.2 is the last release in the CUDA-12 era.
+pip install onnx onnxruntime-gpu==1.20.2
 
 # Step 8b: RTMO + ByteTrack for detection/tracking.
 # --no-deps on rtmlib: its own requires_dist lists plain "onnxruntime" (CPU),
