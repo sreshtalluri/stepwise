@@ -178,6 +178,29 @@ A learner asks two different questions, and the design answers both at once rath
 └──────────────────────────────┘
 ```
 
+## 7a2. Choosing a dancer (MVP)
+
+Multiple dancers are reconstructed and rendered in the MVP (see `docs/PRD.md`).
+The learner picks whose body they are learning from.
+
+- **Default:** the dancer nearest the frame centre with the highest coverage and
+  confidence. Usually the one the camera framed deliberately.
+- **Switching:** one tap. The lesson re-anchors to that person's body; counts and
+  parts are unchanged, because they belong to the dance rather than the dancer.
+- **Colour:** each dancer gets one of the four dancer colours, which differ in
+  both hue and lightness so they survive colour-vision differences and sunlight.
+  Only the *selected* dancer is saturated; the others render in a muted neutral
+  so the screen never has two competing accents.
+- **On phone:** a compact row of dancer chips above the count strip, not a
+  dropdown — one tap, not two.
+- **At a crossing:** if track confidence collapses where dancers overlap, mark
+  that span uncertain on both. **Never silently swap identities** — a confident
+  wrong body is the worst failure this product can produce.
+
+Not in the MVP, and deliberately so: cross-dancer consensus, the sync check, the
+formation view, and "which one is me". Those are v2 (§ v2 in the PRD) and are
+the expensive logic — the reconstruction itself is nearly free.
+
 ## 7b. Compare mode — two angles at once (D4)
 
 **Off by default**, so the simple case stays simple. Turning it on shows a second angle alongside the first, both driven by the same clock:
