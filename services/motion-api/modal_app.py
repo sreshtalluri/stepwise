@@ -486,10 +486,14 @@ gltf_image = (
 @app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights}, timeout=600)
 def inspect_pymomentum():
     """Stage 6a: what does pymomentum-gpu's Character / glTF export API
-    actually look like, empirically -- the PRD's function name
-    (save_gltf_from_skel_states) was renamed upstream to
-    save_gltf_with_skel_states in Sep 2025 (facebookresearch/momentum#569),
-    which is exactly the kind of drift 'measure, don't trust' exists to catch.
+    actually look like, empirically. A quick web check suggested the PRD's
+    function name (save_gltf_from_skel_states) was renamed upstream to
+    save_gltf_with_skel_states in Sep 2025 (facebookresearch/momentum#569) --
+    that PR exists, but this pinned release (0.1.114.post0) still ships the
+    original name, so the PRD was actually right and the web search that
+    flagged a rename was checking a newer unreleased state. Recorded here
+    because "measure, don't trust" cuts both ways: don't trust a claimed fix
+    either, without checking what's actually installed.
     Also: does loading one of the LOD fbx files from the separate assets.zip
     actually work, and what does the resulting Character expose (joint count/
     names) -- needed to check it lines up with the bundled mhr_model.pt's
@@ -504,34 +508,113 @@ def inspect_pymomentum():
     print("\nCharacter members:")
     print([m for m in dir(pym_geo.Character) if not m.startswith("_")])
 
-    save_fn = getattr(pym_geo, "save_gltf_with_skel_states", None) or getattr(
-        pym_geo, "save_gltf_from_skel_states", None
+    # Both save_gltf_from_skel_states and load_fbx showed up in
+    # dir(pym_geo.Character), not dir(pym_geo) -- they are attached to the
+    # Character class (pybind11 def_static bindings: callable without an
+    # instance, e.g. Character.load_fbx(path), but still class-scoped, not
+    # module-level functions). The Sep 2025 rename to
+    # save_gltf_with_skel_states (facebookresearch/momentum#569) evidently
+    # has not shipped in pymomentum-gpu==0.1.114.post0 -- the PRD's original
+    # name is the one actually installed.
+    save_fn = getattr(pym_geo.Character, "save_gltf_with_skel_states", None) or getattr(
+        pym_geo.Character, "save_gltf_from_skel_states", None
     )
-    print(f"\nsave_gltf function found: {save_fn}")
+    print(f"\nsave_gltf function found on Character: {save_fn}")
     if save_fn is not None:
         print(f"docstring: {save_fn.__doc__}")
 
     lod_path = f"{WEIGHTS_DIR}/mhr-assets/lod3.fbx"
-    print(f"\nloading Character from {lod_path}")
-    load_fn = None
-    for candidate in ("load_fbx", "load_fbx_character", "load_gltf", "load_gltf_character"):
-        if hasattr(pym_geo, candidate):
-            load_fn = getattr(pym_geo, candidate)
-            print(f"using loader: {candidate}")
-            break
-    if load_fn is None:
-        return {"error": "no obvious fbx/gltf loader on pymomentum.geometry", "members": dir(pym_geo)}
-
-    character = load_fn(lod_path)
+    print(f"\nloading Character from {lod_path} via Character.load_fbx")
+    character = pym_geo.Character.load_fbx(lod_path)
     skeleton = character.skeleton
     print(f"joint count: {skeleton.size}")
     print(f"joint names (first 20): {list(skeleton.joint_names)[:20]}")
+    has_mesh_attr = character.has_mesh
+    print(f"has_mesh: {has_mesh_attr() if callable(has_mesh_attr) else has_mesh_attr}")
 
     return {
         "save_fn_name": save_fn.__name__ if save_fn else None,
-        "load_fn_name": load_fn.__name__,
         "joint_count": skeleton.size,
+        "joint_names": list(skeleton.joint_names),
     }
+
+
+@app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results}, timeout=600)
+def export_neutral_pose_smoke_test():
+    """Stage 6b: does the export MECHANISM work at all -- Character loaded
+    from a LOD fbx, skel_state from the bundled MHR TorchScript model, and
+    Character.save_gltf_from_skel_states -- independent of whether it is
+    driven by real per-frame video reconstruction yet.
+
+    Deliberately narrow: calls the bundled mhr_model.pt's own forward()
+    directly with a neutral (all-zero) pose, not through SAM3DBodyEstimator.
+    Driving this from real per-frame estimator output needs one more piece
+    this does not yet do: sam_3d_body/models/heads/mhr_head.py's
+    _mhr_forward_core computes exactly this skel_state internally (see its
+    `curr_skinned_verts, curr_skel_state = self.mhr(...)` call) but only
+    exposes derived, already-transformed values in the estimator's public
+    output (pred_joint_coords is curr_skel_state's translation chunk scaled
+    by 0.01; joint_global_rots is its quaternion chunk converted to rotation
+    matrices) -- reconstructing skel_state from those risks a sign/unit bug
+    that would only show up as a warped mesh. The correct fix is a small,
+    additive change to the vendored copy of that file to also return
+    curr_skel_state directly, not a reconstruction here. Not done in the
+    gate itself -- see the gate report.
+    """
+    import numpy as np
+    import pymomentum.geometry as pym_geo
+    import torch
+
+    mhr_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
+    print(f"loading {mhr_path}")
+    mhr = torch.jit.load(mhr_path, map_location="cpu")
+    mhr.eval()
+
+    # Shapes from the buffer inspection in inspect_mhr: blend_shape.shape_vectors
+    # is (45, 18439, 3) -> 45 shape params; face_expressions_model.shape_vectors
+    # is (72, ...) -> 72 expression params; parameter_transform.parameter_transform
+    # is (889, 249) -> 249-dim model_parameters (pose+scale).
+    # model_params is internally concatenated with a 45-dim zeros vector
+    # (matching shape_params) before hitting a 249-dim parameter_transform --
+    # confirmed empirically: passing 249 here raised "einsum(): subscript n
+    # has size 294 ... does not broadcast with previously seen size 249"
+    # (249 + 45 = 294). So model_params itself is 204-dim, not 249.
+    shape_params = torch.zeros(1, 45)
+    model_params = torch.zeros(1, 204)
+    expr_params = torch.zeros(1, 72)
+    with torch.no_grad():
+        verts, skel_state = mhr(shape_params, model_params, expr_params, False)
+    print(f"verts: {tuple(verts.shape)}, skel_state: {tuple(skel_state.shape)}")
+
+    lod_path = f"{WEIGHTS_DIR}/mhr-assets/lod3.fbx"
+    character = pym_geo.Character.load_fbx(lod_path)
+    print(f"character joints: {character.skeleton.size}")
+
+    # save_gltf_from_skel_states signature (confirmed empirically via
+    # inspect_pymomentum): (path, character, fps, skel_states: (F,J,8) f32,
+    # markers=None, options=None). One repeated frame -> a valid, if static,
+    # animation clip, sufficient to prove the mechanism.
+    n_frames = 2
+    # skel_state is (1, 127, 8) -- batch dim first, from a single forward()
+    # call. save_gltf_from_skel_states wants (F, J, 8), so drop the batch dim
+    # before repeating across frames, not after (repeating with it still
+    # there gives (F, 1, 127, 8), a shape save_gltf_from_skel_states does not
+    # expect).
+    single_frame = skel_state[0].numpy().astype(np.float32)  # (127, 8)
+    skel_states_np = np.repeat(single_frame[None, :, :], n_frames, axis=0)  # (F, 127, 8)
+    print(f"skel_states for export: {skel_states_np.shape}, dtype={skel_states_np.dtype}")
+
+    out_path = f"{RESULTS_DIR}/neutral_pose_smoke_test.glb"
+    pym_geo.Character.save_gltf_from_skel_states(
+        out_path, character, 15.0, skel_states_np
+    )
+    results.commit()
+
+    import os
+
+    size_bytes = os.path.getsize(out_path)
+    print(f"SAVED {out_path}, {size_bytes} bytes")
+    return {"out_path": out_path, "size_bytes": size_bytes}
 
 
 @app.local_entrypoint()
