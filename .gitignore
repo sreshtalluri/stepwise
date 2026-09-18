@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.pnp.*
+.venv/
+__pycache__/
+*.py[cod]
+
+# Builds
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Secrets — never commit these
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+
+# Model weights and assets (fetched, never committed)
+weights/
+checkpoints/
+*.pt
+*.onnx
+*.engine
+*.glb
+*.fbx
+assets.zip
+
+# Media and job artifacts
+uploads/
+outputs/
+*.mp4
+*.mov
+!docs/**/*.mp4
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+screenshots/
+qa-reports/
+.playwright-mcp/

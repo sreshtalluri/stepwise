@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Lesson viewer — desktop</title>
+<link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@700,800&f[]=switzer@400,500,600&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#F2EFE9;--sunk:#E7E1D6;--line:#D8D0C3;--stage:#1C1917;
+--ink:#221E1C;--muted:#6B635C;--faint:#9A9188;--accent:#E8952F;
+--fd:'Cabinet Grotesk',sans-serif;--fu:'Switzer',sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#cfc9be;font-family:var(--fu);color:var(--ink);padding:26px;display:flex;justify-content:center}
+.app{width:1180px;background:var(--paper);border-radius:16px;overflow:hidden;box-shadow:0 20px 60px -24px rgba(0,0,0,.45)}
+.top{display:flex;align-items:center;justify-content:space-between;padding:16px 22px;border-bottom:1px solid var(--line)}
+.title{font-family:var(--fd);font-weight:700;font-size:23px;letter-spacing:-.02em}
+.sub{font-size:13px;color:var(--muted);margin-top:2px}
+.share{border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:14px;font-weight:500;background:var(--sunk)}
+.body{display:grid;grid-template-columns:190px 1fr 172px;min-height:430px}
+.rail{padding:18px 16px}
+.rail.l{border-right:1px solid var(--line)}
+.rail.r{border-left:1px solid var(--line)}
+.rlabel{font-size:12px;color:var(--faint);margin-bottom:10px}
+.part{padding:9px 10px;border-radius:9px;font-size:14.5px;font-weight:500;color:var(--muted);margin-bottom:2px}
+.part.on{background:var(--ink);color:var(--paper);font-weight:600}
+.add{font-size:13.5px;color:var(--muted);padding:9px 10px;border:1px dashed var(--line);border-radius:9px;margin-top:8px;text-align:center}
+.view{padding:8px 10px;font-size:14px;color:var(--muted);border-radius:8px;display:flex;justify-content:space-between;align-items:center}
+.view.on{background:var(--sunk);color:var(--ink);font-weight:600}
+.est{font-size:11px;color:var(--faint)}
+.stages{padding:18px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.stage{background:var(--stage);border:1px solid var(--line);border-radius:13px;height:330px;position:relative;overflow:hidden;box-shadow:inset 0 2px 14px rgba(0,0,0,.55)}
+.vl{position:absolute;top:10px;left:12px;font-size:11.5px;color:var(--faint)}
+.floor{position:absolute;left:0;right:0;bottom:0;height:104px;background:linear-gradient(to bottom,#252118,#2E2920)}
+.hz{position:absolute;left:0;right:0;bottom:104px;height:2px;background:rgba(216,208,195,.30)}
+.sh{position:absolute;bottom:58px;left:50%;transform:translateX(-50%);width:132px;height:19px;border-radius:50%;background:radial-gradient(ellipse,rgba(0,0,0,.66),transparent 72%)}
+svg.fig{position:absolute;bottom:50px;left:50%;transform:translateX(-50%)}
+.vig{position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 46%,rgba(18,16,15,.6) 100%)}
+.legend{grid-column:1/-1;font-size:12.5px;color:var(--muted);margin-top:-4px}
+.foot{border-top:1px solid var(--line);padding:14px 22px 20px}
+.pl{font-size:15px;font-weight:600;margin-bottom:10px}
+.counts{display:grid;grid-template-columns:repeat(8,1fr)}
+.c{text-align:center;font-family:var(--fd);font-variant-numeric:tabular-nums;color:var(--muted);font-weight:700;font-size:21px;padding-bottom:7px}
+.c.on{color:var(--ink);font-weight:800;font-size:40px;line-height:.92}
+.c.dim{color:#C4BCB0}
+.tks{display:grid;grid-template-columns:repeat(8,1fr)}
+.tk{height:1px;background:var(--line);margin:0 12px;position:relative}
+.tk.dim{background:#E3DCD0}
+.dot{position:absolute;top:-3.5px;left:50%;transform:translateX(-50%);width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.ctr{display:flex;align-items:center;gap:10px;margin-top:16px}
+.btn{border:1px solid var(--line);border-radius:11px;background:var(--sunk);padding:13px 20px;font-size:14.5px;font-weight:600}
+.btn.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.keys{margin-left:auto;font-size:12.5px;color:var(--faint)}
+.cap{text-align:center;font-size:12px;color:#5c564e;margin-top:10px;font-weight:500}
+</style></head><body>
+<div>
+<div class="app">
+  <div class="top">
+    <div><div class="title">Say So · chorus</div><div class="sub">Learning from your clip · 0:14 · one dancer</div></div>
+    <div class="share">Share lesson</div>
+  </div>
+  <div class="body">
+    <div class="rail l">
+      <div class="rlabel">Parts</div>
+      <div class="part">Part 1 · counts 1–8</div>
+      <div class="part on">Part 2 · counts 9–16</div>
+      <div class="part">Part 3 · counts 17–24</div>
+      <div class="part">Part 4 · counts 25–32</div>
+      <div class="add">+ Add a part here</div>
+    </div>
+    <div class="stages">
+      <div class="stage"><div class="vl">your clip · camera view</div>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#6a635b;font-size:13px">original video</div></div>
+      <div class="stage"><div class="vl">side · estimated view</div>
+        <div class="floor"></div><div class="hz"></div><div class="sh"></div>
+        <svg class="fig" width="168" height="236" viewBox="0 0 168 236">
+          <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#E8952F"/><stop offset="55%" stop-color="#E8952F"/>
+            <stop offset="55%" stop-color="#A3651F"/><stop offset="1" stop-color="#A3651F"/></linearGradient></defs>
+          <circle cx="84" cy="22" r="17" fill="url(#g)"/>
+          <path d="M69 42 h30 l8 64 h-46 z" fill="url(#g)"/>
+          <rect x="64" y="106" width="17" height="68" rx="8" fill="url(#g)"/>
+          <rect x="86" y="106" width="17" height="68" rx="8" fill="url(#g)"/>
+          <rect x="61" y="168" width="20" height="15" rx="6" fill="url(#g)"/>
+          <rect x="44" y="46" width="15" height="56" rx="7" fill="url(#g)" transform="rotate(16 51 46)"/>
+          <g transform="rotate(-20 110 48)">
+            <rect x="106" y="46" width="15" height="56" rx="7" fill="#7E7870" fill-opacity=".5"/>
+            <path d="M106 48 q3 12 0 24 q-3 12 0 26" fill="none" stroke="#B3ABA1" stroke-width="2" stroke-linecap="round"/>
+            <path d="M121 48 q-3 12 0 24 q3 12 0 26" fill="none" stroke="#B3ABA1" stroke-width="2" stroke-linecap="round"/>
+          </g>
+          <line x1="94" y1="174" x2="94" y2="196" stroke="#B3ABA1" stroke-width="3.5" stroke-dasharray="3 6" stroke-linecap="round"/>
+          <text x="99" y="196" fill="#9A9188" font-family="Switzer,sans-serif" font-size="11">foot not in frame</text>
+        </svg>
+        <div class="vig"></div></div>
+      <div class="legend">Solid means the app saw it. Sketchy means it is unsure. Dotted means it left the frame.</div>
+    </div>
+    <div class="rail r">
+      <div class="rlabel">Views</div>
+      <div class="view">Camera</div>
+      <div class="view on">Mirror</div>
+      <div class="view">Side <span class="est">est.</span></div>
+      <div class="view">Back <span class="est">est.</span></div>
+      <div class="view">Top <span class="est">est.</span></div>
+      <div class="view">Hands</div>
+      <div class="view">Feet</div>
+    </div>
+  </div>
+  <div class="foot">
+    <div class="pl">Part 2 · counts 9–16</div>
+    <div class="counts">
+      <div class="c dim">1</div><div class="c dim">2</div><div class="c">3</div><div class="c">4</div>
+      <div class="c on">5</div><div class="c">6</div><div class="c">7</div><div class="c">8</div></div>
+    <div class="tks"><div class="tk dim"></div><div class="tk dim"></div><div class="tk"></div><div class="tk"></div>
+      <div class="tk"><div class="dot"></div></div><div class="tk"></div><div class="tk"></div><div class="tk"></div></div>
+    <div class="ctr">
+      <div class="btn">0.5× speed</div><div class="btn on">Mirror on</div><div class="btn on">Loop 9–16</div>
+      <div class="keys">M mirror · L loop · S speed · space play · ←/→ step a count</div>
+    </div>
+  </div>
+</div>
+<div class="cap">Lesson viewer — desktop (1180px)</div>
+</div>
+</body></html>

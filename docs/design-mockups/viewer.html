@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson viewer — practice room</title>
+<link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@700,800&f[]=switzer@400,500,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F2EFE9; --paper-sunk:#E7E1D6; --line:#D8D0C3;
+    --stage:#1C1917; --stage-deep:#12100F;
+    --ink:#221E1C; --ink-muted:#6B635C; --ink-faint:#9A9188;
+    --accent:#E8952F;
+    --font-display:'Cabinet Grotesk',system-ui,sans-serif;
+    --font-ui:'Switzer',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#cfc9be;font-family:var(--font-ui);color:var(--ink);
+       display:flex;gap:28px;justify-content:center;align-items:flex-start;
+       padding:28px 16px;min-height:100dvh;flex-wrap:wrap}
+  .phone{width:390px;background:var(--paper);border-radius:28px;overflow:hidden;
+         box-shadow:0 18px 50px -20px rgba(0,0,0,.45);display:flex;flex-direction:column}
+  .caption{font-size:12px;color:#5c564e;text-align:center;margin-top:10px;font-weight:500}
+  .wrap{display:flex;flex-direction:column;align-items:center}
+
+  header{padding:16px 18px 10px}
+  .title{font-family:var(--font-display);font-weight:700;font-size:20px;letter-spacing:-.02em;line-height:1.1}
+  .sub{font-size:13px;color:var(--ink-muted);margin-top:3px}
+
+  .stage{background:var(--stage);border:1px solid var(--line);border-radius:14px;
+         margin:0 14px 10px;position:relative;overflow:hidden;
+         box-shadow:inset 0 2px 14px rgba(0,0,0,.55)}
+  .stage.tall{height:300px}
+  .stage.short{height:118px;display:flex;align-items:center;justify-content:center}
+  .viewlabel{position:absolute;top:10px;left:12px;font-size:11.5px;color:var(--ink-faint);letter-spacing:0}
+  .swap{position:absolute;top:8px;right:8px;background:rgba(242,239,233,.12);color:#EDE7DD;
+        border:1px solid rgba(242,239,233,.25);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:500}
+
+  /* floor + figure */
+  .floor{position:absolute;left:0;right:0;bottom:0;height:96px;
+         background:linear-gradient(to bottom,#221F1C 0%,#2A2622 100%)}
+  .floorline{position:absolute;left:0;right:0;bottom:96px;height:1px;background:rgba(216,208,195,.14)}
+  .shadow{position:absolute;bottom:52px;left:50%;transform:translateX(-50%);
+          width:120px;height:17px;border-radius:50%;
+          background:radial-gradient(ellipse,rgba(0,0,0,.62),transparent 72%)}
+  svg.figure{position:absolute;bottom:44px;left:50%;transform:translateX(-50%)}
+  .vignette{position:absolute;inset:0;pointer-events:none;
+            background:radial-gradient(ellipse at center,transparent 45%,rgba(18,16,15,.65) 100%)}
+
+  .legend{font-size:12px;color:var(--ink-muted);padding:0 16px 12px;line-height:1.45}
+
+  .partline{font-size:15px;font-weight:600;padding:2px 16px 8px;letter-spacing:-.01em}
+  .counts{display:grid;grid-template-columns:repeat(8,1fr);padding:0 12px;align-items:end}
+  .c{text-align:center;font-family:var(--font-display);font-variant-numeric:tabular-nums;
+     color:var(--ink-muted);font-weight:700;font-size:19px;padding-bottom:6px}
+  .c.on{color:var(--ink);font-weight:800;font-size:34px;line-height:.95}
+  .c.dim{color:#BEB6AA}
+  .ticks{display:grid;grid-template-columns:repeat(8,1fr);padding:0 12px;margin-top:2px}
+  .tk{height:1px;background:var(--line);margin:0 6px;position:relative}
+  .tk.dim{background:#E3DCD0}
+  .dot{position:absolute;top:-3px;left:50%;transform:translateX(-50%);
+       width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .loopnote{font-size:12px;color:var(--ink-muted);padding:9px 16px 0}
+
+  .transport{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;padding:14px 14px 18px}
+  .btn{height:88px;border:1px solid var(--line);border-radius:13px;background:var(--paper-sunk);
+       display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
+       font-size:15px;font-weight:600;color:var(--ink);letter-spacing:-.01em}
+  .btn small{font-weight:400;font-size:12px;color:var(--ink-muted)}
+  .btn.active{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  .btn.active small{color:#C9C2B7}
+
+  /* upload screen */
+  .drop{margin:14px;border:1.5px dashed var(--line);border-radius:16px;background:#EFEBE3;
+        padding:34px 20px;text-align:center}
+  .drop h2{font-family:var(--font-display);font-weight:700;font-size:23px;letter-spacing:-.02em}
+  .drop p{font-size:14px;color:var(--ink-muted);margin-top:8px;line-height:1.5}
+  .cta{margin-top:18px;background:var(--ink);color:var(--paper);border-radius:12px;
+       padding:15px 20px;font-weight:600;font-size:15px;display:inline-block}
+  .reqs{font-size:13px;color:var(--ink-muted);padding:4px 20px 0;line-height:1.7}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<div class="phone">
+  <header>
+    <div class="title">Say So — chorus</div>
+    <div class="sub">Learning from your clip · 0:14</div>
+  </header>
+
+  <div class="stage tall">
+    <div class="viewlabel">side · estimated view</div>
+    <div class="swap">Swap</div>
+    <div class="floor"></div><div class="floorline"></div>
+    <div class="shadow"></div>
+    <svg class="figure" width="150" height="212" viewBox="0 0 150 212">
+      <!-- solid body: observed -->
+      <circle cx="75" cy="20" r="15" fill="#E8952F"/>
+      <path d="M62 38 h26 l7 58 h-40 z" fill="#E8952F"/>
+      <rect x="58" y="96" width="15" height="62" rx="7" fill="#E8952F"/>
+      <rect x="77" y="96" width="15" height="62" rx="7" fill="#E8952F"/>
+      <rect x="56" y="152" width="17" height="14" rx="5" fill="#E8952F"/>
+      <!-- left arm: observed -->
+      <rect x="40" y="42" width="13" height="50" rx="6" fill="#E8952F" transform="rotate(16 46 42)"/>
+      <!-- right arm: UNCERTAIN — desaturated + sketchy outline -->
+      <g transform="rotate(-22 100 44)">
+        <rect x="96" y="42" width="13" height="50" rx="6" fill="#8A847C" fill-opacity=".45"
+              stroke="#9A9188" stroke-width="1.6" stroke-dasharray="5 2 7 3" stroke-linejoin="round"/>
+        <rect x="94.6" y="40.6" width="15.8" height="52.8" rx="7" fill="none"
+              stroke="#9A9188" stroke-width="1" stroke-dasharray="3 4" opacity=".75"/>
+      </g>
+      <!-- right foot: ABSENT — dotted stub -->
+      <line x1="84" y1="158" x2="84" y2="178" stroke="#9A9188" stroke-width="2.5"
+            stroke-dasharray="2.5 5" stroke-linecap="round"/>
+    </svg>
+    <div class="vignette"></div>
+  </div>
+
+  <div class="stage short">
+    <div class="viewlabel">your clip</div>
+    <div class="swap">Swap</div>
+    <div style="color:#6a635b;font-size:12px">original video</div>
+  </div>
+
+  <div class="legend">Solid means seen. Sketchy means unsure. Dotted means out of frame.</div>
+
+  <div class="partline">Part 2 · counts 9–16</div>
+  <div class="counts">
+    <div class="c dim">1</div><div class="c dim">2</div>
+    <div class="c">3</div><div class="c">4</div>
+    <div class="c on">5</div>
+    <div class="c">6</div><div class="c">7</div><div class="c">8</div>
+  </div>
+  <div class="ticks">
+    <div class="tk dim"></div><div class="tk dim"></div>
+    <div class="tk"></div><div class="tk"></div>
+    <div class="tk"><div class="dot"></div></div>
+    <div class="tk"></div><div class="tk"></div><div class="tk"></div>
+  </div>
+  <div class="loopnote">Counts 1–2 sit outside your loop, so they fade.</div>
+
+  <div class="transport">
+    <div class="btn">0.5×<small>speed</small></div>
+    <div class="btn active">Mirror on<small>tap to turn off</small></div>
+    <div class="btn active">Loop 9–16<small>part 2</small></div>
+  </div>
+</div>
+<div class="caption">Lesson viewer — phone portrait</div>
+</div>
+
+<div class="wrap">
+<div class="phone">
+  <header>
+    <div class="title">Learn a dance from any clip</div>
+    <div class="sub">See the steps from any angle, at any speed.</div>
+  </header>
+  <div class="drop">
+    <h2>Add your clip</h2>
+    <p>Drop a video here, or take one from your camera roll.</p>
+    <div class="cta">Choose a video</div>
+  </div>
+  <div class="reqs">
+    Works best with:<br>
+    One dancer, filmed from the front.<br>
+    Up to 60 seconds.<br>
+    Camera held still, no cuts.
+  </div>
+  <div class="stage short" style="margin-top:16px">
+    <div class="viewlabel">example</div>
+    <div style="color:#6a635b;font-size:12px">a finished lesson</div>
+  </div>
+  <div class="legend" style="padding-top:12px">
+    Nothing is uploaded until you choose a video. We only keep the clip while the lesson exists.
+  </div>
+</div>
+<div class="caption">Landing / upload</div>
+</div>
+
+</body>
+</html>
