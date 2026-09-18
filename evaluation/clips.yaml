@@ -20,27 +20,33 @@
 
 version: 1
 
+# RESOLUTION FINDING (2026-09-18): TikTok serves 576x1024 without a login, not
+# 1080p. The PRD's hand-size estimate assumed ~30px per hand at 1080p; at 576
+# wide it is closer to 15-20px. That makes the decision to show a video crop
+# rather than articulated 3D hands more clearly correct, not less.
+# Do not assume 1080p inputs anywhere in the pipeline.
+
 clips:
   # ---- core set: 10 clips matching the MVP assumption ----
   # one dancer, front camera, <=60s, steady, no cuts
 
   - id: solo-01
-    url: ""                      # TikTok/YouTube URL
+    url: "https://www.tiktok.com/t/ZP83Enx4b/"                      # TikTok/YouTube URL
     title: ""
-    duration_s: null
+    duration_s: 19.7
     tests: [baseline]            # what this clip is here to exercise
     why: "Clean easy case. If this fails, nothing else matters."
     rights: untested             # untested | personal-test-only | permission-granted
-    notes: ""
+    notes: "576x1024 @30fps. Downloaded 2026-09-18."
 
   - id: solo-02
-    url: ""
+    url: "https://www.tiktok.com/t/ZP83E7BJD/"
     title: ""
-    duration_s: null
+    duration_s: 32.5
     tests: [baseline, fast-motion]
     why: "Fast choreography. Motion blur is the known weak point of a per-frame model."
     rights: untested
-    notes: ""
+    notes: "576x1024 @30fps. Downloaded 2026-09-18."
 
   - id: solo-03
     url: ""
@@ -82,13 +88,13 @@ clips:
     notes: ""
 
   - id: solo-07
-    url: ""
+    url: "https://www.tiktok.com/t/ZP83ECgYC/"
     title: ""
-    duration_s: null
+    duration_s: 23.6
     tests: [floor-work]
     why: "Dancer goes to the floor. Breaks the standing-on-a-plane assumption."
     rights: untested
-    notes: ""
+    notes: "576x1022 @24fps. Downloaded 2026-09-18."
 
   - id: solo-08
     url: ""
@@ -155,6 +161,20 @@ clips:
       honesty design has failed.
     rights: untested
     notes: ""
+
+  - id: group-synced-01
+    url: "https://www.tiktok.com/t/ZP83En7tv/"
+    title: ""
+    duration_s: 33.1
+    tests: [multi-dancer, synced-group, sync-check]
+    why: >
+      TWO dancers performing the SAME choreography in sync. This is NOT a
+      violator - it is the v2 synced-group case. In the MVP it should be
+      handled gracefully (pick one dancer, or decline with a clear reason),
+      never averaged into a single mangled body. In v2 it exercises the sync
+      check and the error-only consensus. Useful now as a negative test.
+    rights: untested
+    notes: "Supplied by the builder 2026-09-18. 576x1024 @30fps. Downloaded 2026-09-18."
 
   # ---- violators: must be REFUSED, not processed ----
   # The MVP assumes one choreography per video. These prove it says no.
