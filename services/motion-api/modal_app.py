@@ -169,6 +169,44 @@ def inspect_weights():
     return {"files": found[:40], "count": len(found)}
 
 
+@app.function(image=base_image, volumes={WEIGHTS_DIR: weights}, timeout=600)
+def inspect_mhr():
+    """Stage 3b: what does the bundled MHR TorchScript file actually contain?
+
+    The PRD assumed MHR's LOD meshes (lod?.fbx, for glTF export) come only from
+    a separate ~190 MB GitHub release (assets.zip). A mhr_model.pt is already
+    bundled with the SAM 3D Body checkpoint -- this checks whether it is the
+    parametric TorchScript model only (per facebookresearch/MHR's own asset
+    list: mhr_model.pt is listed separately from lod?.fbx) or whether it
+    happens to carry mesh/LOD data too, before deciding assets.zip is still
+    required.
+    """
+    import torch
+
+    path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
+    print(f"loading {path}")
+    obj = torch.jit.load(path, map_location="cpu")
+
+    print("\n--- top-level code ---")
+    print(obj.code[:4000] if hasattr(obj, "code") else "(no .code)")
+
+    print("\n--- attributes / submodules / buffers ---")
+    for name, _ in obj.named_modules():
+        if name:
+            print(f"module   {name}")
+    for name, val in obj.named_buffers():
+        shape = tuple(val.shape)
+        print(f"buffer   {name:40s} {shape}")
+    for name, val in obj.named_parameters():
+        shape = tuple(val.shape)
+        print(f"param    {name:40s} {shape}")
+
+    print("\n--- methods ---")
+    print([m for m in dir(obj) if not m.startswith("_")])
+
+    return {"loaded": True}
+
+
 @app.local_entrypoint()
 def main():
     """Run the stages in order, stopping at the first failure."""
