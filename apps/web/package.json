@@ -1,0 +1,24 @@
+{
+  "name": "@stepwise/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "^16.3.5",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.7.3"
+  }
+}

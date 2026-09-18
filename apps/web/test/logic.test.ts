@@ -1,0 +1,69 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import { REVEAL_DURATION_MS, easeInOutCubic, revealAzimuth } from "../lib/reveal";
+import { isJobStatus, timeRemaining } from "../lib/jobStatus";
+
+test("the reveal is one full orbit that settles back at the front", () => {
+  assert.equal(revealAzimuth(0), 0);
+  assert.ok(Math.abs(revealAzimuth(REVEAL_DURATION_MS / 2) - 180) < 0.001);
+  // Settled: at and past the end the camera is back at the camera view.
+  assert.equal(revealAzimuth(REVEAL_DURATION_MS), 0);
+  assert.equal(revealAzimuth(REVEAL_DURATION_MS + 5000), 0);
+});
+
+test("the orbit is eased, not linear — DESIGN.md §7f", () => {
+  assert.equal(easeInOutCubic(0), 0);
+  assert.equal(easeInOutCubic(1), 1);
+  assert.equal(easeInOutCubic(0.5), 0.5);
+  // Slow out of the front: a quarter of the time covers well under a quarter
+  // of the turn.
+  assert.ok(easeInOutCubic(0.25) < 0.15);
+  // Monotonic — the camera never reverses mid-orbit.
+  let prev = -1;
+  for (let t = 0; t <= 1.0001; t += 0.01) {
+    const v = easeInOutCubic(t);
+    assert.ok(v >= prev, `eased value went backwards at t=${t}`);
+    prev = v;
+  }
+});
+
+test("time remaining stays loose and says nothing when it cannot know", () => {
+  assert.equal(timeRemaining({ state: "queued", progress: null }, 0), "Still in the queue.");
+  // Too early to extrapolate honestly.
+  assert.equal(timeRemaining({ state: "processing", progress: null }, 30000), null);
+  assert.equal(timeRemaining({ state: "processing", progress: 0.02 }, 30000), null);
+  assert.equal(timeRemaining({ state: "processing", progress: 0.5 }, 1000), null);
+  // 25% done after 60s → about 3 minutes left.
+  assert.equal(
+    timeRemaining({ state: "processing", progress: 0.25 }, 60000),
+    "About 3 minutes left.",
+  );
+  assert.equal(
+    timeRemaining({ state: "processing", progress: 0.5 }, 60000),
+    "About a minute left.",
+  );
+  assert.equal(
+    timeRemaining({ state: "processing", progress: 0.98 }, 60000),
+    "Nearly there.",
+  );
+  // Nothing to say once it is over — the reveal takes it from here.
+  assert.equal(timeRemaining({ state: "succeeded", progress: 1 }, 99999), null);
+});
+
+test("job status guard rejects a malformed payload", () => {
+  const ok = {
+    schema_version: "1.0.0",
+    job_id: "job_1",
+    state: "processing",
+    stage_message: "Building the body — count 9 of 32",
+    progress: 0.3,
+    error: null,
+    retry_count: 0,
+  };
+  assert.ok(isJobStatus(ok));
+  assert.ok(!isJobStatus({ ...ok, state: "detection_complete" }));
+  assert.ok(!isJobStatus({ ...ok, stage_message: 42 }));
+  assert.ok(!isJobStatus(null));
+  assert.ok(!isJobStatus("queued"));
+});
