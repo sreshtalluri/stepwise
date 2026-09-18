@@ -440,9 +440,20 @@ average (2.1 cm max), and even a +3.0 on all 45 dimensions only reaches 1.4 cm
 mean / 13.2 cm max. Body *size* — limb lengths and overall scale — comes from
 the 28 `scale_params`, which are already inside the per-frame `skel_state` that
 was always exported (its scale column averages 0.9716, min 0.8925, so the
-skeleton is already dancer-scaled, and 118 of the GLB's animation channels are
-per-joint translations). So `scale_params` are deliberately **not** re-applied
-here: averaging and re-applying them on top of `skel_state` would double-count.
+skeleton is already dancer-scaled). So `scale_params` are deliberately **not**
+re-applied here: averaging and re-applying them on top of `skel_state` would
+double-count.
+
+That the GLB really carries them was checked rather than assumed, because the
+exporter writes only **2 scale channels for 127 joints** (97 rotation, 118
+translation), which looked like dropped size. It is not: replaying the GLB's own
+TRS animation down its node hierarchy at frame 100 reproduces the estimator's
+joint world positions to **1e-4 cm** and every bone longer than 5 cm to
+**0.0000 cm**, and skinning the GLB with its own joints/weights/inverse-bind
+matrices matches `pymomentum.skin_points` on the same frame to **1e-4 cm**
+(identical bounding box, 98.701 × 140.229 × 98.662 cm) even though 46 joints
+have a scale below 0.99 there. The exporter folds joint scale into the
+transforms it writes; nothing is lost.
 
 That leaves a real, separate defect this pass did not fix and did not hide:
 because scale is re-estimated every frame, **bone lengths wobble frame to
