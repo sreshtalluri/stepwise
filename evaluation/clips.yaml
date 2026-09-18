@@ -166,13 +166,15 @@ clips:
     url: "https://www.tiktok.com/t/ZP83En7tv/"
     title: ""
     duration_s: 33.1
-    tests: [multi-dancer, synced-group, sync-check]
+    tests: [multi-dancer, synced-group, identity-swap]
     why: >
-      TWO dancers performing the SAME choreography in sync. This is NOT a
-      violator - it is the v2 synced-group case. In the MVP it should be
-      handled gracefully (pick one dancer, or decline with a clear reason),
-      never averaged into a single mangled body. In v2 it exercises the sync
-      check and the error-only consensus. Useful now as a negative test.
+      TWO dancers performing the SAME choreography in sync. As of the
+      2026-09-18 scope revision this is an MVP case, not a v2 one: both dancers
+      should be reconstructed, rendered in different colours, and selectable.
+      What stays v2 is the consensus/sync-check logic that would use one dancer
+      to correct the other. Watch specifically for IDENTITY SWAPS where the two
+      dancers cross - the correct behaviour is to mark that span uncertain on
+      both, never to silently swap them.
     rights: untested
     notes: "Supplied by the builder 2026-09-18. 576x1024 @30fps. Downloaded 2026-09-18."
 
