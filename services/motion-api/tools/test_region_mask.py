@@ -76,6 +76,43 @@ UNITY_ISH = [
 ]
 
 
+# --- Convention D: the REAL MHR skeleton (facebook/sam-3d-body-dinov3's
+# bundled mhr_model.pt), captured 2026-09-18 by running
+# `modal_app.py::inspect_mhr_region_mapping` for real against the actual
+# gated weights. `l_`/`r_` prefixed, and critically: the forearm bone is
+# named "lowarm" (no "er"), which the original elbow matcher (checking only
+# "forearm"/"lowerarm") did not catch -- it raised RegionMappingError rather
+# than guess, per the honesty standard, and got fixed here instead of papered
+# over. Trimmed to the joints region_mask.py actually needs; the real
+# skeleton has 127 total (fingers, twist-correction joints, face) omitted.
+REAL_MHR = [
+    ("body_world", None), ("root", "body_world"),
+    ("c_spine0", "root"), ("c_spine1", "c_spine0"), ("c_spine2", "c_spine1"), ("c_spine3", "c_spine2"),
+    ("c_neck", "c_spine3"), ("c_head", "c_neck"),
+    ("l_clavicle", "c_spine3"), ("l_uparm", "l_clavicle"), ("l_lowarm", "l_uparm"),
+    ("l_wrist_twist", "l_lowarm"), ("l_wrist", "l_lowarm"),
+    ("r_clavicle", "c_spine3"), ("r_uparm", "r_clavicle"), ("r_lowarm", "r_uparm"),
+    ("r_wrist_twist", "r_lowarm"), ("r_wrist", "r_lowarm"),
+    ("l_upleg", "root"), ("l_lowleg", "l_upleg"), ("l_foot", "l_lowleg"), ("l_ball", "l_foot"),
+    ("r_upleg", "root"), ("r_lowleg", "r_upleg"), ("r_foot", "r_lowleg"), ("r_ball", "r_foot"),
+]
+
+
+def test_real_mhr_skeleton_resolves_every_canonical_joint():
+    names, parents = _build(REAL_MHR)
+    resolved = _check_all_resolved(names, parents, "real-mhr")
+    assert names[resolved["left_elbow"]] == "l_lowarm"
+    assert names[resolved["right_elbow"]] == "r_lowarm"
+    assert names[resolved["left_knee"]] == "l_lowleg"
+    assert names[resolved["left_shoulder"]] == "l_uparm"
+    assert names[resolved["left_collar"]] == "l_clavicle"
+    assert names[resolved["pelvis"]] == "body_world"
+    # Real bug caught against real data: "l_wrist_twist" is a corrective
+    # rotation-distribution bone, not the wrist -- it must lose to "l_wrist".
+    assert names[resolved["left_wrist"]] == "l_wrist"
+    assert names[resolved["right_wrist"]] == "r_wrist"
+
+
 def _check_all_resolved(names, parents, label):
     resolved = resolve_canonical_joints(names, parents)
     for c in CANONICAL_REQUIRED:

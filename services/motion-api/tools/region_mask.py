@@ -159,11 +159,16 @@ _CATEGORY_MATCHERS: dict[str, list] = {
         lambda j: _has(j, "shoulder") and _lacks(j, "clavicle", "collar"),
     ],
     "elbow": [
-        lambda j: _has(j, "forearm", "lowerarm"),
+        lambda j: _has(j, "forearm", "lowerarm", "lowarm"),
         lambda j: _has(j, "elbow"),
     ],
     "wrist": [
-        lambda j: _has(j, "wrist"),
+        # `_lacks(j, "twist")` matters: the real MHR skeleton has a distinct
+        # "l_wrist_twist" corrective bone (a rotation-distribution joint for
+        # skinning, not the wrist itself) immediately before the real
+        # "l_wrist" joint in traversal order -- without this exclusion the
+        # twist joint matches "wrist" first and wins.
+        lambda j: _has(j, "wrist") and _lacks(j, "twist"),
         lambda j: _has(j, "hand") and _lacks(j, "thumb", "index", "middle", "ring", "pinky", "finger", "tip"),
     ],
     "hip": [
