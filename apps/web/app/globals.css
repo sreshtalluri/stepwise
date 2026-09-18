@@ -1,0 +1,24 @@
+@import url('https://api.fontshare.com/v2/css?f[]=clash-grotesk@600,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0a0a0a;
+  --surface: #141414;
+  --surface-hover: #1a1a1a;
+  --border: #222;
+  --accent: #00d4ff;
+  --success: #44ff88;
+  --warning: #ffdd44;
+  --error: #ff4444;
+  --font-body: 'Instrument Sans';
+}
+* { box-sizing: border-box; }
+html, body { min-height: 100%; margin: 0; background: var(--bg); color: #f0f0f0; font-family: var(--font-body), system-ui, sans-serif; }
+body::before { content: ''; position: fixed; inset: 0; pointer-events: none; background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px), radial-gradient(circle at 18% 10%, rgba(0,212,255,.16), transparent 30%), radial-gradient(circle at 78% 26%, rgba(68,255,136,.08), transparent 28%); background-size: 48px 48px, 48px 48px, 100% 100%, 100% 100%; }
+button, input { font: inherit; }
+.mesh-panel { background: linear-gradient(180deg, rgba(20,20,20,.92), rgba(10,10,10,.94)); border: 1px solid #222; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,212,255,.03), 0 24px 90px rgba(0,0,0,.45); }
+.hud-label { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #888; }
+.cyan-glow { box-shadow: 0 0 24px rgba(0,212,255,.18), inset 0 0 24px rgba(0,212,255,.06); }

@@ -1,30 +1,34 @@
 # Dependencies
-frontend/node_modules/
+node_modules/
+apps/web/node_modules/
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+.venv/
 
-# Test screenshots
+# Test screenshots and browser artifacts
 screenshots/
-
-# Playwright
 .playwright-mcp/
+qa-reports/
 
 # Environment
 .env
 .env.local
 .env.*.local
+apps/web/.env.local
+apps/web/.env.*.local
 
 # IDE
 .vscode/
 .idea/
 
 # Next.js
-frontend/.next/
-frontend/out/
+apps/web/.next/
+apps/web/out/
+apps/web/tsconfig.tsbuildinfo
 
 # OS
 .DS_Store
@@ -33,10 +37,9 @@ Thumbs.db
 
 # Model weights
 *.task
-pipeline/models/mediapipe/
+services/mesh-api/models/
 
-# random
-flow.txt.claude/worktrees/
-
-# status
-STATUS.md
+# Agent/worktree state
+.claude/worktrees/
+.worktrees/
+worktrees/

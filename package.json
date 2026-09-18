@@ -1,0 +1,18 @@
+{
+  "name": "stepwise-mesh-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "packages/contracts"
+  ],
+  "scripts": {
+    "test": "npm run test:contracts && npm run test:api && npm run test:web",
+    "test:contracts": "npm --prefix packages/contracts test",
+    "test:api": "cd services/mesh-api && PYTHONPATH=src pytest -q",
+    "test:web": "npm --prefix apps/web test",
+    "build:web": "npm --prefix apps/web run build",
+    "dev:web": "npm --prefix apps/web run dev",
+    "dev:api": "cd services/mesh-api && PYTHONPATH=src uvicorn mesh_api.app:app --reload"
+  }
+}

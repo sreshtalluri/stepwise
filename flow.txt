@@ -1,52 +1,49 @@
-Current Architecture (as of 2026-03-26)
-========================================
+Stepwise Mesh Platform Restart Flow
+===================================
 
-PIPELINE (Python/FastAPI on Modal)
-──────────────────────────────────
-1. yt-dlp downloads video (TikTok, Instagram, YouTube)
-2. MediaPipe Pose Landmarker extracts 3D pose per frame
-3. Outputs DUAL coordinates per frame:
-   - joints: image-space coords (x=(lm.x-0.5)*1.8, y=(1-lm.y)*1.8)
-     → pixel-perfect alignment with video for ghost overlay
-   - joints_3d: world-blended coords (image pelvis position + world offsets in meters)
-     → correct 3D body proportions for perspective views
-4. Beat detection via librosa
-5. Difficulty scoring (per-frame joint velocities)
-6. Foot contact heuristic (flat/heel/toe/airborne/slide)
-7. Uploads pose JSON + video MP4 to Cloudflare R2
-8. Returns result with signed video URL
+CONTRACT
+────────
+packages/contracts/schema/mesh-result-v1.schema.json
+  - video metadata and signed playback URL
+  - people[] with persistent track IDs, colors, confidence, frame coverage, primary-dancer score
+  - mesh_asset per successful person: rest-pose body surface, faces, skin weights, joint hierarchy, shape params
+  - frames[] with bbox, 2D keypoints, 3D joints, pose params, global transforms, visibility/confidence
+  - analysis: beats, difficulty, body-part heatmap, foot contacts, path trails, step segments
+  - assets: mesh URLs, optional GLB, debug overlays
+  - model_report: adapters, runtime, warnings, license flags
 
-FRONTEND (Next.js 14 + React Three Fiber)
-──────────────────────────────────────────
-1. Landing page: paste URL → submit
-2. Processing status polling (GET /api/status/:jobId)
-3. Result fetched, transformed (joints array → Record, difficulty segments)
-4. Viewer with 8 presets:
-   - Presets 1,2,3,4,6,7,8: Three.js 3D skeleton using joints_3d (world-blended)
-   - Preset 5 (Ghost): 2D HTML Canvas overlay using joints (image-space)
-5. Timeline: beat markers, loop regions, speed control, keyboard shortcuts
-6. Audio sync with video playback speed
+MESH API
+────────
+POST /v1/jobs
+  → validate URL/upload_ref
+  → reject > MAX_VIDEO_SECONDS (120 default)
+  → enqueue job
+GET /v1/jobs/{job_id}
+  → queued/downloading/detecting/tracking/meshing/skinning/smoothing/analyzing/packaging/complete/failed
+GET /v1/jobs/{job_id}/result
+  → MeshResultV1 or partial MeshResultV1 if one person failed
+GET /v1/models
+  → detector/tracker/mesh adapter descriptors + license flags
 
-DATA FLOW
-─────────
-User pastes URL
-  → POST /api/process { url }
-  → Pipeline (Modal): download → extract → analyze → store
-  → GET /api/status/:jobId (poll until complete)
-  → GET /api/result/:jobId (transforms pipeline schema → frontend schema)
-  → Viewer renders
+PIPELINE
+────────
+1. Validate and transcode source video.
+2. Detect people through PersonDetector adapter.
+3. Track persistent IDs through PersonTracker adapter.
+4. Recover a full body mesh per track through MeshRecoverer adapter.
+5. Smooth identity, global trajectory, pose, and foot contacts.
+6. Analyze beats, difficulty, body-part activity, paths, and step segments.
+7. Package mesh assets, GLB/debug URLs, and inline metadata.
 
-KEY DESIGN DECISIONS
-────────────────────
-- Ghost overlay uses 2D Canvas (not Three.js) for pixel-perfect video alignment
-- Pipeline outputs both coordinate systems to serve different view needs
-- Video stored on R2 (no egress fees, ~$0.015/GB/month)
-- MediaPipe image-space landmarks for ghost, world-blended for 3D proportions
-- 8 curated view presets instead of modular grid (simpler, better UX)
-
-SMPL-X UPGRADE (in progress, feat/smplx-mannequin branch)
-──────────────────────────────────────────────────────────
-- Replace skeleton with holographic mannequin
-- 4D Humans for better pose estimation
-- Multi-person support
-- Design doc: docs/designs/smplx-mannequin.md
+WEB APP
+───────
+Landing/upload
+  → URL or upload reference, clip-length warning above 60s, hard max 120s
+Processing
+  → stage rail, progress, people detected, model/license warnings
+Viewer
+  → video + synchronized multi-person skinned mesh playback
+  → primary dancer focus, all-person view, person selector
+  → side-by-side, ghost, mirror, front/back, freeze/orbit, formation minimap
+  → timeline, beats, speed/loop, difficulty/body-part heatmaps, step markers, hand/foot paths
+  → X-ray skeleton as debug overlay only

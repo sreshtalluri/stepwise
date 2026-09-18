@@ -1,0 +1,10 @@
+{
+  "name": "@stepwise/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node scripts/generate-types.mjs",
+    "test": "node tests/mesh-result-v1.test.mjs"
+  }
+}

@@ -1,0 +1,198 @@
+{
+  "schema_version": "mesh-result-v1",
+  "video": {
+    "source_url": "https://example.com/no-people.mp4",
+    "playback_url": "https://assets.stepwise.local/signed/6684649861450992897.mp4",
+    "duration_seconds": 2.0,
+    "fps": 30.0,
+    "dimensions": {
+      "width": 1920,
+      "height": 1080
+    }
+  },
+  "people": [],
+  "frames": [
+    {
+      "frame_index": 0,
+      "timestamp_seconds": 0.0,
+      "people": []
+    },
+    {
+      "frame_index": 1,
+      "timestamp_seconds": 0.042,
+      "people": []
+    },
+    {
+      "frame_index": 2,
+      "timestamp_seconds": 0.083,
+      "people": []
+    },
+    {
+      "frame_index": 3,
+      "timestamp_seconds": 0.125,
+      "people": []
+    },
+    {
+      "frame_index": 4,
+      "timestamp_seconds": 0.167,
+      "people": []
+    },
+    {
+      "frame_index": 5,
+      "timestamp_seconds": 0.208,
+      "people": []
+    },
+    {
+      "frame_index": 6,
+      "timestamp_seconds": 0.25,
+      "people": []
+    },
+    {
+      "frame_index": 7,
+      "timestamp_seconds": 0.292,
+      "people": []
+    },
+    {
+      "frame_index": 8,
+      "timestamp_seconds": 0.333,
+      "people": []
+    },
+    {
+      "frame_index": 9,
+      "timestamp_seconds": 0.375,
+      "people": []
+    }
+  ],
+  "analysis": {
+    "beats": [
+      {
+        "timestamp_seconds": 0,
+        "strength": 1
+      },
+      {
+        "timestamp_seconds": 0.5,
+        "strength": 0.65
+      },
+      {
+        "timestamp_seconds": 1.0,
+        "strength": 0.82
+      }
+    ],
+    "difficulty": {
+      "overall_score": 0.58,
+      "timeline": [
+        {
+          "timestamp_seconds": 0.0,
+          "score": 0.35
+        },
+        {
+          "timestamp_seconds": 0.042,
+          "score": 0.467
+        },
+        {
+          "timestamp_seconds": 0.083,
+          "score": 0.583
+        },
+        {
+          "timestamp_seconds": 0.125,
+          "score": 0.7
+        },
+        {
+          "timestamp_seconds": 0.167,
+          "score": 0.35
+        },
+        {
+          "timestamp_seconds": 0.208,
+          "score": 0.467
+        },
+        {
+          "timestamp_seconds": 0.25,
+          "score": 0.583
+        },
+        {
+          "timestamp_seconds": 0.292,
+          "score": 0.7
+        },
+        {
+          "timestamp_seconds": 0.333,
+          "score": 0.35
+        },
+        {
+          "timestamp_seconds": 0.375,
+          "score": 0.467
+        }
+      ],
+      "body_parts": {
+        "arms": 0.72,
+        "legs": 0.54,
+        "core": 0.38
+      }
+    },
+    "foot_contacts": [],
+    "path_trails": [],
+    "step_segments": [
+      {
+        "label": "opening groove",
+        "start_seconds": 0,
+        "end_seconds": 0.8,
+        "difficulty": 0.45,
+        "primary_body_part": "core"
+      },
+      {
+        "label": "cross-body hit",
+        "start_seconds": 0.8,
+        "end_seconds": 1.6,
+        "difficulty": 0.7,
+        "primary_body_part": "arms"
+      }
+    ]
+  },
+  "assets": {
+    "mesh_asset_urls": [],
+    "debug_overlay_urls": []
+  },
+  "model_report": {
+    "detector": {
+      "name": "Mock YOLO Person Detector",
+      "version": "0.1.0",
+      "adapter": "mock-yolo",
+      "enabled": true
+    },
+    "tracker": {
+      "name": "Mock ByteTrack",
+      "version": "0.1.0",
+      "adapter": "mock-bytetrack",
+      "enabled": true
+    },
+    "mesh": {
+      "name": "Mock Stylized Humanoid Body",
+      "version": "0.2.0",
+      "adapter": "mock-humanoid-body",
+      "enabled": true
+    },
+    "runtime_ms": 3,
+    "warnings": [
+      "No people detected in the source video."
+    ],
+    "license_flags": [
+      {
+        "component": "ultralytics-yolo-adapter",
+        "license": "AGPL-3.0-or-enterprise",
+        "commercial_use": "restricted",
+        "note": "YOLO-style detection is replaceable; closed-source deployments need enterprise/commercial review."
+      },
+      {
+        "component": "sam-3d-body-mhr-candidate",
+        "license": "Apache-2.0 candidate",
+        "commercial_use": "allowed",
+        "note": "Production adapter should verify upstream model/code license before enabling."
+      },
+      {
+        "component": "4d-humans-hmr2-candidate",
+        "license": "research-review-required",
+        "commercial_use": "unknown",
+        "note": "Optional video adapter; install and license review required."
+      }
+    ]
+  }
+}

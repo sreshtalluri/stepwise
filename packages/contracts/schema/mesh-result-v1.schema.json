@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stepwise.local/contracts/mesh-result-v1.schema.json",
+  "title": "MeshResultV1",
+  "description": "Full-body skinned mesh result contract for multi-person Stepwise video analysis.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "video", "people", "frames", "analysis", "assets", "model_report"],
+  "properties": {
+    "schema_version": { "const": "mesh-result-v1" },
+    "video": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_url", "playback_url", "duration_seconds", "fps", "dimensions"],
+      "properties": {
+        "source_url": { "type": "string", "minLength": 1 },
+        "playback_url": { "type": "string", "minLength": 1 },
+        "duration_seconds": { "type": "number", "minimum": 0 },
+        "fps": { "type": "number", "exclusiveMinimum": 0 },
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": {
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "people": { "type": "array", "items": { "$ref": "#/$defs/person" } },
+    "frames": { "type": "array", "items": { "$ref": "#/$defs/frame" } },
+    "analysis": { "$ref": "#/$defs/analysis" },
+    "assets": { "$ref": "#/$defs/assets" },
+    "model_report": { "$ref": "#/$defs/model_report" }
+  },
+  "$defs": {
+    "vec2": { "type": "array", "prefixItems": [{ "type": "number" }, { "type": "number" }], "minItems": 2, "maxItems": 2 },
+    "vec3": { "type": "array", "prefixItems": [{ "type": "number" }, { "type": "number" }, { "type": "number" }], "minItems": 3, "maxItems": 3 },
+    "quat": { "type": "array", "prefixItems": [{ "type": "number" }, { "type": "number" }, { "type": "number" }, { "type": "number" }], "minItems": 4, "maxItems": 4 },
+    "mat4": { "type": "array", "items": { "type": "number" }, "minItems": 16, "maxItems": 16 },
+    "person": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["track_id", "color", "confidence", "visible_frame_ranges", "primary_dancer_score", "mesh_asset"],
+      "properties": {
+        "track_id": { "type": "string", "pattern": "^person-[a-z0-9-]+$" },
+        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "visible_frame_ranges": { "type": "array", "items": { "type": "array", "prefixItems": [{ "type": "integer" }, { "type": "integer" }], "minItems": 2, "maxItems": 2 } },
+        "primary_dancer_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "mesh_asset": { "anyOf": [{ "$ref": "#/$defs/mesh_asset" }, { "type": "null" }] },
+        "error": { "type": "string" }
+      }
+    },
+    "mesh_asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "format", "vertices", "normals", "faces", "skin_weights", "joint_hierarchy", "inverse_bind_matrices", "shape_parameters", "source_model"],
+      "properties": {
+        "asset_id": { "type": "string" },
+        "format": { "const": "inline-rest-mesh-v1" },
+        "vertices": { "type": "array", "minItems": 8, "items": { "$ref": "#/$defs/vec3" } },
+        "normals": { "type": "array", "items": { "$ref": "#/$defs/vec3" } },
+        "faces": { "type": "array", "minItems": 6, "items": { "type": "array", "prefixItems": [{ "type": "integer" }, { "type": "integer" }, { "type": "integer" }], "minItems": 3, "maxItems": 3 } },
+        "skin_weights": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["joints", "weights"], "properties": { "joints": { "type": "array", "items": { "type": "integer" } }, "weights": { "type": "array", "items": { "type": "number" } } } } },
+        "joint_hierarchy": { "type": "array", "minItems": 5, "items": { "type": "object", "additionalProperties": false, "required": ["name", "parent_index", "rest_position"], "properties": { "name": { "type": "string" }, "parent_index": { "anyOf": [{ "type": "integer" }, { "type": "null" }] }, "rest_position": { "$ref": "#/$defs/vec3" } } } },
+        "inverse_bind_matrices": { "type": "array", "items": { "$ref": "#/$defs/mat4" } },
+        "shape_parameters": { "type": "object", "additionalProperties": false, "required": ["height_m", "shoulder_width_m", "hip_width_m", "body_shape_coefficients"], "properties": { "height_m": { "type": "number", "exclusiveMinimum": 0 }, "shoulder_width_m": { "type": "number", "exclusiveMinimum": 0 }, "hip_width_m": { "type": "number", "exclusiveMinimum": 0 }, "body_shape_coefficients": { "type": "array", "items": { "type": "number" } } } },
+        "source_model": { "type": "string" }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frame_index", "timestamp_seconds", "people"],
+      "properties": {
+        "frame_index": { "type": "integer", "minimum": 0 },
+        "timestamp_seconds": { "type": "number", "minimum": 0 },
+        "people": { "type": "array", "items": { "$ref": "#/$defs/person_frame" } }
+      }
+    },
+    "person_frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["track_id", "bbox", "keypoints_2d", "joints_3d", "pose_params", "global_transform", "visibility", "tracking_confidence"],
+      "properties": {
+        "track_id": { "type": "string" },
+        "bbox": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
+        "keypoints_2d": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["name", "position", "confidence"], "properties": { "name": { "type": "string" }, "position": { "$ref": "#/$defs/vec2" }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 } } } },
+        "joints_3d": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["name", "position", "rotation", "confidence"], "properties": { "name": { "type": "string" }, "position": { "$ref": "#/$defs/vec3" }, "rotation": { "$ref": "#/$defs/quat" }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 } } } },
+        "pose_params": { "type": "array", "items": { "type": "number" } },
+        "global_transform": { "type": "object", "additionalProperties": false, "required": ["translation", "rotation", "scale"], "properties": { "translation": { "$ref": "#/$defs/vec3" }, "rotation": { "$ref": "#/$defs/quat" }, "scale": { "$ref": "#/$defs/vec3" } } },
+        "visibility": { "type": "number", "minimum": 0, "maximum": 1 },
+        "tracking_confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["beats", "difficulty", "foot_contacts", "path_trails", "step_segments"],
+      "properties": {
+        "beats": { "type": "array" },
+        "difficulty": { "type": "object" },
+        "foot_contacts": { "type": "array" },
+        "path_trails": { "type": "array" },
+        "step_segments": { "type": "array" }
+      }
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mesh_asset_urls", "debug_overlay_urls"],
+      "properties": { "mesh_asset_urls": { "type": "array" }, "glb_url": { "type": "string" }, "debug_overlay_urls": { "type": "array", "items": { "type": "string" } } }
+    },
+    "model_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detector", "tracker", "mesh", "runtime_ms", "warnings", "license_flags"],
+      "properties": { "detector": { "type": "object" }, "tracker": { "type": "object" }, "mesh": { "type": "object" }, "runtime_ms": { "type": "integer" }, "warnings": { "type": "array", "items": { "type": "string" } }, "license_flags": { "type": "array" } }
+    }
+  }
+}
