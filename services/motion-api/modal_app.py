@@ -287,7 +287,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     import time
 
     sys.path.insert(0, "/app/fast-sam-3d-body")
-    from process_clip import process_clip, save_clip_result
+    from tools.process_clip import process_clip, save_clip_result
 
     video_path = f"{CLIPS_DIR}/{clip_id}.mp4"
     checkpoint_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/model.ckpt"

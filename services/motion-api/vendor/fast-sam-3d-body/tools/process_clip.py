@@ -87,7 +87,10 @@ def process_clip(
     print(f"loading SAM 3D Body + MHR ({checkpoint_path}, {mhr_path})")
     model, model_cfg = load_sam_3d_body(checkpoint_path, device=device, mhr_path=mhr_path)
 
-    detector = HumanDetector(name="rtmo", device=device)
+    # rtmlib's BaseTool does `'cuda' in device`, which requires a plain str
+    # (a torch.device object isn't iterable) -- str(torch.device("cuda"))
+    # gives exactly "cuda", so this is safe, not just a truncation.
+    detector = HumanDetector(name="rtmo", device=str(device))
     estimator = SAM3DBodyEstimator(
         sam_3d_body_model=model, model_cfg=model_cfg, human_detector=detector
     )
