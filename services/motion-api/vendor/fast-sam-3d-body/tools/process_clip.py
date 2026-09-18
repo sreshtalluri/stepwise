@@ -267,6 +267,27 @@ def process_clip(
 
     elapsed_s = time.time() - t_start
     n_ok = sum(1 for f in per_frame if f)
+    # W9: temporal smoothing + suppression. Everything it needs is already in
+    # the arrays built above, so it is one call over the finished per-frame
+    # data -- see tools/smoothing.py. It runs LAST, after any per-frame
+    # anatomical correction, and it does not modify `per_frame`: the raw
+    # estimates stay in the npz next to the smoothed ones, because a smoothed
+    # value with honest flags is only checkable against the thing it smoothed.
+    from tools.smoothing import smooth_clip_result
+
+    smoothed = smooth_clip_result({
+        "per_frame": per_frame,
+        "raw_detections": raw_detections,
+        "sample_times_s": np.array(sample_times_s, dtype=np.float64),
+        "confident_track_ids": sorted(confident_track_ids),
+        "frame_width": frame_width,
+        "frame_height": frame_height,
+    })
+    for tid, track in smoothed.items():
+        s = track["stats"]
+        print(f"  smoothing track {tid}: {s['n_samples_observed']} observed, "
+              f"{s['n_samples_uncertain']} uncertain, {s['n_samples_absent']} absent "
+              f"joint-samples ({s['n_samples_implausible']} physically impossible)")
     print(
         f"done: {n_ok}/{len(per_frame)} frames reconstructed, "
         f"{elapsed_s:.1f}s total ({len(per_frame) / elapsed_s:.2f} fps), "
@@ -278,6 +299,7 @@ def process_clip(
         "refused": False,
         "sample_times_s": np.array(sample_times_s, dtype=np.float64),
         "per_frame": per_frame,  # list of {track_id: person_dict}, one per sample time
+        "smoothed": smoothed,  # W9: {track_id: smoothed skel_states + visibility/provenance}
         "raw_detections": raw_detections,
         "confident_track_ids": sorted(confident_track_ids),
         "faces": estimator.faces,
@@ -313,6 +335,12 @@ def save_clip_result(result: dict, out_path: str) -> None:
         refused=False,
         sample_times_s=result["sample_times_s"],
         per_frame=np.array(result["per_frame"], dtype=object),
+        # W9: smoothed motion + per-joint visibility/provenance, keyed by
+        # track id. Additive -- `per_frame` still holds the raw estimates, and
+        # the export stage keeps reading those until it is switched over.
+        # Read it back with `np.load(...)["smoothed"].item()`: a dict stored
+        # this way comes back as a 0-d object array, not a dict.
+        smoothed=np.array(result.get("smoothed", {}), dtype=object),
         raw_detections=np.array(result["raw_detections"], dtype=object),
         confident_track_ids=np.array(result["confident_track_ids"], dtype=np.int64),
         faces=result["faces"],

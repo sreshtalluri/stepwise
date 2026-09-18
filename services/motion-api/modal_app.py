@@ -130,6 +130,10 @@ cv_image = (
         "dill",
         "pandas",
         "rich",
+        # W9: the temporal smoothing chain (tools/smoothing.py). PRD section 4
+        # says use FilterPy rather than hand-rolling the Kalman filter; it
+        # pulls scipy, which the same module uses for quaternion algebra.
+        "filterpy",
         "hydra-core",
         "hydra-submitit-launcher",
         "hydra-colorlog",
@@ -202,6 +206,13 @@ cv_image = (
     # Mounted at container start, not baked into the image layer -- editing
     # the adapter doesn't force a rebuild of everything above it.
     .add_local_dir(VENDOR_DIR, remote_path="/app/fast-sam-3d-body")
+    # W9: the static MHR skeleton (parent indices + joint names) that
+    # tools/smoothing.py needs to work in parent-local space. Same file api.py
+    # reads; generated once by dump_joint_hierarchy below.
+    .add_local_file(
+        os.path.join(os.path.dirname(__file__), "mhr_joint_hierarchy.json"),
+        remote_path="/app/mhr_joint_hierarchy.json",
+    )
 )
 
 

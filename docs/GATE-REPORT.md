@@ -355,3 +355,210 @@ still marked OPEN there. The `CONFIDENT_MIN_FRAMES` threshold and the
 job-status "refused → failed" mapping are implementation judgment calls
 within the existing contract, not new product/design decisions of the kind
 OPEN-DECISIONS.md tracks — flagged above rather than silently assumed.
+
+## W9 addendum (2026-09-18): temporal smoothing + suppression
+
+Branch `smoothing`, off `w4-jobservice`. New module
+`services/motion-api/vendor/fast-sam-3d-body/tools/smoothing.py` (pure
+functions over per-frame arrays), its self-check `tools/test_smoothing.py`,
+and the verification harness `evaluation/measure_smoothing.py`. Wiring into
+`tools/process_clip.py` is one call plus the npz key. Every number below was
+measured by running the shipped code path against real `run_clip` output
+pulled from the `stepwise-results` Volume (`solo-01.npz`, `solo-07.npz`) —
+CPU only, no GPU session this pass.
+
+**1. The headline finding, which changed the design: most of the measured
+"jitter" is the dance.** The W9 brief's defect numbers are real and
+reproduce exactly (solo-01, 291 frames, 127 joints: per-frame mean joint
+displacement 0.1088 m, p90 0.1704, per-frame max single-joint 0.2692 m
+mean / 0.5831 m worst = 8.7 m/s). But a spectrum of the same world joint
+positions says **97% of the power is below 3 Hz, 1.1% above 5 Hz, and the
+flat-extrapolated white-noise share is ~0.1%**. Human voluntary limb motion
+is band-limited around 5 Hz, so at a 15 fps sample there is almost no
+high-frequency noise available to remove. Two independent noise estimators
+agree on the measurement noise floor — third-difference MAD and the 6–7.5 Hz
+PSD level, 2–5° per frame on real limb joints, median disagreement 12%
+(p90 29%) across the 163 of 381 joint-axes that have a noise floor above the
+model's floor at all; the other 218 are MHR's procedural twist/tongue/eye
+joints, whose local rotation is a deterministic function and genuinely does
+not jitter.
+
+This was not assumed, it was learned the hard way: an intermediate version
+of this module did drive mean jitter down 43.8% — and took **41% of the
+sub-3 Hz motion with it**, flattening accent peaks to 55% of their raw
+height. That version is why the module now carries explicit spectral and
+accent checks rather than a jitter number alone.
+
+**2. Smoothing: 384 independent FilterPy constant-velocity filters, and how
+rotations are handled.** One filter per unwrapped scalar, per
+`docs/PRD.md` §4: three per joint for rotation, three for the root's world
+translation. Quaternion components are never filtered as scalars. Instead
+each joint's *local, parent-relative* rotation is filtered in the tangent
+space of the filter's own nominal quaternion — the measurement handed to the
+filters is `z = log(q_nom⁻¹ · q_meas)`, three genuinely independent,
+structurally-unwrapped angles, and the filtered result is injected back
+multiplicatively (`q_nom · exp(δθ)`), so the output is a unit quaternion by
+construction and the q/−q hemisphere flip is invisible to the filter. There
+is a self-check for exactly that: flipping the sign of the input
+quaternions on 15 of 40 frames moves the resulting body by < 1e-6 m.
+
+Working in parent-local space needs forward kinematics, which is also where
+the skel_state format got pinned down empirically: `decompose → recompose`
+round-trips solo-01 to **5.7e-14 cm** in float64, and dividing by the
+*parent's* scale drops median bone-length variation from CV 0.015 to CV
+0.005 — that is the evidence that a momentum skel_state row is a joint's
+**world** transform composed as `p_child = p_parent + s_parent · R_parent ·
+offset`, not a local one.
+
+**3. Parameters, and the lag/sharpness trade.** R (measurement noise) and Q
+(process noise) are both measured per joint per axis from the clip itself,
+not hand-tuned: R from the third-difference noise floor, Q from the clip's
+own robust angular-acceleration scale. The steady-state gain that falls out
+is K ≈ 0.76 median (p10 0.61, p90 0.84) on the joint-axes that carry real
+noise, which — independently — is the gain whose first-order equivalent puts
+its −3 dB corner at **~5 Hz**, the top of human voluntary movement.
+Two different arguments, one filter. A constant-velocity model has *zero*
+steady-state lag on constant-velocity motion by construction; it lags only
+against acceleration, i.e. only at an accent, which is why it was chosen
+over the smoother everyone reaches for. Measured against that strawman
+(a centred moving average tuned to remove the *same* amount of jitter):
+
+| | Kalman + suppression | moving average, same jitter |
+|---|---|---|
+| accent peak speed retained (solo-01, 26 accents) | **95.4%** (worst 73.5%) | 68.6% (worst 29.6%) |
+| accent peak speed retained (solo-07, 31 accents) | **96.7%** (worst 46.5%) | 71.1% (worst 8.6%) |
+| timing lag | **0 frames** | 0–1 frames |
+| 0–3 Hz power kept (solo-01) | **101.1%** | 93.1% |
+| 5–7.5 Hz power kept (solo-01) | 82.1% | 25.4% |
+| 5–7.5 Hz power kept (solo-07) | 46.2% | 9.3% |
+
+Accents were located as local maxima of a median-filtered body-speed curve,
+so the noise the smoother is meant to remove cannot define its own target.
+
+**4. Jitter, before and after.** Small on solo-01 by design (see item 1) and
+larger on solo-07, which genuinely is noisier:
+
+| metric (world joint positions) | solo-01 raw → smoothed | solo-07 raw → smoothed |
+|---|---|---|
+| per-frame mean displacement | 0.1088 → **0.1034 m** (−5.0%) | 0.0675 → **0.0602 m** (−10.8%) |
+| per-frame mean, p90 | 0.1704 → 0.1622 (−4.8%) | 0.1294 → 0.1127 (−12.9%) |
+| per-frame max single-joint, mean | 0.2692 → 0.2658 (−1.3%) | 0.1818 → 0.1612 (−11.3%) |
+| per-frame max single-joint, p99 | 0.5683 → 0.6480 (+14.0%) | 0.7659 → 0.5290 (−30.9%) |
+| worst single-joint speed | 8.75 → 10.68 m/s | **14.61 → 10.49 m/s** (−28.2%) |
+
+The solo-01 tail going *up* is real and is explained, not hidden: a
+suppressed block holds its pose, and the frame where it re-acquires moves
+further than one frame's worth. Every such sample is flagged `uncertain` —
+over only the samples the result still **claims** as observed, solo-01 goes
+0.1047 → 0.1018 m mean and 0.5620 → 0.6225 m worst, solo-07 goes 0.0619 →
+0.0553 m mean and 0.5629 → 0.5219 m worst. Both numbers are reported by
+`evaluation/measure_smoothing.py`; neither is the one to quote alone.
+
+**5. Suppression — what got marked, and why.** Three inputs, never one:
+
+* **Detector evidence per region.** RTMO's 17 COCO keypoints are mapped onto
+  MHR's 127 joints by nearest anchored ancestor, so a suppressed wrist
+  suppresses all 22 joints of that hand (`docs/PRD.md` §4's conservative
+  region mapping). Confidence below 0.3 → `uncertain` / `low_confidence`;
+  a keypoint predicted outside the frame → `absent` / `out_of_frame`.
+  Measured on solo-01: RTMO's scores are strongly bimodal (median 0.98–1.00
+  when visible, below 0.1 when not), so the threshold sits in a dead zone —
+  anything in 0.2–0.5 gives the same answer.
+* **Physical plausibility of the measurement itself**, computed from the
+  estimator's output only, never from the filter's state: rejected if the
+  joint's world speed exceeds 8 m/s averaged over a 67 ms sample (past the
+  fastest hand speeds ever measured on a human, 9–11 m/s in a punch or a
+  throw) or its implied acceleration exceeds 150 m/s² ≈ 15 g (the top of
+  measured peak segment accelerations in sport; choreography is well below).
+* **Optional upstream correction magnitude.** If the `bone-constraints`
+  module lands and reports how far it had to move a joint, large corrections
+  become `low_confidence`. Optional by design — nothing here depends on that
+  branch.
+
+Then: conservative propagation to descendants, and hysteresis (degrade
+immediately, recover after 3 clean frames).
+
+solo-01 (37,592 joint-samples = 296 frames × 127 joints):
+
+| | count | share |
+|---|---|---|
+| `observed` | 33,751 | 89.8% |
+| `uncertain` (`low_confidence`) | 2,793 | 7.4% |
+| `absent` (`out_of_frame`) | 1,048 | 2.8% |
+| of which: measurements rejected as physically impossible | 69 | 0.18% |
+| filter updates refused by the per-block gate | 15 | — |
+| filter updates skipped because the detector could not see the region | 1,529 | — |
+
+The uncertain mass is concentrated where it should be: the fingers of
+whichever hand the wrist keypoint lost (l_index/l_thumb chains, ~50 frames
+each) and the face during the back-turn — which is `uncertain`, never
+`absent`, per §7h case 1. solo-07 (44,958 joint-samples): 95.2% observed,
+4.8% uncertain, 0 absent, 268 physically-impossible samples.
+
+Its four tracks also exercise the honest end of the scale: tracks 5 and 9
+were reconstructed on 21 and 14 of 354 frames, and come back 98% `uncertain`
+— today the exporter's forward-hold presents those same frames as a
+confident frozen body with no flag at all.
+
+**6. Skipping suppressed blocks, and the two things that broke first.** A
+suppressed block does not predict and does not update — it holds its last
+filtered pose, and after 0.2 s without evidence it restarts cold at its next
+real measurement. Both of those are the result of a measurement, not taste:
+
+* Coasting on the constant-velocity prediction through a gap (the textbook
+  answer) let joints with a real 25 rad/s angular velocity extrapolate up to
+  **177°** over three missing frames — inventing a flourish nobody observed.
+  A visible freeze is honest; that is not.
+* Gating a filter update on its *innovation against the filter's own
+  prediction* (also the textbook answer) deadlocks: a held block drifts from
+  the measurement, which inflates its own innovation, which keeps it held.
+  That locked solo-01's entire right leg into `uncertain` for all 296
+  frames. Both gates are now computed from the estimator's output alone,
+  which cannot form that loop.
+
+**7. What this hands the export stage (no export code touched).** The npz
+gains a `smoothed` key: per track, `skel_states` (F, 127, 8), `visibility`,
+`suppression`, `prov_observed`, `prov_interpolated`, and stats — alongside
+the untouched raw `per_frame`, because a smoothed value with honest flags is
+only checkable against the thing it smoothed. `export_clip_gltf`'s naive
+forward-hold and leading back-fill still run unchanged; what is now
+available to replace them is a per-sample answer to "is this a claim", which
+is the missing input for splitting the animation into segments rather than
+letting the player interpolate across a gap (`docs/PRD.md` §4's
+"missing GLB keyframes do not prevent interpolation" trap).
+
+**8. Unresolved, flagged rather than invented.**
+
+* **`docs/OPEN-DECISIONS.md` E3 (mesh-region masking) still gates whether any
+  of this is visible.** Per-joint `visibility` is now real data, but hiding a
+  bone does not hide its skinned surface — until E3 is resolved the flags
+  cannot be rendered, only counted. E2 (the uncertain-limb render) likewise
+  stays OPEN; this module produces its input, not its answer.
+* **`docs/PRD.md` §4's fourth state, `unknown`** ("where the detector simply
+  cannot speak — fingers, toes"), has no representation in the frozen
+  contract, whose `Visibility` enum is three-valued. Resolved here by
+  inheritance (a finger answers to its wrist) rather than by adding a state;
+  flagged because it is a contract gap, not an implementation choice.
+* **`provenance.interpolated` is ambiguous in the schema.** "Filled in by the
+  Kalman/interpolation chain across a gap rather than taken directly from a
+  single frame's estimate" can be read to include every smoothed sample.
+  This module sets it only where no measurement from that frame reached the
+  value. Judgment call, not a decision OPEN-DECISIONS.md tracks.
+* **Not measured this pass:** no Modal GPU run (the chain is CPU-only and was
+  exercised against stored npz output), no GLB re-exported, nothing viewed on
+  a phone. The claim "this reads less choppy" is therefore **not** made here —
+  what is measured is jitter, spectrum, accent retention, and flag counts.
+  Note also that with 97% of motion below 3 Hz, the most likely remaining
+  cause of visible choppiness is the 15 fps sample rate itself, not noise;
+  the filters carry a velocity state, so sub-sample interpolation at export
+  is available if that turns out to be the real complaint.
+* **Possible pre-existing bug in `services/motion-api/api.py`, not touched.**
+  `_build_motion_result` treats a skel_state quaternion as "the ABSOLUTE
+  local-to-parent rotation" and serves `rest⁻¹ · skel_quat` as the contract's
+  local-to-parent value. The FK evidence above says skel_state rotations are
+  **world** rotations (composing them as world is what makes bone offsets
+  constant to CV 0.5% and round-trips to 5.7e-14 cm). If so the per-joint
+  rotations currently served are wrong for every joint whose parent is not
+  the identity-rotation root. `smoothing.decompose()` already produces the
+  correct local-to-parent quaternion, so wiring W9 into api.py fixes it for
+  free — flagged for whoever does that wiring rather than fixed here.
