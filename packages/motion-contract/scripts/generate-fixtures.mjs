@@ -173,11 +173,11 @@ function makeGoodLesson() {
     },
     accent_color: { hex: "#D9A441", source: "sampled" },
     joint_hierarchy: joints,
-    animation: { clip_id: "lesson_full", glb_asset_id: "asset_glb_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d" },
     persons: [
       {
         person_id: "person_1",
         track_id: 1,
+        animation: { clip_id: "lesson_full", glb_asset_id: "asset_glb_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d" },
         shape_params: { vector: [0.12, -0.05, 0.03, 0.0, 0.08, -0.02, 0.0, 0.01, -0.01, 0.0], source: "well_observed_frames" },
         root_trajectory: rootTrajectory,
         samples,
@@ -290,11 +290,11 @@ function makeFailureLesson() {
     },
     accent_color: { hex: "#1E7A6F", source: "fallback" },
     joint_hierarchy: joints,
-    animation: { clip_id: "lesson_full", glb_asset_id: "asset_glb_9e8d7c6b5a4938271605f4e3d2c1b0a9" },
     persons: [
       {
         person_id: "person_1",
         track_id: 1,
+        animation: { clip_id: "lesson_full", glb_asset_id: "asset_glb_9e8d7c6b5a4938271605f4e3d2c1b0a9" },
         shape_params: { vector: [0.12, -0.05, 0.03, 0.0, 0.08, -0.02, 0.0, 0.01, -0.01, 0.0], source: "well_observed_frames" },
         root_trajectory: rootTrajectory,
         samples,
@@ -314,6 +314,149 @@ function makeFailureLesson() {
   };
 }
 
+// Two-dancer fixture (W8): hand-built to match the REAL pipeline's output
+// shape exactly (docs/GATE-REPORT.md's multi-dancer contract gap) rather than
+// derived from the single-dancer fixture. Two dancers, DIFFERENT choreography
+// (the 2026-09-18 scope revision made this the normal case, not a violation --
+// see evaluation/clips.yaml's `violator-crowd`, which replaced the old
+// "different roles" refusal). track_id/person_id match what
+// tools/process_clip.py + services/motion-api/modal_app.py::export_clip_gltf
+// actually produce: one ByteTrack id and one separate GLB per confidently-
+// tracked dancer (each PersonResult.animation points at its own glb_asset_id --
+// this fixture is exactly what motivated moving `animation` under `persons`).
+// A real two-dancer clip was not run this pass (no GPU session in this
+// environment) -- see docs/GATE-REPORT.md's W8 addendum for why this is
+// hand-built rather than pipeline output, and what would need to happen to
+// replace it with a real run.
+function makeTwoDancerLesson() {
+  const fps = 15;
+  const durationS = 8.0;
+  const n = Math.round(durationS * fps); // 120
+  const sampleTimesS = Array.from({ length: n }, (_, i) => round(i / fps, 6));
+  const joints = jointHierarchy();
+
+  // The two dancers cross paths (x position) around the midpoint -- during
+  // the crossing, the far dancer (B) is partially occluded by the near one
+  // (A), matching tools/process_clip.py's documented non-goal: no cross-
+  // dancer identity-continuity correction happens in the pipeline, so a real
+  // crossing can and does produce a low-confidence span like this one.
+  const crossStart = 50; // i.e. t ≈ 3.33s
+  const crossEnd = 64; // t ≈ 4.27s, inclusive
+
+  function buildDancer({ personId, trackId, freq, xFrom, xTo, glbAssetId, occludedDuringCross }) {
+    const rootTrajectory = sampleTimesS.map((t, i) => {
+      const xProgress = smoothstep(0.2 * durationS, 0.8 * durationS, t);
+      const x = xFrom + (xTo - xFrom) * xProgress;
+      const occluded = occludedDuringCross && i >= crossStart && i <= crossEnd;
+      return {
+        position: vec3(x, 0.95 + 0.03 * Math.sin(2 * Math.PI * freq * 2 * t), 0.05 * Math.cos(2 * Math.PI * freq * 0.25 * t)),
+        rotation: axisAngleQuat([0, 1, 0], 0.15 * Math.sin(2 * Math.PI * freq * 0.5 * t)),
+        provenance: occluded
+          ? { observed: true, interpolated: true, suppressed: "low_confidence" }
+          : observedProvenance(),
+      };
+    });
+
+    const samples = sampleTimesS.map((t, i) => {
+      const occluded = occludedDuringCross && i >= crossStart && i <= crossEnd;
+      return {
+        joints: JOINTS.map((j) => {
+          const { axis, angle } = poseAngle(j.name, t, freq);
+          const rotation = axisAngleQuat(axis, angle);
+          return occluded
+            ? { rotation, provenance: { observed: true, interpolated: true, suppressed: "low_confidence" }, visibility: "uncertain" }
+            : { rotation, provenance: observedProvenance(), visibility: "observed" };
+        }),
+      };
+    });
+
+    const handsCrop = sampleTimesS.map((t, i) => {
+      if (occludedDuringCross && i >= crossStart && i <= crossEnd) return null;
+      const x = xFrom + (xTo - xFrom) * smoothstep(0.2 * durationS, 0.8 * durationS, t);
+      return { x: round(0.5 + 0.2 * x, 4), y: round(0.3 + 0.03 * Math.sin(2 * Math.PI * freq * 2 * t), 4), width: 0.22, height: 0.16 };
+    });
+    const feetCrop = sampleTimesS.map((t, i) => {
+      if (occludedDuringCross && i >= crossStart && i <= crossEnd) return null;
+      const x = xFrom + (xTo - xFrom) * smoothstep(0.2 * durationS, 0.8 * durationS, t);
+      return { x: round(0.5 + 0.2 * x, 4), y: 0.82, width: 0.26, height: 0.14 };
+    });
+
+    return {
+      person_id: personId,
+      track_id: trackId,
+      animation: { clip_id: "lesson_full", glb_asset_id: glbAssetId },
+      shape_params: { vector: [0.05, 0.02, -0.03, 0.0, 0.04, 0.0, 0.0, -0.01, 0.02, 0.0], source: "well_observed_frames" },
+      root_trajectory: rootTrajectory,
+      samples,
+      crop_rects: { hands: handsCrop, feet: feetCrop },
+    };
+  }
+
+  // Different choreography, different tempo -- deliberately NOT synced,
+  // since "two dancers doing different things" is the normal case now, not
+  // the violator-crowd refusal case (which is about COUNT, not sameness).
+  const personA = buildDancer({
+    personId: "person_1", trackId: 7, freq: 30 / durationS / 2,
+    xFrom: -0.35, xTo: 0.35, glbAssetId: "asset_glb_two_dancer_trackA_1a2b3c4d5e6f",
+    occludedDuringCross: false, // A is nearer camera during the crossing
+  });
+  const personB = buildDancer({
+    personId: "person_2", trackId: 12, freq: 22 / durationS / 2,
+    xFrom: 0.35, xTo: -0.35, glbAssetId: "asset_glb_two_dancer_trackB_6f5e4d3c2b1a",
+    occludedDuringCross: true, // B passes behind A
+  });
+
+  return {
+    schema_version: "1.0.0",
+    job_id: "job_two_dancer_7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
+    source_video: {
+      asset_id: "asset_video_two_dancer_3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d",
+      width_px: 576,
+      height_px: 1024,
+      rotation_deg: 0,
+      duration_s: durationS,
+      fps_nominal: fps,
+      audio_offset_s: 0.0,
+    },
+    sample_times_s: sampleTimesS,
+    camera: {
+      model: "pinhole",
+      intrinsics: { fx: 780, fy: 780, cx: 288, cy: 512, reference_width_px: 576, reference_height_px: 1024 },
+      camera_to_world: [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 1.3, 3.6, 1,
+      ],
+    },
+    grounding: {
+      status: "grounded",
+      floor_plane: { normal: [0, 1, 0], point: [0, 0, 0] },
+    },
+    // Real accent-color sampling picks one dominant hue; with two dancers
+    // present it falls back per AccentColor's `source` enum (OPEN-DECISIONS.md
+    // E4 -- sampling quality with >1 person is unproven).
+    accent_color: { hex: "#5B4CC4", source: "fallback" },
+    joint_hierarchy: joints,
+    persons: [personA, personB],
+    model_report: {
+      pipeline_git_sha: "808b53c",
+      models: [
+        { name: "rtmo-m", version: "body7", license: "Apache-2.0", license_flags: [] },
+        { name: "bytetrack", version: "upstream-main", license: "MIT", license_flags: [] },
+        { name: "sam-3d-body-dinov3", version: "hf:facebook/sam-3d-body-dinov3", license: "SAM License", license_flags: ["itar-military-use-prohibited", "citation-required-for-research-publication"] },
+        { name: "mhr", version: "v1.0.1", license: "Apache-2.0", license_flags: ["body-model-asset-license-see-zip"] },
+      ],
+      // Not extrapolated from the solo-01 gate number -- this fixture is
+      // hand-built, not a real run, so this is a plausible placeholder
+      // (~2x solo cost per docs/GATE-REPORT.md's scope-revision estimate),
+      // not a measurement. A real two-dancer run must replace it.
+      measured_performance: { fps: 2.05, peak_vram_mb: 5100, cost_usd: 0.11 },
+    },
+  };
+}
+
 writeFileSync(path.join(root, "fixtures", "good-lesson.json"), JSON.stringify(makeGoodLesson(), null, 2) + "\n");
 writeFileSync(path.join(root, "fixtures", "failure-lesson.json"), JSON.stringify(makeFailureLesson(), null, 2) + "\n");
-console.log("wrote fixtures/good-lesson.json and fixtures/failure-lesson.json");
+writeFileSync(path.join(root, "fixtures", "two-dancer-lesson.json"), JSON.stringify(makeTwoDancerLesson(), null, 2) + "\n");
+console.log("wrote fixtures/good-lesson.json, fixtures/failure-lesson.json, and fixtures/two-dancer-lesson.json");

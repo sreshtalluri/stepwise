@@ -48,3 +48,23 @@ demo scripts).
 - Nothing in `sam_3d_body/models/meta_arch/sam3d_body.py` was touched --
   `_get_hand_box_from_yolo_pose` (~line 3430) is pure numpy keyed to COCO-17
   wrist indices and needs no ultralytics-specific change.
+
+## W8 (2026-09-18): real motion through export, multi-dancer cap
+
+- `sam_3d_body/models/heads/mhr_head.py`: `_mhr_forward_core` now also returns
+  `curr_skel_state` (additive 6th tuple element; already computed internally,
+  just wasn't returned). Threaded through `_head_forward_core`,
+  `_head_forward_core_slim` (ignores it), `mhr_forward` (new
+  `return_skel_state` kwarg, both its compiled and non-compiled paths), and
+  `forward()`'s output dict as `"skel_state"`. Closes the neutral-pose gap in
+  `docs/GATE-REPORT.md` G6 -- this is the exact tensor
+  `Character.save_gltf_from_skel_states` needs for real per-frame motion.
+- `sam_3d_body/sam_3d_body_estimator.py`: `process_one_image`'s per-person
+  output dict now includes `"skel_state"` (the estimator's raw (127, 8) array
+  for that person), sourced from the above.
+- `tools/process_clip.py`: two-pass structure (detect-only pass to count
+  confidently-tracked dancers and decide refusal, then a reconstruction pass
+  for confidently-tracked track ids only, capped at `MAX_DANCERS = 6`), an
+  `on_progress` callback for job-status wiring, and `select_confident_tracks`/
+  `refusal_reason_for` as pure, independently-testable decision logic (see
+  `test_process_clip.py`).

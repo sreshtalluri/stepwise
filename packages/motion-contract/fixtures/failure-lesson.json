@@ -553,14 +553,14 @@
       }
     ]
   },
-  "animation": {
-    "clip_id": "lesson_full",
-    "glb_asset_id": "asset_glb_9e8d7c6b5a4938271605f4e3d2c1b0a9"
-  },
   "persons": [
     {
       "person_id": "person_1",
       "track_id": 1,
+      "animation": {
+        "clip_id": "lesson_full",
+        "glb_asset_id": "asset_glb_9e8d7c6b5a4938271605f4e3d2c1b0a9"
+      },
       "shape_params": {
         "vector": [
           0.12,

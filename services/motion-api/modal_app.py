@@ -278,49 +278,115 @@ GPU_HOURLY_USD = {"L40S": 1.95, "A10G": 1.10, "T4": 0.59}
     volumes={WEIGHTS_DIR: weights, CLIPS_DIR: eval_clips, RESULTS_DIR: results},
     timeout=3600,
 )
-def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1):
+def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1, job_id: str | None = None):
     """Stage 5: the week-one deliverable. One real clip from evaluation/clips.yaml,
-    through RTMO+ByteTrack -> SAM3DBodyEstimator, all detected dancers (docs/PRD.md
-    section 5's multi-dancer MVP), saved to the results Volume for stage 6 (export).
+    through RTMO+ByteTrack -> SAM3DBodyEstimator, every confidently-tracked dancer
+    up to the 6-dancer cap (docs/PRD.md section 5's revised multi-dancer MVP),
+    saved to the results Volume for stage 6 (export).
+
+    W8: also emits job-status.schema.json-compliant progress documents to the
+    results Volume as `{job_id}.job-status.json`, one write per real pipeline
+    stage transition -- not just the final result. There is no live API polling
+    this yet (ponytail: a JSON file on a Volume, not a queue/pubsub -- upgrade
+    to real push/poll once services/motion-api has an HTTP layer to serve it
+    from); this is the real emitter W7's processing screen needs behind it.
     """
+    import json
     import sys
     import time
 
     sys.path.insert(0, "/app/fast-sam-3d-body")
     from tools.process_clip import process_clip, save_clip_result
 
+    job_id = job_id or f"job_{clip_id}_{int(time.time())}"
+    status_path = f"{RESULTS_DIR}/{job_id}.job-status.json"
+
+    def write_status(state: str, stage_message: str, progress, error=None, retry_count: int = 0):
+        doc = {
+            "schema_version": "1.0.0",
+            "job_id": job_id,
+            "state": state,
+            "stage_message": stage_message,
+            "progress": progress,
+            "error": error,
+            "retry_count": retry_count,
+        }
+        with open(status_path, "w") as f:
+            json.dump(doc, f)
+        results.commit()
+        print(f"[job-status] {state} {progress if progress is not None else '-'}  {stage_message}")
+
+    def on_progress(stage: str, message: str, progress) -> None:
+        write_status("refused" if stage == "refused" else "processing", message, progress)
+
+    write_status("queued", "", None)
+
     video_path = f"{CLIPS_DIR}/{clip_id}.mp4"
     checkpoint_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/model.ckpt"
     mhr_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
 
     t0 = time.time()
-    result = process_clip(
-        video_path=video_path,
-        checkpoint_path=checkpoint_path,
-        mhr_path=mhr_path,
-        frames_dir=f"/tmp/{clip_id}_frames",
-        fps=fps,
-        max_seconds=max_seconds,
-        bbox_thr=bbox_thr,
-    )
+    try:
+        result = process_clip(
+            video_path=video_path,
+            checkpoint_path=checkpoint_path,
+            mhr_path=mhr_path,
+            frames_dir=f"/tmp/{clip_id}_frames",
+            fps=fps,
+            max_seconds=max_seconds,
+            bbox_thr=bbox_thr,
+            on_progress=on_progress,
+        )
+    except Exception as e:  # noqa: BLE001 -- surface as a job-status failure, not a bare crash
+        write_status(
+            "failed", "",
+            None,
+            error={"code": "pipeline_error", "message": str(e), "retryable": True},
+        )
+        raise
     wall_s = time.time() - t0
+
+    if result.get("refused"):
+        # job-status "state" has no dedicated refused value (job-status.schema.json
+        # only has queued/processing/succeeded/failed) -- a refusal IS a completed,
+        # non-retryable failure from the caller's point of view, not a crash.
+        write_status(
+            "failed", "",
+            None,
+            error={
+                "code": "too_many_dancers",
+                "message": result["refusal_message"],
+                "retryable": False,
+            },
+        )
+        print(f"REFUSED: {result['refusal_message']}")
+        return {
+            "refused": True,
+            "n_confident_dancers": result["n_confident_dancers"],
+        }
 
     out_path = f"{RESULTS_DIR}/{clip_id}.npz"
     save_clip_result(result, out_path)
     results.commit()
 
     cost = wall_s / 3600 * GPU_HOURLY_USD.get(GPU_TIER, 0.0)
+    n_dancers = len(result["confident_track_ids"])
+    write_status("succeeded", "", 1.0)
     print(
         f"\nSAVED {out_path}\n"
         f"wall clock: {wall_s:.1f}s  pipeline-internal: {result['elapsed_s']:.1f}s\n"
         f"peak VRAM: {result['peak_vram_bytes'] / 1e9:.2f} GB\n"
+        f"dancers reconstructed: {n_dancers}\n"
         f"frames: {result['n_frames_ok']}/{result['n_frames_total']} reconstructed\n"
         f"estimated cost at ${GPU_HOURLY_USD.get(GPU_TIER, 0.0)}/hr ({GPU_TIER}): ${cost:.4f}\n"
-        "(warm compute only -- excludes cold start, storage, retries, idle billing; see PRD G7)"
+        "(warm compute only -- excludes cold start, storage, retries, idle billing; see PRD G7. "
+        "Measured for THIS clip's dancer count -- do not extrapolate the solo-01 gate numbers.)"
     )
     return {
+        "refused": False,
         "wall_s": wall_s,
         "peak_vram_gb": round(result["peak_vram_bytes"] / 1e9, 2),
+        "n_dancers": n_dancers,
         "n_frames_ok": result["n_frames_ok"],
         "n_frames_total": result["n_frames_total"],
         "estimated_cost_usd": round(cost, 4),
@@ -548,18 +614,11 @@ def export_neutral_pose_smoke_test():
 
     Deliberately narrow: calls the bundled mhr_model.pt's own forward()
     directly with a neutral (all-zero) pose, not through SAM3DBodyEstimator.
-    Driving this from real per-frame estimator output needs one more piece
-    this does not yet do: sam_3d_body/models/heads/mhr_head.py's
-    _mhr_forward_core computes exactly this skel_state internally (see its
-    `curr_skinned_verts, curr_skel_state = self.mhr(...)` call) but only
-    exposes derived, already-transformed values in the estimator's public
-    output (pred_joint_coords is curr_skel_state's translation chunk scaled
-    by 0.01; joint_global_rots is its quaternion chunk converted to rotation
-    matrices) -- reconstructing skel_state from those risks a sign/unit bug
-    that would only show up as a warped mesh. The correct fix is a small,
-    additive change to the vendored copy of that file to also return
-    curr_skel_state directly, not a reconstruction here. Not done in the
-    gate itself -- see the gate report.
+    Kept as-is (still useful as a cheap mechanism-only smoke test that doesn't
+    need a real clip run first) now that the neutral-pose gap itself is closed
+    -- see export_clip_gltf below, which drives this same mechanism from real
+    per-frame `skel_state` (sam_3d_body/models/heads/mhr_head.py's
+    _mhr_forward_core now returns it directly, W8, docs/GATE-REPORT.md G6).
     """
     import numpy as np
     import pymomentum.geometry as pym_geo
@@ -615,6 +674,74 @@ def export_neutral_pose_smoke_test():
     size_bytes = os.path.getsize(out_path)
     print(f"SAVED {out_path}, {size_bytes} bytes")
     return {"out_path": out_path, "size_bytes": size_bytes}
+
+
+@app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results}, timeout=600)
+def export_clip_gltf(clip_id: str):
+    """Stage 6c: the real fix (W8) -- export the ACTUAL reconstructed motion
+    from a run_clip() result, not a neutral pose. One GLB per confidently-
+    tracked dancer (each PersonResult carries its own animation ref per the
+    motion-result.schema.json contract change, W8).
+
+    Reads the npz run_clip() saved (per_frame[i][track_id]["skel_state"], now
+    populated because sam_3d_body_estimator.py exposes the estimator's raw
+    (J, 8) skel_state -- see mhr_head.py's _mhr_forward_core). Builds one
+    (n_samples, J, 8) array per dancer and exports it.
+
+    Gap-filling for samples where a dancer wasn't reconstructed (occluded,
+    out of frame, or not yet confidently tracked): holds the nearest earlier
+    observed skel_state (or the first observed one, for a leading gap).
+    ponytail: this is a naive hold, not Kalman/interpolation -- it exists only
+    so save_gltf_from_skel_states gets a frame for every sample_times_s slot
+    (a hard contract requirement), not to make gaps look good. Milestone A's
+    real interpolation/suppression chain (out of W8 scope, see
+    docs/GATE-REPORT.md) replaces this; a held pose plays as a visible freeze,
+    which is honest -- it does not claim motion that wasn't observed.
+    """
+    import numpy as np
+    import pymomentum.geometry as pym_geo
+
+    npz_path = f"{RESULTS_DIR}/{clip_id}.npz"
+    print(f"loading {npz_path}")
+    data = np.load(npz_path, allow_pickle=True)
+    if bool(data["refused"]):
+        raise RuntimeError(f"{clip_id} was refused by run_clip ({data['refusal_reason']}), nothing to export")
+
+    per_frame = data["per_frame"]  # array of dicts, one per sample
+    confident_track_ids = data["confident_track_ids"].tolist()
+    n_samples = len(per_frame)
+
+    lod_path = f"{WEIGHTS_DIR}/mhr-assets/lod3.fbx"
+    fps = 15.0  # matches process_clip's default; TODO thread the real fps through the npz if it ever varies
+
+    out_paths = {}
+    for track_id in confident_track_ids:
+        skel_states = np.zeros((n_samples, 127, 8), dtype=np.float32)
+        held = None
+        n_observed = 0
+        for i in range(n_samples):
+            person = per_frame[i].get(track_id) if isinstance(per_frame[i], dict) else None
+            if person is not None and "skel_state" in person:
+                held = np.asarray(person["skel_state"], dtype=np.float32)
+                n_observed += 1
+            if held is None:
+                # Leading gap before this dancer's first observed frame -- no
+                # pose to hold yet. Neutral (all-zero) is the honest fallback:
+                # it renders as an A-pose, not a fabricated motion guess.
+                skel_states[i] = np.zeros((127, 8), dtype=np.float32)
+            else:
+                skel_states[i] = held
+
+        print(f"track {track_id}: {n_observed}/{n_samples} samples observed")
+
+        character = pym_geo.Character.load_fbx(lod_path)
+        out_path = f"{RESULTS_DIR}/{clip_id}_track{track_id}.glb"
+        pym_geo.Character.save_gltf_from_skel_states(out_path, character, fps, skel_states)
+        out_paths[track_id] = out_path
+        print(f"SAVED {out_path}")
+
+    results.commit()
+    return {"clip_id": clip_id, "glb_paths": out_paths, "n_dancers": len(confident_track_ids)}
 
 
 @app.local_entrypoint()

@@ -233,3 +233,125 @@ handling is proven until that clip exists and runs.
 None of this is speculative — every piece above it has already been proven
 to work in isolation. This is assembly and one more measurement, not open
 research.
+
+## W8 addendum (2026-09-18): real motion export, multi-dancer, contract fix
+
+Branch `w8-worker` off `w8-base`. No Modal GPU session was run this pass (see
+"what's not measured" below) — everything in this addendum is a code change,
+read against the vendored source, plus a schema/contract change validated by
+the existing (real, running) test suites. Nothing here is a fabricated number.
+
+**1. Neutral-pose gap (G6): closed, not yet run on real hardware.**
+`sam_3d_body/models/heads/mhr_head.py`'s `_mhr_forward_core` now returns
+`curr_skel_state` as an additive 6th tuple element (it was already computed
+there, per this report's own "what's left" note above) — threaded through
+`_head_forward_core`, `mhr_forward` (new `return_skel_state` kwarg, both its
+compiled and non-compiled/CUDA-graph paths), and `forward()`'s output dict,
+then through `sam_3d_body_estimator.py`'s `process_one_image` per-person
+output as `"skel_state"`. Verified by reading every call site of
+`_mhr_forward_core` and `mhr_forward` in the vendored tree (`sam3d_body.py`
+has two other callers; neither requests `return_skel_state`, so they're
+unaffected — additive, not a signature break) and by `py_compile` on every
+touched file. **Not yet run against real weights on GPU** — no Modal session
+in this environment this pass. `services/motion-api/modal_app.py::export_clip_gltf`
+is new, wires this into a real per-clip, per-dancer GLB export, and is
+unexercised beyond `py_compile` for the same reason. This is the single
+highest-priority remaining risk to close: run it for real, on a clip, and do
+the literal phone check this gate has always wanted.
+
+**2. Multi-dancer: cap 6, cost linear, no cross-dancer shortcut.**
+`tools/process_clip.py` now does a detect-only pass first (cheap: RTMO +
+ByteTrack, no SAM 3D Body) to decide which track ids are "confidently
+tracked" (>= `CONFIDENT_MIN_FRAMES = 5` sampled frames — a plain frequency
+threshold, not a learned confidence model; ponytail-flagged in the source).
+If more than `MAX_DANCERS = 6` are confidently tracked, the clip is refused
+**before** any reconstruction runs, so a refusal costs almost nothing. Below
+the cap, every confidently-tracked dancer gets full SAM 3D Body
+reconstruction — cost is linear per dancer, same per-dancer cost as the
+solo-01 number above (not re-measured per-dancer this pass; see below).
+**Considered and rejected (v2 idea, explicitly not built):** reconstruct one
+dancer fully and use cross-dancer motion correlation to approximate the
+others on synced choreography. Rejected per this work package's explicit
+scope decision — full reconstruction for every confidently-tracked dancer is
+simpler, doesn't assume synced choreography (which the 2026-09-18 scope
+revision explicitly says is not required), and its cost is already affordable
+per-clip at the solo-01 number. Recorded here so it isn't rediscovered.
+`evaluation/clips.yaml`'s `violator-duet` entry (no URL, unsourced) was
+renamed to `violator-crowd` and its refusal condition changed from "two
+dancers doing different roles" (no longer a violation — a learner just picks
+which dancer to learn from) to "more than 6 confidently-tracked dancers".
+
+**3. Contract gap: `animation` moved from top-level to per-`PersonResult`.**
+`packages/motion-contract/schema/motion-result.schema.json`: removed the
+single top-level `animation: {clip_id, glb_asset_id}` (assumed exactly one
+dancer) and added `animation` as a required field on each entry in `persons`
+instead, so a multi-dancer `MotionResult` can say which GLB/clip belongs to
+which dancer — previously there was no way to express that at all, per W5/
+W6/W7's independent findings. Chose per-person over a separate `person_id`-
+keyed map at the top level: every other per-person fact already lives inside
+`PersonResult`, and a consumer already iterates `persons` to render each
+dancer, so a second top-level collection would only be one more thing that
+could drift out of sync by `person_id`. `persons` also gained `maxItems: 6`
+matching the cap above. TS/Python generated types regenerated
+(`npm run generate` / `bash scripts/generate-python.sh`); both test suites
+(`npm test`, `uv run pytest`) pass, including the schema-validation and
+invariant checks. Added `packages/motion-contract/fixtures/two-dancer-lesson.json`
+— **hand-built, not a real pipeline run** (no GPU session available this
+pass), but shaped to match exactly what `process_clip.py` +
+`export_clip_gltf` actually produce (real ByteTrack-style track ids, one GLB
+per confidently-tracked dancer, a genuine crossing-occlusion span with no
+identity-continuity correction, matching this file's own documented
+non-goal). Its `model_report.measured_performance` is a labeled placeholder,
+not a measurement — replace it the first time this actually runs on two real
+dancers.
+
+**4. Stale doc-comment.** The schema's top-level description previously
+implied exactly one dancer; updated to describe the revised multi-dancer MVP
+(up to 6, 2026-09-18) and the per-person animation change.
+
+**5. `solo-03` (turn + wrist occlusion + re-entry, the actual PRD week-one
+deliverable): still has no URL. Not sourced this pass** — this environment
+has no browsing/video-fetch capability and no real clip to hand-film or
+download. What was tested instead: the turn case (`good-lesson.json`'s
+continuous-tracking-through-a-full-turn fixture, unchanged by this pass) and
+the occlusion+re-entry case (`failure-lesson.json`'s mid-playback dropout
+fixture, unchanged by this pass) at the **contract level only** — these are
+hand-built JSON documents, not real pipeline output on a real clip. No real
+GLB was exported or viewed on a phone this pass. This gap is unchanged from
+this report's original "what's left" list, item 2 above.
+
+**6. Job-status wiring.** `tools/process_clip.py` gained an `on_progress`
+callback invoked at real stage transitions (loading, extracting frames,
+detecting, reconstructing, refused) with plain-language `stage_message` text
+per `DESIGN.md` §7c/§7h (e.g. "Building the body — frame 40 of 296", never
+"detection complete" or a bare percentage). `modal_app.py::run_clip` wires
+this to write `job-status.schema.json`-compliant documents to the results
+Volume as `{job_id}.job-status.json` at every real stage, not just the final
+result. Not resolved in `job-status.schema.json` itself: the schema's `state`
+enum has no "refused" value, only `queued/processing/succeeded/failed` — a
+refusal is mapped to `state: "failed"` with `error.code: "too_many_dancers"`
+and `retryable: false`, which fits the existing contract without adding a
+new state. This is a judgment call, not an OPEN-DECISIONS.md item; flagging
+it in case a real "refused" state is wanted later. There is no live API or
+push/poll layer consuming this file yet (services/motion-api has no HTTP
+server) — this writes to a Volume path a future service would read, not a
+running end-to-end integration with W7's processing screen.
+
+**What's not measured, honestly.** No Modal GPU session ran this pass (no
+GPU credentials exercised, though `modal profile current` confirms an
+authenticated account exists) — so there are no real multi-dancer fps/VRAM/
+cost numbers to report beyond the linear-cost reasoning above, and the
+`skel_state` plumbing above is verified by reading the vendored source and
+`py_compile`, not by a real forward pass. Per this file's own "measure, do
+not trust" standard: **do not treat the multi-dancer cost/fps numbers in
+`two-dancer-lesson.json`'s `model_report` as real** — they're explicitly
+labeled placeholders. The next session with GPU access should: (a) run
+`export_clip_gltf` against a real `run_clip` result and check the GLB on a
+phone, (b) run a real 2+ dancer clip (`group-synced-01` is already fetched)
+end to end and replace the placeholder numbers, (c) source or film `solo-03`.
+
+**OPEN-DECISIONS.md check.** Nothing in this pass required deciding an item
+still marked OPEN there. The `CONFIDENT_MIN_FRAMES` threshold and the
+job-status "refused → failed" mapping are implementation judgment calls
+within the existing contract, not new product/design decisions of the kind
+OPEN-DECISIONS.md tracks — flagged above rather than silently assumed.

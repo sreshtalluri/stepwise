@@ -392,6 +392,13 @@ class SAM3DBodyEstimator:
                     "mask": masks[idx] if masks is not None else None,
                     "pred_joint_coords": out["pred_joint_coords"][idx],
                     "pred_global_rots": out["joint_global_rots"][idx],
+                    # Raw (J, 8) [translation, quaternion, scale] MHR skel_state,
+                    # not derived from pred_joint_coords/pred_global_rots -- see
+                    # mhr_head.py's _mhr_forward_core. This is the tensor
+                    # Character.save_gltf_from_skel_states needs to export the
+                    # dancer's REAL per-frame pose instead of a neutral one
+                    # (docs/GATE-REPORT.md G6).
+                    "skel_state": out["skel_state"][idx],
                 }
             )
 

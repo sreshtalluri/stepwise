@@ -179,14 +179,27 @@ clips:
     notes: "Supplied by the builder 2026-09-18. 576x1024 @30fps. Downloaded 2026-09-18."
 
   # ---- violators: must be REFUSED, not processed ----
-  # The MVP assumes one choreography per video. These prove it says no.
 
-  - id: violator-duet
+  # Renamed from `violator-duet` (2026-09-18 multi-dancer scope revision, see
+  # docs/GATE-REPORT.md and W8's report): a duet where two dancers do DIFFERENT
+  # parts is no longer a violation at all -- a learner just picks which dancer
+  # to learn from, per PersonResult now carrying a per-person animation ref.
+  # Kept the same empty-URL slot rather than adding a new one, since this was
+  # never sourced and the old "different roles" test case doesn't exist
+  # anymore -- what still needs refusing is too many confidently-tracked
+  # dancers to reasonably pick from (cap: 6, PRD §5 revised scope).
+  - id: violator-crowd
     url: ""
     title: ""
     duration_s: null
-    tests: [multi-dancer, different-roles]
-    why: "Two dancers doing DIFFERENT parts. The sync check must decline, not average them."
+    tests: [multi-dancer, too-many-dancers]
+    why: >
+      More than 6 confidently-tracked dancers in frame (e.g. a crowd shot or a
+      large group routine) -- past the point where "pick a dancer to learn
+      from" is a reasonable ask, and past the cap where per-dancer full SAM 3D
+      Body reconstruction cost stays linear/affordable. The pipeline must
+      refuse the clip before running reconstruction on any of them, not
+      silently truncate to 6 or reconstruct a subset.
     rights: untested
     notes: ""
 

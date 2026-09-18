@@ -295,7 +295,7 @@ class AnimationRef(BaseModel):
     )
     glb_asset_id: constr(min_length=1) = Field(
         ...,
-        description='Immutable id of the exported GLB asset. Never a signed/expiring URL — resolve separately at render time, same as source_video.asset_id.',
+        description="Immutable id of the exported GLB asset this person's animation lives in. Never a signed/expiring URL — resolve separately at render time, same as source_video.asset_id. Multiple persons MAY share the same glb_asset_id with distinct clip_id values (one GLB, multiple AnimationClips) or each MAY point at its own GLB — this contract does not prescribe which; it only guarantees each person carries its own resolvable reference (see PersonResult.animation, added for the multi-dancer MVP so a GLB/clip can be tied to the specific dancer it belongs to, per docs/GATE-REPORT.md's multi-dancer contract gap).",
     )
 
 
@@ -398,6 +398,10 @@ class PersonResult(BaseModel):
         ...,
         description="The tracker's (ByteTrack) numeric track id, kept for pipeline debugging — not guaranteed stable across re-processing.",
     )
+    animation: AnimationRef = Field(
+        ...,
+        description="This person's own exported GLB/clip reference. Moved here from a single top-level `animation` field (schema v1.0.0 originally assumed exactly one dancer) so a multi-dancer MotionResult can say which GLB/clip belongs to which entry in `persons` — previously there was no way to express that at all. Kept per-person rather than a separate `person_id`-keyed map at the top level: every other per-person fact (shape_params, root_trajectory, samples, crop_rects) already lives inside this object, and a consumer already iterates `persons` to render each dancer, so colocating avoids a second collection that could drift out of sync by person_id.",
+    )
     shape_params: ShapeParams
     root_trajectory: list[RootTrajectorySample] = Field(
         ...,
@@ -471,7 +475,7 @@ class ModelReport(BaseModel):
 
 class MotionResult(BaseModel):
     """
-    The frozen, versioned output of a completed stepwise motion job: one person (MVP) tracked and lifted to 3D from one monocular clip. This document describes a FINISHED job only — queued/processing/failed state lives in the separate job-status.schema.json contract, never here. Units: meters, seconds, radians-free (all rotations are quaternions). Axes: glTF/three.js convention — right-handed, +Y up, matrices column-major — chosen because the animation clip this document points to is consumed by GLTFLoader/AnimationMixer downstream. Open-decision note (OPEN-DECISIONS.md E3): this contract does not prescribe HOW the GLB hides a suppressed body region (separate meshes vs. vertex masks vs. blend shapes) — that is an exporter/renderer technique choice. It only guarantees per-joint `visibility` and `provenance` are available so any technique can consume them, and that a suppressed wrist implies its hand region should render as absent/uncertain (conservative region suppression, per PRD §4).
+    The frozen, versioned output of a completed stepwise motion job: one or more dancers (MVP, revised 2026-09-18: up to 6 confidently-tracked dancers per clip, docs/PRD.md section 5) tracked and lifted to 3D from one monocular clip. This document describes a FINISHED job only — queued/processing/failed state lives in the separate job-status.schema.json contract, never here. Units: meters, seconds, radians-free (all rotations are quaternions). Axes: glTF/three.js convention — right-handed, +Y up, matrices column-major — chosen because the animation clip(s) this document points to are consumed by GLTFLoader/AnimationMixer downstream. Open-decision note (OPEN-DECISIONS.md E3): this contract does not prescribe HOW the GLB hides a suppressed body region (separate meshes vs. vertex masks vs. blend shapes) — that is an exporter/renderer technique choice. It only guarantees per-joint `visibility` and `provenance` are available so any technique can consume them, and that a suppressed wrist implies its hand region should render as absent/uncertain (conservative region suppression, per PRD §4).
     """
 
     model_config = ConfigDict(
@@ -495,10 +499,10 @@ class MotionResult(BaseModel):
     grounding: Grounding
     accent_color: AccentColor
     joint_hierarchy: JointHierarchy
-    animation: AnimationRef
     persons: list[PersonResult] = Field(
         ...,
-        description='MVP always has exactly one entry (PRD §5: one dancer). Array shape kept for the multi-dancer case named as a future direction in PRD §9 — do not special-case length 1 in consumers.',
+        description="One entry per confidently-tracked dancer, up to 6 (PRD §5, revised 2026-09-18: full SAM 3D Body reconstruction runs for every confidently-tracked dancer in frame, cost scaling linearly per dancer — not just partial/on-demand reconstruction for extras). A clip with more than 6 confidently-tracked dancers is refused before reconstruction (see evaluation/clips.yaml's former `violator-duet` entry, repurposed for this case) rather than partially processed. Do not special-case length 1 in consumers — solo clips are simply the length-1 case of the same shape.",
+        max_length=6,
         min_length=1,
     )
     model_report: ModelReport

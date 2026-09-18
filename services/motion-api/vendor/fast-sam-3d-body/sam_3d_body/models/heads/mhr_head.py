@@ -410,7 +410,7 @@ class MHRHead(nn.Module):
 
         Returns: (global_rot_6d, global_rot_euler, pred_pose_cont, pred_pose_euler,
                   pred_shape, pred_scale, pred_hand, pred_face,
-                  verts, j3d, jcoords, mhr_model_params, joint_global_rots)
+                  verts, j3d, jcoords, mhr_model_params, joint_global_rots, skel_state)
         """
         batch_size = x.shape[0]
 
@@ -442,7 +442,7 @@ class MHRHead(nn.Module):
         pred_face = pred[:, count : count + self.num_face_comps] * 0
 
         # === mhr_forward_core stage ===
-        verts, j3d, jcoords, mhr_model_params, joint_global_rots = self._mhr_forward_core(
+        verts, j3d, jcoords, mhr_model_params, joint_global_rots, skel_state = self._mhr_forward_core(
             global_trans=global_trans,
             global_rot=global_rot_euler,
             body_pose_params=pred_pose_euler,
@@ -466,7 +466,7 @@ class MHRHead(nn.Module):
 
         return (global_rot_6d, global_rot_euler, pred_pose_cont, pred_pose_euler,
                 pred_shape, pred_scale, pred_hand, pred_face,
-                verts, j3d, jcoords, mhr_model_params, joint_global_rots)
+                verts, j3d, jcoords, mhr_model_params, joint_global_rots, skel_state)
 
     def _head_forward_core_slim(
         self,
@@ -508,7 +508,7 @@ class MHRHead(nn.Module):
         pred_face = pred[:, count : count + self.num_face_comps] * 0
 
         # === mhr_forward_core stage (slim_mode=True) ===
-        verts, j3d, jcoords, mhr_model_params, _ = self._mhr_forward_core(
+        verts, j3d, jcoords, mhr_model_params, _, _ = self._mhr_forward_core(
             global_trans=global_trans,
             global_rot=global_rot_euler,
             body_pose_params=pred_pose_euler,
@@ -543,7 +543,15 @@ class MHRHead(nn.Module):
     ):
         """
         Core computation of MHR forward pass (no timing, used for torch.compile).
-        Returns: (skinned_verts, keypoints_pred, joint_coords, model_params, joint_rots)
+        Returns: (skinned_verts, keypoints_pred, joint_coords, model_params, joint_rots, skel_state)
+
+        skel_state is the raw (B, J, 8) tensor straight out of self.mhr() --
+        [translation(3), quaternion(4), scale(1)] per joint, NOT the scaled/
+        rotmat-converted curr_joint_coords/curr_joint_rots derived from it a
+        few lines below. This is the exact tensor
+        Character.save_gltf_from_skel_states expects (per docs/GATE-REPORT.md
+        G6's smoke test) -- returned here, additively, so real per-frame
+        motion can be exported instead of a neutral pose.
 
         Args:
             slim_mode: If True, skip computations not needed by intermediate layers (joint_rots).
@@ -618,7 +626,7 @@ class MHRHead(nn.Module):
                 model_keypoints_pred[:, :21] = 0
                 model_keypoints_pred[:, 42:] = 0
 
-        return curr_skinned_verts, model_keypoints_pred, curr_joint_coords, model_params, curr_joint_rots
+        return curr_skinned_verts, model_keypoints_pred, curr_joint_coords, model_params, curr_joint_rots, curr_skel_state
 
     def mhr_forward(
         self,
@@ -634,6 +642,7 @@ class MHRHead(nn.Module):
         return_joint_coords=False,
         return_model_params=False,
         return_joint_rotations=False,
+        return_skel_state=False,
         scale_offsets=None,
         vertex_offsets=None,
         _do_timing=False,
@@ -651,7 +660,7 @@ class MHRHead(nn.Module):
 
         if use_compiled:
             # Call compiled core function
-            curr_skinned_verts, model_keypoints_pred, curr_joint_coords, model_params, curr_joint_rots = \
+            curr_skinned_verts, model_keypoints_pred, curr_joint_coords, model_params, curr_joint_rots, curr_skel_state = \
                 self._compiled_mhr_forward(
                     global_trans, global_rot, body_pose_params, hand_pose_params,
                     scale_params, shape_params, expr_params, return_keypoints
@@ -667,6 +676,8 @@ class MHRHead(nn.Module):
                 to_return.append(model_params)
             if return_joint_rotations:
                 to_return.append(curr_joint_rots)
+            if return_skel_state:
+                to_return.append(curr_skel_state)
 
             if len(to_return) == 1:
                 return to_return[0]
@@ -793,6 +804,8 @@ class MHRHead(nn.Module):
             to_return = to_return + [model_params]
         if return_joint_rotations:
             to_return = to_return + [curr_joint_rots]
+        if return_skel_state:
+            to_return = to_return + [curr_skel_state]
 
         if isinstance(to_return, list) and len(to_return) == 1:
             return to_return[0]
@@ -831,7 +844,7 @@ class MHRHead(nn.Module):
             # Call compiled full head forward core function
             (global_rot_6d, global_rot_euler, pred_pose_cont, pred_pose_euler,
              pred_shape, pred_scale, pred_hand, pred_face,
-             verts, j3d, jcoords, mhr_model_params, joint_global_rots) = \
+             verts, j3d, jcoords, mhr_model_params, joint_global_rots, skel_state) = \
                 self._compiled_head_forward(x, init_estimate)
 
             # Assemble output dict (clone tensors to avoid cudagraph buffer reuse issues)
@@ -850,6 +863,7 @@ class MHRHead(nn.Module):
                 "faces": self._get_faces_numpy(),
                 "joint_global_rots": joint_global_rots.clone(),
                 "mhr_model_params": mhr_model_params.clone(),
+                "skel_state": skel_state.clone(),
             }
             return output
 
@@ -918,6 +932,7 @@ class MHRHead(nn.Module):
             return_joint_coords=True,
             return_model_params=True,
             return_joint_rotations=True,
+            return_skel_state=True,
             _do_timing=do_timing,
         )
 
@@ -925,7 +940,7 @@ class MHRHead(nn.Module):
             t_mhr_forward = _sync_time()
 
         # Some existing code to get joints and fix camera system
-        verts, j3d, jcoords, mhr_model_params, joint_global_rots = output
+        verts, j3d, jcoords, mhr_model_params, joint_global_rots, skel_state = output
         j3d = j3d[:, :70]  # 308 --> 70 keypoints
 
         if verts is not None:
@@ -956,6 +971,7 @@ class MHRHead(nn.Module):
             "faces": self._get_faces_numpy(),
             "joint_global_rots": joint_global_rots,
             "mhr_model_params": mhr_model_params,
+            "skel_state": skel_state,
         }
 
         if do_timing:
