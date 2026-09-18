@@ -1,0 +1,193 @@
+# Evaluation clip manifest
+#
+# THIS FILE IS VERSIONED. THE VIDEOS ARE NOT.
+#
+# Store the manifest here (text, reviewable, diffable). Keep the actual video
+# files in the Modal Volume "stepwise-eval" — never in git. Videos are large
+# binaries and, more importantly, they are other people's work.
+#
+# Rights, plainly:
+#   - Downloading a clip to test a pipeline privately is one thing.
+#   - Redistributing it, or putting it on a public landing page, is another.
+#   - Anything that becomes a PUBLIC demo needs actual permission. The easiest
+#     source of that is the builder's own community: the dance school, the DJ's
+#     teams. Ask, get a yes in writing, record it in `rights:` below.
+#
+# Add a clip:
+#   1. Add an entry here with a stable id.
+#   2. python evaluation/fetch.py <id>     (downloads + uploads to the Volume)
+#   3. Commit this file. Never commit the video.
+
+version: 1
+
+clips:
+  # ---- core set: 10 clips matching the MVP assumption ----
+  # one dancer, front camera, <=60s, steady, no cuts
+
+  - id: solo-01
+    url: ""                      # TikTok/YouTube URL
+    title: ""
+    duration_s: null
+    tests: [baseline]            # what this clip is here to exercise
+    why: "Clean easy case. If this fails, nothing else matters."
+    rights: untested             # untested | personal-test-only | permission-granted
+    notes: ""
+
+  - id: solo-02
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [baseline, fast-motion]
+    why: "Fast choreography. Motion blur is the known weak point of a per-frame model."
+    rights: untested
+    notes: ""
+
+  - id: solo-03
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [turn, back-facing]
+    why: >
+      Contains a full turn where the dancer's back faces the camera. This is the
+      product's best claim — turning away IS tracked — so it must work. Watch
+      for left/right flips, which are the classic monocular failure here.
+    rights: untested
+    notes: ""
+
+  - id: solo-04
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [low-light]
+    why: "Dim or coloured lighting. Common on TikTok, degrades detection."
+    rights: untested
+    notes: ""
+
+  - id: solo-05
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [loose-clothing]
+    why: "Baggy clothes hide the body outline. Known hard case for mesh recovery."
+    rights: untested
+    notes: ""
+
+  - id: solo-06
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [full-body-small]
+    why: "Dancer far from camera, small in frame. Tests the detector's floor."
+    rights: untested
+    notes: ""
+
+  - id: solo-07
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [floor-work]
+    why: "Dancer goes to the floor. Breaks the standing-on-a-plane assumption."
+    rights: untested
+    notes: ""
+
+  - id: solo-08
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [self-occlusion]
+    why: "Arms cross the torso. Parts genuinely invisible — must render uncertain, not confident."
+    rights: untested
+    notes: ""
+
+  - id: solo-09
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [baseline, longer]
+    why: "Near the 60s cap. Tests cost, memory, and whether counts stay aligned over time."
+    rights: untested
+    notes: ""
+
+  - id: solo-10
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [mirror-ambiguity]
+    why: "Symmetric choreography. Bone-length checks CANNOT reliably catch mirror flips here."
+    rights: untested
+    notes: ""
+
+  # ---- stress cases: these are expected to be hard or to fail ----
+  # Their value is proving the product degrades honestly rather than confidently.
+
+  - id: stress-hands
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [hands]
+    why: >
+      Specific hand shapes carry meaning. A hand is ~30px in a full-body 1080p
+      phone clip and articulated hand pose is the weakest link in every model
+      surveyed. EXPECTED OUTCOME: hands are unreliable, get marked approximate,
+      and the learner is shown a video crop instead. A confident wrong hand is
+      worse than an honest unknown.
+    rights: untested
+    notes: ""
+
+  - id: stress-footwork
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [feet, grounding]
+    why: "Fast footwork. Tests the floor solve and whether feet slide."
+    rights: untested
+    notes: ""
+
+  - id: stress-cropped-feet
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [out-of-frame, suppression, grounding-none]
+    why: >
+      A Short framed from the knees up. THE SUCCESS CRITERION IS NEGATIVE: no
+      foot may ever be drawn solid, the suppression must show, and grounding
+      must report "none" with no fake floor. If the app invents feet here, the
+      honesty design has failed.
+    rights: untested
+    notes: ""
+
+  # ---- violators: must be REFUSED, not processed ----
+  # The MVP assumes one choreography per video. These prove it says no.
+
+  - id: violator-duet
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [multi-dancer, different-roles]
+    why: "Two dancers doing DIFFERENT parts. The sync check must decline, not average them."
+    rights: untested
+    notes: ""
+
+  - id: violator-cuts
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [shot-boundaries]
+    why: "Edited with hard cuts. The shot-boundary check must reject it with a clear reason."
+    rights: untested
+    notes: ""
+
+  # ---- the demo clip: needs REAL permission ----
+
+  - id: demo-public
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [baseline, showcase]
+    why: >
+      This is the clip that goes on the public landing page as the live demo
+      lesson. It MUST have explicit permission from the dancer. Best source is
+      the builder's own community — the dance school or the DJ's teams. Record
+      who gave permission and when.
+    rights: needs-permission
+    notes: ""

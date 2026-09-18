@@ -45,3 +45,6 @@ screenshots/
 qa-reports/
 .playwright-mcp/
 .gstack/
+
+# Local evaluation clip cache
+.stepwise-clips/
