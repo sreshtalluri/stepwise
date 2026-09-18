@@ -819,22 +819,55 @@ def export_clip_gltf(clip_id: str):
     out_paths = {}
     for track_id in confident_track_ids:
         skel_states = np.zeros((n_samples, 127, 8), dtype=np.float32)
-        held = None
-        n_observed = 0
+
+        # Pass 1: collect the observed poses by sample index.
+        observed: dict[int, "np.ndarray"] = {}
         for i in range(n_samples):
             person = per_frame[i].get(track_id) if isinstance(per_frame[i], dict) else None
             if person is not None and "skel_state" in person:
-                held = np.asarray(person["skel_state"], dtype=np.float32)
-                n_observed += 1
-            if held is None:
-                # Leading gap before this dancer's first observed frame -- no
-                # pose to hold yet. Neutral (all-zero) is the honest fallback:
-                # it renders as an A-pose, not a fabricated motion guess.
-                skel_states[i] = np.zeros((127, 8), dtype=np.float32)
-            else:
-                skel_states[i] = held
+                observed[i] = np.asarray(person["skel_state"], dtype=np.float32)
+        n_observed = len(observed)
+        if not observed:
+            print(f"track {track_id}: no observed samples, skipping export")
+            continue
 
-        print(f"track {track_id}: {n_observed}/{n_samples} samples observed")
+        # Pass 2: forward-hold, and BACK-FILL the leading gap from the first
+        # observed pose.
+        #
+        # The leading gap used to be filled with np.zeros((127, 8)). That is
+        # NOT a neutral pose: a skel_state row carries a quaternion, and an
+        # all-zero quaternion has zero norm, so normalizing it yields NaN.
+        # A single NaN frame propagates through the skeleton's world matrices
+        # and makes the ENTIRE model vanish in any glTF viewer -- verified
+        # against solo-01, whose frame 0 is one of its 5 unreconstructed
+        # frames: 128 of 235 animation channels had a NaN at frame 0 and
+        # nothing rendered at all.
+        #
+        # Back-filling is the same honesty argument the forward-hold already
+        # makes (a held pose plays as a visible freeze, it does not claim
+        # motion that was not observed), just applied at the start of the
+        # clip instead of the middle. It also needs no knowledge of the
+        # skel_state layout, unlike constructing a true identity pose.
+        first_observed_idx = min(observed)
+        held = observed[first_observed_idx]
+        for i in range(n_samples):
+            if i in observed:
+                held = observed[i]
+            skel_states[i] = held
+
+        if not np.all(np.isfinite(skel_states)):
+            # Never export a NaN/Inf animation: it fails silently at render
+            # time (an invisible model), which is the worst possible failure
+            # mode -- it looks like a viewer bug, not a pipeline bug.
+            bad = np.argwhere(~np.isfinite(skel_states))
+            raise ValueError(
+                f"track {track_id}: non-finite skel_state values before export "
+                f"({len(bad)} entries, first at sample {bad[0][0]} joint {bad[0][1]}). "
+                "Refusing to write a GLB that would render as nothing."
+            )
+
+        print(f"track {track_id}: {n_observed}/{n_samples} samples observed "
+              f"(first at {first_observed_idx}, leading gap back-filled)")
 
         character = pym_geo.Character.load_fbx(lod_path)
         out_path = f"{RESULTS_DIR}/{clip_id}_track{track_id}.glb"
