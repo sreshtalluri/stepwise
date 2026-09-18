@@ -152,7 +152,19 @@ cv_image = (
         # TensorRT in the gate entirely.
         "onnx",
         "onnxruntime-gpu",
+    )
+    .pip_install(
+        # --no-deps: rtmlib's own requires_dist lists plain "onnxruntime"
+        # (CPU), not onnxruntime-gpu. pip installs both into the same
+        # onnxruntime/ site-packages directory since they share an import
+        # name, and the CPU package's files silently clobber the GPU
+        # package's -- CUDAExecutionProvider vanishes from
+        # get_available_providers() with no error, only a build-log warning
+        # ("multiple onnxruntime packages installed to the same location").
+        # numpy/opencv/tqdm are already installed above; nothing else in
+        # rtmlib's requires_dist is needed.
         "rtmlib",
+        extra_options="--no-deps",
     )
     .pip_install(
         # The published PyPI release of bytetracker (0.3.2) pins lap==0.4.0,
@@ -189,6 +201,7 @@ def verify_cv_stack():
     across a couple of synthetic frames -- before spending GPU time on a real
     clip.
     """
+    import os
     import time
 
     import cv2
@@ -205,6 +218,11 @@ def verify_cv_stack():
     print(f"detectron2 {detectron2.__version__}, compiled ok (import succeeded)")
 
     print("\n--- onnxruntime providers ---")
+    print(f"onnxruntime {ort.__version__}")
+    # rtmlib's BaseTool never calls this, so it also happens at import time in
+    # tools/rtmo_detector.py -- called again here so this check is accurate
+    # even if that import hasn't happened yet in this process.
+    ort.preload_dlls()
     print(ort.get_available_providers())
     assert "CUDAExecutionProvider" in ort.get_available_providers(), (
         "onnxruntime-gpu did not register CUDAExecutionProvider -- would silently "

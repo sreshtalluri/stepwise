@@ -53,8 +53,21 @@ pip install 'git+https://github.com/facebookresearch/detectron2.git@a1ce2f9' \
 echo "=== Installing ONNX + ONNXRuntime CUDA ==="
 pip install onnx onnxruntime-gpu
 
-# Step 8b: RTMO + ByteTrack for detection/tracking
-pip install rtmlib bytetracker
+# Step 8b: RTMO + ByteTrack for detection/tracking.
+# --no-deps on rtmlib: its own requires_dist lists plain "onnxruntime" (CPU),
+# not onnxruntime-gpu. Installing both puts CPU and GPU builds' files in the
+# same onnxruntime/ site-packages directory, and CUDAExecutionProvider
+# silently vanishes from get_available_providers() with no error -- only a
+# "multiple onnxruntime packages installed to the same location" warning.
+# numpy/opencv/tqdm are already covered by earlier steps.
+pip install rtmlib --no-deps
+pip install bytetracker
+
+# Also call onnxruntime.preload_dlls() before constructing any ORT session
+# (see tools/rtmo_detector.py) -- rtmlib's BaseTool builds the session
+# directly and never calls it, and ORT >=1.21 needs the explicit preload
+# rather than relying on ldconfig/LD_LIBRARY_PATH discovery of torch's
+# pip-installed CUDA/cuDNN.
 
 pip install numpy scipy opencv-python tqdm
 # [REMOVED] smplx, chumpy -- SMPL-X body model, unused (this pipeline runs

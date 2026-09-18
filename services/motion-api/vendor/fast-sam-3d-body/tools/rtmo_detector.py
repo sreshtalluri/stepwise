@@ -36,8 +36,18 @@ Nothing downstream should rescale coordinates a second time.
 from __future__ import annotations
 
 import numpy as np
+import onnxruntime as ort
 from rtmlib.tools.object_detection.post_processings import nms
 from rtmlib.tools.pose_estimation.rtmo import RTMO
+
+# rtmlib's BaseTool creates the ORT session directly and never calls this, so
+# CUDAExecutionProvider silently vanishes from get_available_providers() even
+# though torch's own pip-installed CUDA/cuDNN are right there on disk -- ORT
+# >=1.21 needs an explicit preload (onnxruntime.ai/docs/execution-providers/
+# CUDA-ExecutionProvider.html) rather than relying on ldconfig/LD_LIBRARY_PATH
+# discovery. Must run before any InferenceSession is constructed, so it goes
+# here at import time rather than inside RTMODetector.__init__.
+ort.preload_dlls()
 
 # Lower than rtmlib's RTMO default of 0.7. ByteTrack's own two-tier matching
 # (high-confidence detections spawn/confirm tracks; low-confidence ones only
