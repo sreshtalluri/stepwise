@@ -140,7 +140,7 @@ two factual errors in it.
 
 ---
 
-## W1 — The feasibility gate  🟡 BLOCKED on HF token + Modal billing
+## W1 — The feasibility gate  🟢 READY — weights downloaded, GPU verified
 
 ```
 You are running the feasibility gate for stepwise — deciding whether the core
@@ -150,15 +150,25 @@ Repo: github.com/sreshtalluri/stepwise. Start from branch worktree-modal-gate,
 which already has working Modal infrastructure at services/motion-api/modal_app.py.
 Read services/motion-api/README.md and docs/PRD.md sections 2 and 3 in full.
 
-ALREADY DONE: Modal app with three staged functions, image verified to build
-with torch 2.5.1/cu124, CPU stages green.
+ALREADY DONE AND VERIFIED (do not redo):
+- Modal app with three staged functions at services/motion-api/modal_app.py
+- Image builds clean: torch 2.5.1+cu124
+- GPU verified: NVIDIA L40S, CUDA 12.4, 47.2 GB free VRAM, matmul OK
+- Gated weights DOWNLOADED into the Modal Volume "stepwise-weights": 2.81 GB at
+  /weights/facebook__sam-3d-body-dinov3 containing exactly two large files:
+    model.ckpt        2109.1 MB   (SAM 3D Body checkpoint)
+    assets/mhr_model.pt 696.1 MB  (MHR parametric model, BUNDLED)
+
+NOTE ON MHR: the PRD assumed MHR assets come only from a separate ~190 MB
+GitHub release (assets.zip, 7 LODs, lod?.fbx). An mhr_model.pt is already
+bundled here, but that is the parametric model, NOT the LOD meshes needed for
+glTF export. Verify what the bundled file actually contains before deciding
+whether the separate assets.zip download is still required. Also: the asset
+LICENSE ships inside that zip and has never been read — read it before shipping.
 
 YOUR TASK, IN THIS ORDER. Stop at the first failure and report.
 
-1. Confirm weights downloaded into the Modal Volume, and run inspect_weights to
-   see which checkpoint variants exist and their sizes.
-2. Run verify_gpu. Record the actual CUDA version, device, and free VRAM.
-3. Build the real CV image. Pins are NOT arbitrary: Python 3.11, Torch 2.5.1,
+1. Build the real CV image. Pins are NOT arbitrary: Python 3.11, Torch 2.5.1,
    cu124, because Detectron2 compiles against that toolkit.
    - Fast-SAM-3D-Body's setup_env.sh STILL INSTALLS Ultralytics, TensorRT and
      SMPL-X. Remove all three; we use RTMO instead and TensorRT is not needed
@@ -168,10 +178,10 @@ YOUR TASK, IN THIS ORDER. Stop at the first failure and report.
    - Do NOT install pymomentum here. Its wheels target Python 3.12/3.13 with
      Torch 2.8 and are incompatible. glTF export gets a SEPARATE image; the two
      exchange plain arrays (npz/JSON).
-4. Get RTMO running via rtmlib with ONNXRuntime CUDA. Import torch BEFORE
+2. Get RTMO running via rtmlib with ONNXRuntime CUDA. Import torch BEFORE
    creating the ORT session, and verify CUDA actually activated rather than
    silently falling back to CPU. Start with RTMO-m/body7 at 640x640.
-5. Build the detector adapter. This is the crux and rtmlib will not hand you
+3. Build the detector adapter. This is the crux and rtmlib will not hand you
    what you need:
    - RTMO(image) returns keypoints (N,17,2) and scores (N,17). Its postprocessor
      COMPUTES person boxes and detection scores and then DISCARDS them. Subclass
@@ -188,9 +198,9 @@ YOUR TASK, IN THIS ORDER. Stop at the first failure and report.
    - The hand-box code itself needs NO change: _get_hand_box_from_yolo_pose at
      roughly line 3430 of sam_3d_body/models/meta_arch/sam3d_body.py is pure
      numpy keyed to COCO-17 wrist indices and touches nothing from ultralytics.
-6. Eager inference first — correctness before speed. Skip TensorRT entirely for
+4. Eager inference first — correctness before speed. Skip TensorRT entirely for
    now; it moves the pipeline only 3.50 to 3.58 FPS and is not worth the time.
-7. THE WEEK-ONE DELIVERABLE: one 10-15 second clip containing a turn, a wrist
+5. THE WEEK-ONE DELIVERABLE: one 10-15 second clip containing a turn, a wrist
    occlusion, and a re-entry, exported to GLB and played on a phone beside the
    original video, with raw detector overlays visible and measured runtime, peak
    VRAM, and cost per clip.
