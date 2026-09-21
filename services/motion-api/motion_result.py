@@ -203,7 +203,18 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
             for k, i in enumerate(placement["idx"]):
                 if valid_rows[k]:
                     composed_position[int(i)] = world_pts[k]
-        held_position = None  # most recent composed world position, forward-filled
+        # Seeded with the FIRST solved position rather than None, i.e. the
+        # leading gap is BACK-FILLED -- the same argument, and the same fix,
+        # modal_app.export_clip_gltf already applies to skel_state's leading
+        # gap.  A track can be reconstructed on a sample whose placement did
+        # not solve (solo-01's first sample is one of its 4 NaN translation
+        # rows), and leaving those on the pinned constant put the dancer at
+        # the old character-local origin for one frame and then TELEPORTED
+        # them 6.14 m -- measured; solo-07 track 3 jumped 7.73 m.  A held
+        # pose reads as a freeze, which is honest; a 6 m jump reads as real
+        # travel, which is a lie about what the pipeline saw.
+        placed = bool(composed_position)
+        held_position = composed_position[min(composed_position)] if placed else None
         # branch `hands`: crop rects are computed in the GPU stage (they need the
         # detector keypoints and the real post-rotation frame size, both of which
         # only exist there) and carried per-person in the npz, same as
@@ -287,6 +298,15 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                     # (solo-07 track 3 measured 53 cm off) -- both still OPEN
                     # in OPEN-DECISIONS E6, not resolved by this wiring.
                     position = [float(v) for v in held_position]
+                    # Placement is a per-sample claim of its own: a sample
+                    # whose own translation solved is observed, one that
+                    # inherited a held/back-filled position is not.  This is
+                    # NOT the joint provenance above -- the pose can be
+                    # observed on a sample whose placement was not.
+                    root_prov = provenance if i in composed_position else {
+                        "observed": False, "interpolated": True,
+                        "suppressed": provenance["suppressed"] or "low_confidence",
+                    }
                 else:
                     # CORRECTION: the reason this was pinned was WRONG, not
                     # merely incomplete. It said composing pred_cam_t would
@@ -296,6 +316,18 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                     # the choreography, and the -0.93 correlation with bbox
                     # height is the pinhole relation working, not an error.
                     position = [float(root_pos_cm[0]) / 100.0, float(root_pos_cm[1]) / 100.0, float(root_pos_cm[2]) / 100.0]
+                    # This track was never placed (too few frames for
+                    # world_placement_probe's 25-frame minimum -- solo-07
+                    # tracks 5 and 9 have 21 and 14).  The pinned constant is
+                    # NOT a world position in this document's world space: it
+                    # sits 2.16 m above solo-07's own fitted floor, next to
+                    # the camera.  A Vec3 is required here and there is no
+                    # honest one, so the position stays the old placeholder
+                    # and the provenance says so -- never `observed`, so a
+                    # consumer that respects provenance (DESIGN.md 7h) does
+                    # not draw this dancer standing in a spot nobody measured.
+                    root_prov = {"observed": False, "interpolated": False,
+                                 "suppressed": "low_confidence"}
                 root_traj.append({
                     # cm -> meters, same scale factor verified against
                     # joint_hierarchy.rest_translation (see dump_joint_hierarchy).
@@ -305,7 +337,7 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                     # its local one, and the body's world orientation is
                     # exactly what root_trajectory is asking for.
                     "rotation": list(tuple(float(v) for v in held[root_idx, 3:7])),
-                    "provenance": provenance,
+                    "provenance": root_prov,
                 })
 
             samples_out.append({"joints": joints_sample})
