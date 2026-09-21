@@ -46,7 +46,7 @@ Status key: **OPEN** · **LEANING** (a recommendation exists) · **DEFER** (safe
 | D5 | Accounts: none, magic link, or OAuth? | OPEN | Invite-only cohort needs *some* identity. Magic link is least friction. Affects A3 and A6. |
 | D6 | How long is a lesson kept? | OPEN | Storage cost and a privacy promise. "We keep the clip while the lesson exists" is written on the landing mockup — needs to be true and stated. |
 | D7 | Can a lesson be deleted, and does the share link die with it? | OPEN | Should be yes to both; needs designing. |
-| D8 | Who can upload video of whom? | OPEN | Both Meta and NVIDIA licences restrict processing people without consent. The ToS must say users only upload video they have rights to — and the upload screen should say it in plain language, once. |
+| D8 | Who can upload video of whom? | LEANING | **Recommendation: `docs/research/rights-and-privacy.md`.** Keep W7's passive one-liner, add one sentence naming the people *in* the clip, build **no blocking checkbox** — the consent that matters is the dancer's and the uploader cannot give it. Highest-value item is a working removal path, not upload-screen friction; gate at *publication*, not upload. Interacts with D5 (no accounts = no subscriber to terminate under §512(i), and no owner to restore a wrongly-removed lesson) and D6/D7 (there is no retention or deletion code in the service at all today). |
 | D9 | What happens when the learner wants a dance longer than 60s? | OPEN | The cap is real. Do we say "trim it" and give them a trimmer, or just refuse? |
 | D10 | Public name | OPEN | `NAMES.md` has candidates. Needed before public launch, not before the gate. |
 
