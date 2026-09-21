@@ -7,6 +7,7 @@ import {
   viewLabel,
   projectBoxToFrame,
   cropTransform,
+  cropRectAt,
   followStep,
   damp,
   travelExtent,
@@ -14,6 +15,7 @@ import {
   FOLLOW,
   VIEW_PRESETS,
   SPEEDS,
+  type CropRegion,
   type MotionResult,
   type Rect,
   type Vec3,
@@ -231,6 +233,105 @@ function useVideoCrop(
   return status;
 }
 
+/**
+ * One region's close-up: real pixels from the SAME `<video>` element this page
+ * already has, cropped to `crop_rects[region]` and drawn onto a canvas — no
+ * second `<video>`, no second decode, no second clock. Reads `timeRef` on its
+ * own rAF loop exactly like `useVideoCrop` above, and only touches React state
+ * when a sample flips between having a rect and not having one.
+ *
+ * WHY A CANVAS. The main video pane already owns `style.transform` for its own
+ * body-follow crop; a second, differently-cropped view of the same element
+ * needs its own pixels, not a second style on the one `<video>` DOM node. This
+ * is the "crop-transform... or draw canvas from it" the brief asks for, and it
+ * costs nothing extra to decode — `drawImage` samples whatever the browser has
+ * already decoded for display.
+ *
+ * DESIGN.md §7h — the crux. A `null` sample means the pipeline did not
+ * confidently localize this region, and `crop_rects.hands`/`.feet` say so
+ * per-sample by contract (`hand_crops.py`'s emission rules). Holding the last
+ * drawn crop on a `null` sample would show a stale frame as if it were the
+ * current one — the exact confident-wrong-output failure this project exists
+ * to guard against — so the canvas is cleared and a plain label takes over.
+ */
+function CropPeek({
+  video,
+  doc,
+  timeRef,
+  personIndex,
+  region,
+  mirrored,
+}: {
+  video: HTMLVideoElement | null;
+  doc: MotionResult;
+  timeRef: React.RefObject<number>;
+  personIndex: number;
+  region: CropRegion;
+  mirrored: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [live, setLive] = useState(false);
+
+  useEffect(() => {
+    if (!video) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d") ?? null;
+    if (!canvas || !ctx) return;
+    let handle = 0;
+    let reported = false;
+
+    const tick = () => {
+      handle = requestAnimationFrame(tick);
+      const rect = cropRectAt(doc, personIndex, region, timeRef.current);
+      if (!rect) {
+        if (reported) {
+          reported = false;
+          setLive(false);
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height); // never hold a stale crop — §7h
+        return;
+      }
+      // `videoWidth`/`videoHeight` fall back to the contract's own dimensions
+      // before the element has a frame decoded yet; ingest already bakes
+      // rotation into both, so the two agree once the video is ready.
+      const vw = video.videoWidth || doc.source_video.width_px;
+      const vh = video.videoHeight || doc.source_video.height_px;
+      if (!vw || !vh) return;
+      if (!reported) {
+        reported = true;
+        setLive(true);
+      }
+      const sx = rect.x * vw;
+      const sy = rect.y * vh;
+      const sw = rect.width * vw;
+      const sh = rect.height * vh;
+      // Contain-fit inside the fixed canvas so the crop only ever scales up,
+      // never stretches — the rect's own aspect ratio drifts slightly frame to
+      // frame as a hand opens or a foot lifts.
+      const scale = Math.min(canvas.width / sw, canvas.height / sh);
+      const dw = sw * scale;
+      const dh = sh * scale;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, sx, sy, sw, sh, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh);
+    };
+    handle = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(handle);
+  }, [video, doc, timeRef, personIndex, region]);
+
+  return (
+    <div className="crop-peek">
+      <span className="crop-peek-label">{lessonCopy.crop[region]}</span>
+      <canvas
+        ref={canvasRef}
+        width={128}
+        height={128}
+        style={mirrored ? { transform: "scaleX(-1)" } : undefined}
+      />
+      {!live && <span className="crop-peek-msg">{lessonCopy.crop.unavailable}</span>}
+    </div>
+  );
+}
+
 export interface LessonViewerProps {
   doc: MotionResult;
   title: string;
@@ -340,6 +441,15 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
   const [follow, setFollow] = useState(true);
   /** Written every frame by the main 3D stage; read by the video pane's crop. */
   const focusRef = useRef<Focus | null>(null);
+  /**
+   * Hand/feet close-up, on by default. Builder-dance feedback names specific
+   * hand shapes as one of the things the product has to get right, and
+   * `crop_rects` is the one honest way to show them at this source resolution
+   * (see `hand_crops.py`'s header) — so it defaults to visible rather than a
+   * discovery a learner might never make. It stays a real toggle (§8) because
+   * it is one more box on a phone screen and someone may just want the video.
+   */
+  const [showCrops, setShowCrops] = useState(true);
 
   // ...except under `prefers-reduced-motion`. A camera that pans through a 3D scene
   // is exactly the motion that setting exists for — unlike the contact shadow, which
@@ -494,6 +604,18 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
           />
+          {/* Hidden when the video pane itself is demoted to a 96px strip (D2) —
+              there is no room to make a close-up legible, and the strip is
+              already the close-up-of-everything at that point. Placed in the
+              video stage only, so it can never crowd the 3D stage or (being
+              absolutely positioned inside a fixed-height box) the count strip
+              below the stages. */}
+          {showCrops && promoted !== "3d" && (
+            <div className="crop-peek-group">
+              <CropPeek video={video} doc={doc} timeRef={timeRef} personIndex={selected} region="hands" mirrored={mirrored} />
+              <CropPeek video={video} doc={doc} timeRef={timeRef} personIndex={selected} region="feet" mirrored={mirrored} />
+            </div>
+          )}
         </section>
       </div>
 
@@ -582,6 +704,10 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
         >
           {compareView ? "Compare on" : "Compare off"}
           <small>two angles</small>
+        </button>
+        <button className={`btn ${showCrops ? "active" : ""}`} onClick={() => setShowCrops((v) => !v)}>
+          {showCrops ? lessonCopy.crop.toggleOn : lessonCopy.crop.toggleOff}
+          <small>{lessonCopy.crop.toggleHint}</small>
         </button>
       </LessonNavigator>
 

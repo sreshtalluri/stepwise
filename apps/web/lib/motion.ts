@@ -2,10 +2,10 @@
  * Pure logic for reading MotionResult v1. No three.js, no React — everything here
  * is unit-testable and is tested in motion.test.ts.
  */
-import type { MotionResult, Visibility } from "../../../packages/motion-contract/src/ts/generated/motion-result";
+import type { CropRect, MotionResult, Visibility } from "../../../packages/motion-contract/src/ts/generated/motion-result";
 import { REGIONS } from "./regions";
 
-export type { MotionResult, Visibility };
+export type { CropRect, MotionResult, Visibility };
 
 /* ------------------------------------------------------------------- seeking */
 
@@ -29,6 +29,23 @@ export function sampleIndexAt(times: readonly number[], t: number): number {
     else hi = mid - 1;
   }
   return lo;
+}
+
+export type CropRegion = "hands" | "feet";
+
+/**
+ * The `CropRect` in effect for one region at time `t`, or `null` when the
+ * pipeline did not confidently localize it for that sample.
+ *
+ * Same step function as `sampleIndexAt`, for the same reason: a crop rectangle
+ * is a per-frame fact from the detector, not a quantity to interpolate across a
+ * `null` gap. A rect synthesised between two real localizations would be a
+ * claim the pipeline never made (DESIGN.md §7h).
+ */
+export function cropRectAt(doc: MotionResult, personIndex: number, region: CropRegion, t: number): CropRect {
+  const person = doc.persons[personIndex];
+  if (!person) return null;
+  return person.crop_rects[region][sampleIndexAt(doc.sample_times_s, t)] ?? null;
 }
 
 /* ---------------------------------------------------------------- visibility */

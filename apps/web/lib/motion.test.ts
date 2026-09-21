@@ -11,6 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   sampleIndexAt,
+  cropRectAt,
   regionVisibility,
   absentNotes,
   defaultPersonIndex,
@@ -56,6 +57,33 @@ test("sampleIndexAt is a step function on sample_times_s, not index/fps arithmet
     const mid = (t[i] + t[i + 1]) / 2;
     assert.equal(sampleIndexAt(t, mid), i);
   }
+});
+
+test("cropRectAt is a step function on crop_rects.*, and null means not localized (DESIGN.md §7h)", () => {
+  // good-lesson has a rect at every sample — a real one comes back untouched.
+  const idx = 5;
+  assert.deepEqual(
+    cropRectAt(good, 0, "hands", good.sample_times_s[idx]),
+    good.persons[0].crop_rects.hands[idx],
+  );
+
+  // failure-lesson's feet are null for most of the clip (LessonViewer.tsx's own
+  // comment cites 8/90) — find one null sample and one real one.
+  const feet = failure.persons[0].crop_rects.feet;
+  const times = failure.sample_times_s;
+  const nullIdx = feet.findIndex((r) => r === null);
+  const realIdx = feet.findIndex((r) => r !== null);
+  assert.ok(nullIdx >= 0 && realIdx >= 0, "fixture must contain both a null and a real foot crop");
+  assert.equal(cropRectAt(failure, 0, "feet", times[nullIdx]), null);
+  assert.deepEqual(cropRectAt(failure, 0, "feet", times[realIdx]), feet[realIdx]);
+
+  // Step function, not interpolation: halfway between two samples resolves to
+  // whichever one sampleIndexAt would pick, never a blended rectangle.
+  const mid = (times[nullIdx] + times[nullIdx + 1]) / 2;
+  assert.deepEqual(cropRectAt(failure, 0, "feet", mid), feet[sampleIndexAt(times, mid)]);
+
+  // An out-of-range person index is absent, not a crash.
+  assert.equal(cropRectAt(failure, 99, "feet", 0), null);
 });
 
 test("failure fixture: feet go absent, left arm goes uncertain, and the shin stays drawn", () => {
