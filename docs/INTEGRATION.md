@@ -1269,3 +1269,608 @@ because neither is visible in a diff:
 - **A real Modal run** of `beat_image` (§15).
 - **§3.3 / §9.4's other open item** — W9's per-joint visibility, computed and
   discarded — is untouched by this branch and still unowned.
+
+---
+---
+
+# Third integration pass — branch `integration-3`
+
+Five more branches landed on top of the four `integration-2` merged. Same
+exercise, same question: **what is broken only once the pieces meet?** This pass
+found one defect of exactly that kind, and it is the same shape as §9.1's even
+though nothing was moved between files this time: two branches edited two
+*different* files, git had nothing to conflict on, every one of the 189 tests
+stayed green, and the composed result would have deployed an API that answers
+500 to every request while `modal deploy` printed success (§24.1).
+
+Base: `origin/integration-2`. Nothing from `main` merged. No branch modified,
+deleted or force-pushed. Every merge pushed before the next one started.
+Everything below is measured on the merged branch, including a real Modal L40S
+session and a live deploy of the HTTP service.
+
+---
+
+## 22. Merge order
+
+Ancestry verified with `git merge-base` over every pair before starting rather
+than trusted from the brief. **This time the brief's tree was correct** — the
+two errors the first two passes found do not recur:
+
+| # | Branch | Cut from | Verified | Result |
+|---|--------|----------|----------|--------|
+| 1 | `lesson-structure` | `integration-2` (`b31bea2`) | yes | clean |
+| 2 | `hand-crop-view` | `lesson-structure` tip (`ff76b3a`) | yes | clean |
+| 3 | `link-ingestion` | `integration-2` (`b31bea2`) | yes | 2 conflicts (§23.1, §23.2) |
+| 4 | `grounding-wiring` | `link-ingestion` tip (`42eb96c`) | yes | clean; `motion_result.py` auto-merged and audited (§23.3) |
+| 5 | `deployment` | `integration-2` (`b31bea2`) | yes | 3 conflicts, one of which is the whole point of this pass (§24.1) |
+
+Dependency order, so the two stacked pairs go in as pairs: `hand-crop-view`
+directly after its base `lesson-structure`, `grounding-wiring` directly after
+its base `link-ingestion`. `deployment` last, because it is the branch that
+edits the most of `api.py` and it is better to re-derive its changes onto four
+merged branches than to have four branches land on top of it.
+
+Every merge is a real merge commit (`--no-ff`), and **every merge was tested and
+pushed before the next began** — five merges stacked and then debugged is how
+the work gets lost.
+
+| merge | commit |
+|---|---|
+| `lesson-structure` | `2e23688` |
+| `hand-crop-view` | `05c7882` |
+| `link-ingestion` | `42334f7` |
+| `grounding-wiring` | `1839ab3` |
+| `deployment` | `b49ecae` |
+
+---
+
+## 23. Conflict resolutions
+
+### 23.1 `next.config.mjs` — two branches, two unrelated reasons, one file
+
+`lesson-structure` sets `turbopack.root` to the repo, because
+`<LessonNavigator>` is the first *value* import from a sibling package and
+Turbopack will not resolve above the project directory. `link-ingestion` adds a
+`rewrites()` proxying `/api/*` at the motion service, because the app had been
+fetching `/api/jobs/...` from three places with nothing serving them.
+
+Union, not a choice: the two keys are independent and dropping either breaks a
+different feature. Both comment blocks kept, merged into one docstring that says
+which half is which, because the next person to open this file will be adding a
+third key and both reasons need to survive that.
+
+### 23.2 `OPEN-DECISIONS.md` D5 — two branches append a different dependency
+
+Both sides add a "this decision now blocks something new" note to the same D5
+row. `lesson-structure`'s is that authored counts live in `localStorage` with
+nothing to key them on; `link-ingestion`'s is that a link-derived `clip_id`
+makes D11's takedown question depend on D5. Neither replaces the other. Both
+kept, and `link-ingestion`'s renumbered from "Second dependency" to "Third",
+which is the same clash §8.2 recorded for E-numbers: branches cut from one
+commit pick the same next free ordinal against their own base. Nothing prevents
+it and nothing yet does.
+
+### 23.3 `motion_result.py` — the highest-risk file, auto-merged, audited anyway
+
+`grounding-wiring` rewrites this file (+214/−43: the world-placement solve, the
+camera-space grounding call, the `camera_to_world` rationale) while
+`lesson-structure` adds `_proposed_counts` and a `beats` parameter to the same
+function's signature. Git produced no conflict. Given that §9.1 was a clean
+merge of this exact file that silently reverted four packages, "no conflict" is
+not evidence of anything, so the merged file was diffed against **both** parents
+rather than read for plausibility:
+
+```
+diff origin/grounding-wiring:motion_result.py  <merged>
+  -> exactly four hunks, all additive, all lesson-structure's beats work
+```
+
+Nothing of `grounding-wiring`'s rewrite was dropped and nothing of
+`lesson-structure`'s addition was. The composed `build_motion_result(job_id,
+clip_id, npz_bytes, manifest, perf, beats=None)` carries both.
+
+### 23.4 `modal_app.py` — four branches, no conflict, each edit verified present
+
+`lesson-structure` (+100: `beat_image`, `propose_counts`, the spawn/collect pair
+inside `run_clip`), `link-ingestion` (+13: the `results.reload()` guard before
+`export_clip_gltf` reads the npz), `grounding-wiring` (+12: mounting
+`world_placement_probe.py` and `skeleton_constraints.py` into `gltf_image`) and
+`deployment` (+221: `api_image`, the `@modal.asgi_app()` web function, R2
+secrets, `_publish_to_r2`) all edit this file in non-overlapping places.
+
+Each was checked present in the merged file by name rather than assumed, because
+the ENOENT fix in particular is the sort of four-line guard that a merge can
+quietly lose: `link-ingestion`'s `if not os.path.exists(npz_path):
+results.reload()` is at line 1231 of the merged file, still above the
+`np.load`, and `lesson-structure`'s `beats` read is at 1448, still below it.
+Both survived, in the right order.
+
+### 23.5 `api.py` — three conflicts, and §24.1
+
+`link-ingestion` (+279) and `deployment` (+168) both substantially rewrite this
+file. Two of the three conflicts are unions (the import block: `Header` and
+`ingest` from one side, `RedirectResponse`, `jobstore` and `storage` from the
+other; and a helper-ordering collision where one side inserted `_publish_video`
+exactly where the other split `_find_existing` into `_usable` +
+`_find_existing` + `_find_by_source`). The third is §24.1.
+
+---
+
+## 24. What was broken only in combination
+
+### 24.1 The deployed API would have 500'd on every request
+
+**Severity: fatal in production, invisible in the merge and in every test.
+Found and fixed.**
+
+This is the finding this exercise exists to produce, and it is a cleaner
+specimen than §9.1 because nothing was moved and nothing was claimed verbatim.
+Two branches edited two different files, correctly, against their own bases.
+
+* `deployment` adds `api_image` so `api.py` can run as an
+  `@modal.asgi_app()` on Modal. It mounts `services/motion-api` with
+  `ignore=["vendor/**", ...]`, and that exclusion is the *point* of the image:
+  api.py's whole design property is that it never imports torch or the CV
+  stack, so 1.9 GB of vendored Fast-SAM-3D-Body has no business in a CPU
+  container. Correct when written — api.py had no vendored dependency at all.
+* `grounding-wiring` gives `motion_result.py` a module-level
+  `import world_placement_probe`, which itself has a module-level
+  `import skeleton_constraints` — a file that lives under `vendor/`. Correct on
+  its own base, which had no `api_image` in it. It even remembered to mount that
+  file into `gltf_image`, the only image that existed to mount it into.
+
+`api.py` imports `motion_result` at module level. Composed:
+
+```
+import api -> import motion_result -> import world_placement_probe
+           -> import skeleton_constraints
+ModuleNotFoundError: No module named 'skeleton_constraints'
+```
+
+**Git had nothing to conflict on** — two different files, no textual overlap.
+**No test could have caught it**, and this is the part worth internalising: every
+suite in this repo runs from a checkout where `vendor/` is simply *there on
+disk*, so `import api` succeeds locally no matter what api_image ships. The
+image even builds and `modal deploy` reports success, because a mount list is
+not type-checked against an import graph. The failure surfaces only as a 500
+from the live URL, on the first request after a container recycle.
+
+Reproduced before fixing, by building api_image's file tree by its own rules
+(three `add_local_dir` mounts with their ignore lists) into a temp directory and
+importing `api` from it in a clean subprocess. That reproduction is now the fix's
+test.
+
+Fixed in `modal_app.py` with one mount: `skeleton_constraints.py` (17 KB, pure
+numpy, no torch) put back at the exact repo-relative path it came from, so
+`world_placement_probe`'s own `sys.path.insert(_HERE / "vendor/...")` finds it
+with **no import-path change in any module**. The `vendor/**` exclusion stays,
+which is what keeps api_image a CPU image. `gltf_image` mounts the same file
+flat at `/app` because that image has a flat `/app`; the two mounts differ in
+path for that reason and no other.
+
+Covered by `services/motion-api/test_api_image.py`, two tests:
+
+* `test_api_imports_with_only_what_api_image_ships` — builds the tree, imports
+  `api` in a subprocess, fails with the ModuleNotFoundError if any future branch
+  adds another unshipped import anywhere in that graph. Confirmed to fail when
+  the mount is removed.
+* `test_skeleton_constraints_is_mounted_despite_the_vendor_exclusion` — the
+  named instance, so a failure reads as itself rather than as "something is
+  unshippable".
+
+**Verified on the real deploy, not only in the reproduction**: after
+`modal deploy` and a forced fresh container, `GET /health` answers 200 and
+`POST /clips/link` answers its 403. Both require `api.py` to have imported.
+
+**The general lesson, since this will recur:** §9.1's was "a branch cannot claim
+*verbatim* about a file it has not seen for four packages". This one's is
+narrower and nastier: **a branch that adds an import and a branch that narrows a
+deployment manifest cannot see each other at all.** Neither file appears in the
+other's diff. The only thing that catches it is an import performed against the
+manifest's own rules, which is why that is now a test rather than a habit.
+
+### 24.2 `deployment`'s R2 publish and job record landed in a deleted function
+
+**Severity: silent loss of two features on both front doors. Caught in the
+conflict, re-derived.**
+
+The third `api.py` conflict, and a direct echo of §9.1 in a new costume.
+
+`deployment` adds two calls inside `upload_clip`: `_publish_video(clip_id,
+tmp_path)` (so the source video is range-servable from R2 instead of proxied
+whole through the service) and `jobstore.record_dispatch(...)` replacing the
+raw `retention.write_json(... job-meta.json ...)`. Correct where that branch was
+cut.
+
+`link-ingestion`, meanwhile, had moved that entire function body out of
+`upload_clip` into a new `_store_and_dispatch(tmp_path, clip_id, fp,
+source_key)`, precisely so that the uploaded-file door and the pasted-link door
+mint a job in exactly one place — which is what keeps a takedown complete.
+
+Git offered the two `deployment` additions as non-overlapping edits to a
+function the other side had deleted. **Taking that offer would have dropped R2
+video publishing and the jobstore record from both front doors**, with no
+conflict marker on those lines, no failing test, and a `/health` that keeps
+saying `"assets": "r2"` because R2 *is* configured — the videos simply would
+never have been put in it. Every lesson would have silently regressed to the
+byte proxy that cannot answer a `Range:` request, i.e. video scrubbing, which is
+DESIGN.md §7c's core interaction.
+
+Re-derived into `_store_and_dispatch` instead of replayed. The composed result is
+strictly better than `deployment`'s own: the **link door now gets both for
+free**, so a linked lesson's video is range-servable exactly like an uploaded
+one, which `deployment` could not have written because `/clips/link` did not
+exist on its base.
+
+One thing deliberately **not** converted while re-deriving: the adoption read at
+the end of `_store_and_dispatch` stays a raw Volume read of
+`{job_id}.job-status.json` and is **not** switched to `jobstore.read_status`,
+even though every other status read in the file was. It asks one question — "has
+`run_clip` started and written its own status document" — and only the worker
+writes that document. `record_dispatch` a few lines above inserts a `queued` row
+for *this* request under `STEPWISE_JOB_BACKEND=postgres`, so reading the row back
+here would find our own insert and adopt a job nobody ever spawned. The comment
+in the code says so, because the next person to tidy this will reach for the
+abstraction.
+
+### 24.3 A stale container kept serving pre-merge code after `modal deploy`
+
+**Severity: not a defect. Confirmed behaviour, recorded because it invalidates
+the obvious way to verify a deploy.**
+
+The brief flagged this and it reproduced exactly. After `modal deploy` of the
+merged branch (50.7 s, mounts only, no image rebuild):
+
+```
+GET  /health       -> 200   {"ok":true,"assets":"r2",...}
+POST /clips/link   -> 404   {"detail":"Not Found"}
+```
+
+`/clips/link` exists only on merged code, and its invite gate answers **403**,
+never 404 (deliberately — "someone who was given a code and typed it wrong"
+deserves to be told). A 404 is therefore proof the ASGI app being served predates
+the merge. `/health` answering 200 the whole time is the trap: the endpoint that
+looks like a deploy check is exactly the one that cannot tell you the deploy
+took.
+
+`modal container stop -y <id>` forces a fresh one, after which:
+
+```
+POST /clips/link   -> 403   {"error":{"code":"invite_required", ...}}
+GET  /health       -> 200
+```
+
+So: when only mounted local files change, **the running container survives the
+deploy**. Verifying a mount-only deploy requires either stopping the container or
+probing something the new code alone can answer. `/health` is not that thing.
+(This is also what turned §24.1 from a reproduction into a live verification —
+the fresh container had to import `api.py` for real.)
+
+### 24.4 Smaller notes
+
+* **`beat_image` had never run on Modal.** §15 recorded that as open. It ran
+  here, in parallel with reconstruction as designed: `[beats] solo-01: 143.6
+  BPM, 0.4180 s/count, count 1 at 0.070s, confidence 0.91`, emitted while the
+  GPU was still on frame 1 of 296. The whole cost disappeared inside the GPU
+  stage exactly as §15 argued it would, and no image rebuild was triggered.
+* **`api.py` carries a dead import.** `from grounding import
+  camera_intrinsics_from_clip, solve_grounding_for_clip` (line 79) is used
+  nowhere in the file — a leftover from `caching-retention` moving the assembly
+  into `motion_result.py`. Harmless, pre-existing on `integration-2`, and left
+  alone rather than tidied mid-merge. Worth naming only because if it *were*
+  live it would now be a second, character-space grounding solve sitting beside
+  `motion_result`'s camera-space one.
+* **`test_schema.py`'s 12 tests skip by default** (no `DATABASE_URL`) and the
+  skip is correct — they must not fail on a laptop with no container daemon.
+  They were not left skipped here: run against a real `postgres:16` container,
+  all 12 pass, including the one that matters (a job-status document served from
+  a row is byte-identical to one served from the Volume). `requirements-api.txt`
+  correctly pins `psycopg[binary,pool]`; installing only `psycopg[binary]` fails
+  five of them on `psycopg_pool`, which is worth knowing when reproducing.
+* **The "4 Issues" badge is explained and survives.** It is the Next.js **dev
+  overlay**'s issue counter, and its four entries are four
+  `THREE.WebGLRenderer: A WebGL context could not be created` console errors
+  raised from `Stage3D.tsx:542`, because the headless browser taking the
+  screenshot has no GPU. It is dev-only (absent from `next build` output) and an
+  artifact of how the screenshots are taken, not of the page. Still out of
+  scope, but no longer unexplained.
+
+---
+
+## 25. Test matrix
+
+Every suite in the tree, on the merged branch. Python 3.12, Node 24.
+
+| Suite | `integration-2` | Now | Result |
+|-------|-----------------|-----|--------|
+| `packages/motion-contract` — TypeScript (`test/ts/validate.test.ts`) | 14 | **17** | **17 pass** |
+| `packages/motion-contract/python` (`tests/test_validate.py`) | 14 | **17** | **17 pass** |
+| `packages/navigation` (`test/core.test.ts`) | 17 | 17 | **17 pass** |
+| `packages/beat-detect/python` (`tests/test_propose.py`) | 2 | 2 | **2 pass** |
+| `apps/web` — `test/copy.test.ts` | 10 | **14** | **14 pass** |
+| `apps/web` — `test/logic.test.ts` | 4 | 4 | **4 pass** |
+| `apps/web` — `lib/motion.test.ts` | 13 | **14** | **14 pass** |
+| `services/motion-api/test_grounding.py` | 15 | 15 | **15 pass** |
+| `services/motion-api/test_world_placement_wiring.py` (new, `grounding-wiring`) | — | **9** | **9 pass** |
+| `services/motion-api/test_api_rotations.py` | 6 | 6 | **6 pass** |
+| `services/motion-api/test_proposed_counts.py` (new, `lesson-structure`) | — | **4** | **4 pass** |
+| `services/motion-api/test_ingest.py` (new, `link-ingestion`) | — | **23** | **20 pass, 3 skipped** |
+| `services/motion-api/test_schema.py` (new, `deployment`) | — | **12** | **12 pass** |
+| `services/motion-api/test_api_image.py` (new, §24.1) | — | **2** | **2 pass** |
+| `services/motion-api/test_retention.py` | 10 | 10 | **10 pass** |
+| `services/motion-api/test_fingerprint.py` | 2 | 2 | **2 pass** |
+| `services/motion-api/tools/test_region_mask.py` | 9 | 9 | **9 pass** |
+| `tools/test_skeleton_constraints.py` | 12 | 12 | **12 pass** |
+| `tools/test_hand_crops.py` | 8 | 8 | **8 pass** |
+| `tools/test_smoothing.py` | 9 | 9 | **9 pass** |
+| `tools/test_process_clip.py` | 5 | 5 | **5 pass** |
+| `tools/test_rtmo_detector.py` | 7 | 7 | **7 pass** |
+| **Total** | **157** | **238** | **235 pass, 3 skipped, 0 fail** |
+
+157 → 238 is +81: contract +3/+3 (`proposed_counts`, both sides), `copy.test.ts`
++4 and `motion.test.ts` +1 (the web branches), `test_ingest.py` +23,
+`test_schema.py` +12, `test_world_placement_wiring.py` +9,
+`test_proposed_counts.py` +4, and +2 written here for §24.1.
+
+**Nothing was loosened, skipped or deleted.** The two additions are both §24.1's
+guard; both were confirmed to fail when the mount they protect is removed.
+
+**The three skips are honest and were left as the branch wrote them.**
+`test_ingest.py`'s three live-network tests are gated on `STEPWISE_LIVE=1` and
+hit TikTok for real — they are not runnable in CI by design.
+
+**`test_schema.py` was NOT left skipped.** Its twelve tests skip when
+`DATABASE_URL` is unset, which is correct for a laptop with no container daemon,
+but "skipped" is not "green". Run against a real `postgres:16`:
+
+```
+docker run -d --name stepwise-pg -p 5433:5432 -e POSTGRES_PASSWORD=stepwise postgres:16
+DATABASE_URL=postgresql://postgres:stepwise@localhost:5433/postgres \
+  python3 -m pytest test_schema.py -q        -> 12 passed
+```
+
+**Reproducing the Python suites.** As §10, plus: `librosa` + `soundfile`
+(beat-detect), `boto3` (storage), `psycopg[binary,pool]` — the `pool` extra is
+load-bearing, `psycopg[binary]` alone fails five `test_schema.py` tests on
+`psycopg_pool`. `test_world_placement_wiring.py` additionally needs
+`vendor/fast-sam-3d-body/tools` on `PYTHONPATH` (that is what §24.1 is about).
+
+**`apps/web`**: `npm run build` and `tsc --noEmit` both clean. `npm run assets`
+must run first. Routes built: `/`, `/upload`, `/job/[jobId]`, `/lessons`,
+`/lesson/[lesson]` ×6.
+
+---
+
+## 26. End-to-end on Modal
+
+`modal run modal_app.py::run_clip --clip-id solo-01` on the merged branch. Real
+L40S session, real clip, real GLB. App `ap-snkLndtJcLp3nsh9dkAOGw`, job
+`job_solo-01_1789989003`, final job-status document:
+
+```json
+{"schema_version": "1.0.0", "job_id": "job_solo-01_1789989003",
+ "state": "succeeded", "stage_message": "", "progress": 1.0,
+ "error": null, "retry_count": 0}
+```
+
+### Cost and runtime
+
+| | This pass | `integration-2` | First pass |
+|---|---|---|---|
+| Reconstruction | **82.9 s (3.57 fps)**, 291/296 frames | 87.1 s (3.40 fps) | 146.5 s (2.02 fps) |
+| Wall clock incl. export | **136.0 s** | 140.9 s | — |
+| Peak VRAM | **3.69 GB** | 3.69 GB | 3.69 GB |
+| **Cost** | **$0.0737** | $0.0763 | $0.1279 |
+| Image build | none — mounts only | none | ~13 min |
+
+3.57 fps against `GATE-REPORT.md`'s 3.79; the same note applies as in both prior
+passes, and the trend across three runs on warm containers is flat.
+
+### The merged pipeline, in the order it ran
+
+```
+[beats] solo-01: 143.6 BPM, 0.4180 s/count, count 1 at 0.070s, confidence 0.91
+done: 291/296 frames reconstructed, 82.9s total (3.57 fps), peak VRAM 3.69 GB
+  bone lengths, track 1: 117 bones fixed, worst frame off by 2.36x,
+    177/291 frames carry an uncertain joint
+  crops, track 1: hands 289/291 frames, feet 278/291 frames
+  smoothing track 1: 27363 observed, 9204 uncertain, 1025 absent (28 impossible)
+SAVED /results/solo-01.npz
+wall clock: 136.0s  pipeline-internal: 82.9s
+track 1: 291/296 samples observed (first at 1, leading gap back-filled)
+track 1: shape from 291 frames, ||shape||=2.846, rest-mesh mean=0.2492 max=2.1353 cm
+SAVED solo-01_track1.glb (single mesh, pre-region-split)
+track 1: region triangle counts: {18 regions, all non-zero}
+SAVED solo-01_track1.glb (region-split)
+SAVED solo-01_track1.glb (region-split, 218/218 samplers rewritten to LINEAR)
+[grounding] solo-01: grounded -- {...}
+[beats] solo-01: 143.6 BPM, 47 counts, confidence 0.91
+[r2] published 2 objects for solo-01
+[job-status] succeeded 1.0
+```
+
+The `[beats]` line is first because `propose_counts` is **spawned** beside the
+GPU work rather than sequenced after it — `lesson-structure`'s §15 design,
+running on Modal for the first time. §2.2's stage order (spatial → crops →
+temporal) and §8.1's post-export order (region split → interpolation rewrite)
+both survive four more merges.
+
+### Verification of the exported GLB
+
+Measured on the downloaded file, not read from the log. Reproduce:
+`python services/motion-api/verify_glb.py <file.glb> --expect-fps 15.0`.
+
+| Check | Result |
+|---|---|
+| Verdict | **PASS** |
+| GLB produced | yes, **1,937,604 bytes**, 1 animation, 218 channels |
+| **Interpolation** | **LINEAR on 218/218 samplers. Zero STEP.** |
+| **Keyframe rate** | **15.0 fps** (dt = 0.066667 s) |
+| **Non-finite animation values** | **0 / 222,296** |
+| **Non-finite mesh vertices** | **0 / 30,498 components** |
+| **Region meshes** | **18 / 18 present and named `region_*`, none empty** |
+| Shape bake applied | yes — 291 observed frames, `‖shape‖ = 2.846`, rest-mesh 0.2492 cm mean / 2.1353 cm max |
+| Bone-length CV | mean 2.1503%, **median 0.0001%**, max 74.0848%, 72/119 under 0.01% |
+| Animated `scale` nodes | `l_wrist`, `r_wrist` — the same two, the same cause |
+
+Bone CV is the third independent measurement of the same distribution (2.1426 /
+0.0002 / 73.7855 / 72, then 2.1504 / 0.0002 / 74.0992 / 72, now 2.1503 / 0.0001 /
+74.0848 / 72). Pre-existing, `bone-constraints`' call, untouched here.
+
+### Verification of the served MotionResult
+
+Measured on the downloaded `solo-01.motion-result.json.gz`, materialised by the
+GPU worker (not rebuilt by `api.py`):
+
+```
+MotionResult VALIDATES against the frozen v1 schema
+persons=1  samples=296  joints=127
+non-finite numbers anywhere in document: 0
+grounding.status = grounded
+  floor_plane.normal = [-0.016115, 0.973953, -0.226177]
+  floor_plane.point  = [-0.046584, -0.963417, -3.483641]
+camera.intrinsics.fx = 1174.88     (real estimate, not the 1024.0 placeholder)
+camera_to_world = identity
+proposed_counts = {bpm 143.55, s/count 0.41796, count 1 at 0.0697s,
+                   count_total 47, confidence 0.905,
+                   alternates: double-time 287.1, half-time 71.8}
+person 0.animation = {'clip_id': 'solo-01_track1',
+                      'glb_asset_id': 'solo-01_track1.glb'}
+person 0.shape_params.source = well_observed_frames   (vector withheld)
+person 0.crop_rects.hands = 289/296, .feet = 278/296
+document = 7,162,777 characters
+```
+
+Every package is visible in one document at once: W8's per-person `animation`,
+`shape-params`' honest `source` with `caching-retention` still withholding the
+vector, `hands`' crop rects, `grounding`'s real intrinsics, `grounding-wiring`'s
+floor solve, and `lesson-structure`'s `proposed_counts`.
+
+**`grounding.status` is `grounded`, not `none`.** This is the first run in three
+passes where it is. The diagnostics:
+
+```
+n_inliers 69, inlier_rms_m 0.01646, tilt_deg 13.106, floor_height_m -0.9634,
+contact_time_coverage 0.80 (16 s of a 20 s clip), foot_visible_fraction 0.9622,
+planted_frame_fraction 0.5357, reason "grounded"
+```
+
+The thing that changed is not the floor solver's thresholds — those are
+unchanged (`min_time_coverage` still 0.6). It is that `grounding-wiring` feeds
+it `world_placement_probe`'s real per-frame camera-space translations instead of
+the character-local frame's flattened depth. §5 and §11 both recorded `none` with
+`reason: contacts_not_spread_over_clip` at 0.30 coverage; the same clip now
+reaches 0.80.
+
+**Travel, measured on `root_trajectory` rather than claimed:**
+
+```
+XZ travel extent      8.626 m
+depth span (Z)        8.253 m
+path length           27.35 m
+vertical span (Y)     1.881 m
+distinct root positions   276 / 296 samples
+root provenance observed  287 / 296 samples
+```
+
+Against `integration-2`, where every one of the 296 positions was the identical
+constant `(0, 0.924, 0)`. This is E6's 8.7 m of depth showing up in the shipped
+document, and it agrees with `grounding-wiring`'s own pre-merge measurement of
+8.25 m.
+
+### `[r2] published 2 objects` — and the redirect actually works
+
+The GLB and the gzipped MotionResult were published to R2 by the export stage.
+Checked end to end against the **live** service, on an artifact this run
+produced:
+
+```
+GET /assets/solo-01_track1.glb -> 302
+   -> https://<acct>.r2.cloudflarestorage.com/stepwise-results/glb/solo-01_track1.glb?X-Amz-...
+   Range: bytes=0-1023  ->  HTTP 206, 1024 bytes
+```
+
+206 with exactly the requested bytes is `deployment`'s whole argument working on
+merged output: the old byte proxy could only answer 200 with the entire file.
+
+### npz slimming survived four more merges
+
+`solo-01.npz` is **4,415,899 bytes** (4,416,302 on `integration-2`; 61.30 MB
+before `caching-retention`). `pred_vertices` and `expr_params` are absent;
+`per_frame`, `sample_times_s`, `raw_detections`, `frame_width`/`frame_height`
+(which `world_placement_probe` now requires) and W9's whole `smoothed` block are
+all still there.
+
+---
+
+## 27. Known open items — status, not fixes
+
+All four were re-checked on the merged branch against this run's artifacts.
+**None was fixed here**; three are unchanged and one is now measurable.
+
+* **The exported GLB still carries the character-local root.** Confirmed, and it
+  is the one place the document and the GLB now disagree: `root_trajectory`
+  carries 8.6 m of travel while the GLB's root channel does not, and
+  `Stage3D` animates the GLB and never reads `root_trajectory`. So the *rendered*
+  dancer still dances in place. This is recorded as E6 item 5 and is the next
+  work package, not this one.
+* **W9's per-joint visibility is still computed and still discarded** (§3.3,
+  §9.4). Now with both halves measured on the same run, from the same artifacts:
+
+  ```
+  npz `smoothed` block: 198 / 296 frames carry more than one distinct
+                        per-joint visibility value
+  served MotionResult:    0 / 296 frames do
+  ```
+
+  The pipeline works out per-joint occlusion on 198 frames and throws it away on
+  all 198. The hookup point is unmoved (`motion_result.build_motion_result`
+  reads `data["per_frame"]`, never `data["smoothed"]`). Still a product
+  decision, still unowned.
+* **Bone CV is not 0.0000%.** Median **0.0001%**, mean 2.1503%, and the fingers
+  are still below `l_wrist`/`r_wrist` — the only two nodes in the file carrying
+  an animated `scale` channel. Third identical measurement, pre-existing,
+  `bone-constraints`' call.
+* **The "4 Issues" badge survives** — and is explained in §24.4. It is the
+  Next.js dev overlay, counting four WebGL-context errors raised because the
+  headless screenshot browser has no GPU. Dev-only, absent from `next build`.
+
+### Three stale comments, now fixed
+
+`grounding-wiring` deliberately left three comments claiming `root_trajectory`
+is pinned, because the files were being edited concurrently by the two web
+branches. After merge nothing else is in flight in those files, so they are
+fixed here — comments only, no behaviour change:
+
+* `apps/web/lib/motion.ts` — `travelExtent`'s "~0.2 m on every real clip". The
+  gate it justifies is still right, for a *different* reason, which is what the
+  new note says: a track under 25 frames still falls back to the pinned
+  constant, so one document can carry a real trajectory and a placeholder.
+* `apps/web/components/LessonViewer.tsx` — the follow-camera rationale. Rewritten
+  to point at the seam that is actually still open (GLB root, above) rather than
+  at one that closed.
+* `apps/web/lib/lessons.ts` — the synthetic-travel fixtures. Still the only
+  fixtures here with travel in them, but because nobody has checked in a real
+  placed clip, not because the pipeline pins anything.
+
+A fourth, unlisted, was found and fixed with them: `LessonViewer.tsx`'s
+follow-button comment asserted grounding is `"none"` on *every* real clip, which
+this run disproves.
+
+---
+
+## 28. Ground rules honoured
+
+- Work only on `integration-3`, cut from `origin/integration-2`. **Pushed after
+  every one of the five merges**, not once at the end.
+- `main` never merged. No force-push. No branch modified, renamed or deleted —
+  `lesson-structure`, `hand-crop-view`, `link-ingestion`, `grounding-wiring` and
+  `deployment` are untouched commits that were read from.
+- `docs/DESIGN.md` and `docs/OPEN-DECISIONS.md` carry only the edits the merged
+  branches made to them, plus §23.2's D5 renumbering. **This pass opened no
+  decisions of its own and closed none.** E6 in particular is left OPEN with
+  `grounding-wiring`'s own five-item list of what the wiring did *not* resolve,
+  because absolute metric scale, the viewer render, and short-track
+  trustworthiness are still unverified and answering them is not a merge's job.
+- No secret committed. R2 and database credentials are Modal Secrets read at
+  runtime; `/health` reports which names are set and never a value.

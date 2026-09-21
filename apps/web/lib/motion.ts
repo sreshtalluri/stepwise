@@ -323,10 +323,15 @@ export function followStep(
  * DESIGN.md §8 wants readable from three metres away. Y is ignored on purpose: a
  * dancer who jumps has not travelled.
  *
- * NOTE (OPEN-DECISIONS E6): today this is ~0.2 m on every real clip because
- * `root_trajectory` is pinned to the origin. That is a property of the pipeline, not
- * of the dancer, which is why `travelsMeaningfully` gates the readout rather than the
- * viewer printing "0.0 m" and implying it measured stillness.
+ * NOTE (OPEN-DECISIONS E6): this used to read "~0.2 m on every real clip, because
+ * `root_trajectory` is pinned to the origin". That stopped being true on branch
+ * `grounding-wiring`: `motion_result` now composes a real per-frame world placement,
+ * and solo-01 measures metres of travel rather than centimetres of sway. The gate is
+ * still right, though, and for a reason the old note did not give: a track too short
+ * to place (under 25 frames) still falls back to the pinned constant, so a document
+ * can carry a real trajectory for one dancer and a placeholder for another. Reading
+ * provenance is what tells them apart; `travelsMeaningfully` is the cheap version of
+ * that, and it still beats printing "0.0 m" and implying we measured stillness.
  */
 export function travelExtent(doc: MotionResult, personIndex: number): number {
   const rt = doc.persons[personIndex].root_trajectory;

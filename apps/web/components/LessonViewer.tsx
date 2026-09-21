@@ -428,10 +428,14 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
   /**
    * Follow is ON by default. Three reasons, in order:
    *
-   * 1. Under the deadzone it is a NO-OP for a dancer working in place, which is every
-   *    clip today (`root_trajectory` is pinned — OPEN-DECISIONS E6). So it does not
+   * 1. Under the deadzone it is a NO-OP for a dancer working in place, so it does not
    *    move anything on its own and does not contradict DESIGN.md §9's
-   *    MOTION_INTENSITY 3. The moment world placement lands it starts earning itself.
+   *    MOTION_INTENSITY 3. This used to say "which is every clip today, because
+   *    `root_trajectory` is pinned"; world placement landed on `grounding-wiring`, so
+   *    the served document now carries real travel and this is earning itself. NOTE
+   *    the seam that is still open: the 3D stage animates the GLB, and the GLB still
+   *    carries the character-local root, so the *rendered* dancer does not travel yet
+   *    even though the document says they do (OPEN-DECISIONS E6, item 5).
    * 2. The failure it prevents is silent. A dancer who drifts away and shrinks to
    *    forty pixels looks like a badly shot video, not like a setting the learner
    *    could have changed — they will not go looking for a control they do not know
@@ -688,12 +692,15 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
           <small>M</small>
         </button>
         {/* Framing, not angle — a separate axis from the views rail, and it stays on
-            while you orbit. The `small` carries the travel fact: with no floor to
-            slide underneath the dancer (§10 forbids drawing one when grounding is
-            "none", which is every real clip today) this readout is what stops three
-            metres of travel looking identical to standing still. Shown only when the
-            document actually carries travel — printing "0.0 m" for a pinned
-            trajectory would claim a stillness nobody measured (OPEN-DECISIONS E6). */}
+            while you orbit. The `small` carries the travel fact: when there is no
+            floor to slide underneath the dancer (§10 forbids drawing one when
+            grounding is "none") this readout is what stops three metres of travel
+            looking identical to standing still. Shown only when the document
+            actually carries travel — printing "0.0 m" for a track that fell back to
+            the pinned constant would claim a stillness nobody measured.
+            Two clauses here went stale on `grounding-wiring` and are corrected: a
+            real clip is no longer always `none` (solo-01 now solves `grounded`), and
+            `root_trajectory` is no longer always pinned. OPEN-DECISIONS E6. */}
         <button className={`btn ${follow ? "active" : ""}`} onClick={() => setFollow((v) => !v)}>
           {follow ? "Follow on" : "Follow off"}
           <small>{travels ? `travels ${travelExtent(doc, selected).toFixed(1)} m` : "F"}</small>
