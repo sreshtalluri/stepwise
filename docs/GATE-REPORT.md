@@ -652,3 +652,12 @@ breakdown above and the `hands` branch).
 - **The hybrid adaptive-rate option is unpriced** (§3).
 - **`group-synced-01` was not re-exported** this pass, so multi-dancer GLBs on
   the Volume still predate these fixes.
+
+**Reproducing the fps experiment.** It needs a 30 fps reconstruction of a clip
+that also has a 15 fps one, so `solo-01.mp4` was copied to `solo01-30fps.mp4`
+on the `stepwise-eval` Volume and run with `--fps 30`, leaving
+`solo01-30fps.{npz,performance.json}` and `solo01-30fps_track1.glb` on
+`stepwise-results`. Those are kept deliberately, so the numbers above can be
+re-derived. **`solo01-30fps` is NOT in `evaluation/clips.yaml`** — it is a
+byte-identical copy of `solo-01` under a second id, not a new eval clip, and
+should not be treated as one.
