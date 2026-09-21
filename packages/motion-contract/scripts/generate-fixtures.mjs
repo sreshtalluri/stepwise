@@ -98,6 +98,28 @@ function smoothstep(edge0, edge1, x) {
 
 const observedProvenance = () => ({ observed: true, interpolated: false, suppressed: null });
 
+/**
+ * A `proposed_counts` block, sized by the same formula the validator checks and
+ * `normalizeStructure` uses — computed, never hand-typed, so a fixture can never
+ * ship a grid that disagrees with its own timeline.
+ */
+function proposedCounts(sampleTimesS, { countOneS, bpm, confidence, warnings = [] }) {
+  const secondsPerCount = 60 / bpm;
+  const endS = sampleTimesS[sampleTimesS.length - 1];
+  return {
+    count_one_s: countOneS,
+    seconds_per_count: secondsPerCount,
+    count_total: Math.max(1, Math.floor((endS - countOneS) / secondsPerCount) + 1),
+    confidence,
+    bpm,
+    alternates: [
+      { label: "double-time", seconds_per_count: secondsPerCount / 2, bpm: bpm * 2 },
+      { label: "half-time", seconds_per_count: secondsPerCount * 2, bpm: bpm / 2 },
+    ],
+    warnings,
+  };
+}
+
 function makeGoodLesson() {
   const fps = 15;
   const durationS = 14.0;
@@ -172,6 +194,11 @@ function makeGoodLesson() {
       floor_plane: { normal: [0, 1, 0], point: [0, 0, 0] },
     },
     accent_color: { hex: "#D9A441", source: "sampled" },
+    // A strong proposal: steady 120 BPM, count 1 on the first detected beat.
+    // Confident about the SPACING; count 1 itself is still only the first beat
+    // the tracker heard, which is why the surface that renders this must offer
+    // "set 1 here" rather than present it as settled.
+    proposed_counts: proposedCounts(sampleTimesS, { countOneS: 0.4, bpm: 120, confidence: 0.93 }),
     joint_hierarchy: joints,
     persons: [
       {
@@ -289,6 +316,19 @@ function makeFailureLesson() {
       floor_plane: null,
     },
     accent_color: { hex: "#1E7A6F", source: "fallback" },
+    // The other branch, and the one that matters: a WEAK proposal. 196 BPM is
+    // outside the plausible dance-practice band, which is the classic signature
+    // of a double-time lock, so the tracker caps its own confidence and says so
+    // in words a learner can act on. The half-time alternate is the correct
+    // reading here and it travels with the guess rather than being discarded.
+    proposed_counts: proposedCounts(sampleTimesS, {
+      countOneS: 0.21,
+      bpm: 196,
+      confidence: 0.28,
+      warnings: [
+        "tempo 196 BPM is outside the typical 70-180 dance-practice range; half/double-time confusion is the likely explanation (see alternates)",
+      ],
+    }),
     joint_hierarchy: joints,
     persons: [
       {

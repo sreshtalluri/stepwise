@@ -118,6 +118,35 @@ def test_rejects_joint_index_mismatch(good_lesson):
     assert any("must equal 3" in e for e in result.errors)
 
 
+def test_proposed_counts_is_optional(good_lesson):
+    doc = copy.deepcopy(good_lesson)
+    del doc["proposed_counts"]
+    result = validate_motion_result(doc)
+    assert result.errors == []
+    assert result.valid is True
+
+
+def test_rejects_proposed_grid_sized_against_the_wrong_timeline(good_lesson):
+    doc = copy.deepcopy(good_lesson)
+    # The realistic way to get this wrong: size the grid against
+    # source_video.duration_s (14.0) instead of sample_times_s[N-1] (13.933...).
+    # It is off by exactly one count and nothing else in the document notices.
+    doc["proposed_counts"]["count_total"] += 1
+    result = validate_motion_result(doc)
+    assert result.valid is False
+    assert any("authoritative timeline" in e for e in result.errors)
+
+
+def test_weak_proposal_carries_its_alternates_and_its_reason(failure_lesson):
+    # The honesty rule has teeth only if the doubt survives the trip: a consumer
+    # that gets the grid must also get the confidence, the half-time reading and
+    # the plain-language reason, or it cannot be quieter about a weak guess.
+    proposed = failure_lesson["proposed_counts"]
+    assert proposed["confidence"] < 0.5
+    assert proposed["warnings"]
+    assert sorted(a["label"] for a in proposed["alternates"]) == ["double-time", "half-time"]
+
+
 def test_job_status_minimal_queued_job_is_valid():
     result = validate_job_status(
         {

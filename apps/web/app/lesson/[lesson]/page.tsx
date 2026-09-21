@@ -22,6 +22,7 @@ export default async function LessonPage({ params }: { params: Promise<{ lesson:
   return (
     <LessonViewer
       doc={doc}
+      lessonId={lesson}
       title={meta.title}
       videoUrl={`/fixtures/${lesson}.mp4`}
       glbUrls={doc.persons.map((p) => `/fixtures/${lesson}.${p.person_id}.glb`)}

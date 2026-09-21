@@ -133,9 +133,49 @@ def _local_rotations(skel_state, parents):
     return out
 
 
+def _proposed_counts(beats: dict | None, sample_times_s: list) -> dict | None:
+    """Shape `beat_detect.propose_grid()`'s output into the contract's
+    `proposed_counts`, or None.
+
+    `count_total` is RE-DERIVED here against `sample_times_s[-1]`, never taken
+    from the beat module. The beat module only ever saw ffprobe's container
+    duration, which is not the same number as the last sample slot -- and the
+    contract's invariant (and `normalizeStructure`, which renders this) is
+    stated against the sample timeline. A grid one count longer than the dance
+    is the kind of disagreement nothing else in the document would notice.
+    """
+    if not beats or not sample_times_s:
+        return None
+    spc = float(beats["seconds_per_count"])
+    if not spc > 0:
+        return None
+    count_one_s = max(0.0, float(beats["count_one_s"]))
+    end_s = float(sample_times_s[-1])
+    return {
+        "count_one_s": count_one_s,
+        "seconds_per_count": spc,
+        "count_total": max(1, int((end_s - count_one_s) // spc) + 1),
+        "confidence": float(beats["confidence"]),
+        "bpm": float(beats["bpm"]),
+        "alternates": [
+            {"label": a["label"], "seconds_per_count": float(a["seconds_per_count"]), "bpm": float(a["bpm"])}
+            for a in beats.get("alternates", [])
+        ],
+        "warnings": list(beats.get("warnings", [])),
+    }
+
+
 def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
-                        manifest: dict | None, perf: dict | None) -> dict:
-    """Pure: every input is passed in, nothing is read from a Volume here."""
+                        manifest: dict | None, perf: dict | None,
+                        beats: dict | None = None) -> dict:
+    """Pure: every input is passed in, nothing is read from a Volume here.
+
+    `beats` is `beat_detect.propose_grid()`'s output as a dict, or None. None is
+    a normal outcome (no audio track, silent clip, the beat stage failed or was
+    never run) and must not fail the job -- the learner sets counts by hand,
+    which they can always do anyway. Defaulted rather than required so the two
+    existing call sites and every stored npz keep working unchanged.
+    """
     import numpy as np
 
     if npz_bytes is None:
@@ -303,6 +343,10 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
     grounding = solved.grounding
     print(f"[grounding] {clip_id}: {grounding['status']} -- {json.dumps(solved.diagnostics)}")
     intrinsics = camera_intrinsics_from_clip(data)
+    proposed_counts = _proposed_counts(beats, sample_times_s)
+    print(f"[beats] {clip_id}: " + (
+        f"{proposed_counts['bpm']:.1f} BPM, {proposed_counts['count_total']} counts, "
+        f"confidence {proposed_counts['confidence']:.2f}" if proposed_counts else "no proposal"))
 
     doc = {
         "schema_version": "1.0.0",
@@ -355,6 +399,8 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
         "model_report": {
             "pipeline_git_sha": "808b53c",
             "models": [
+                *([{"name": "librosa.beat_track", "version": "librosa>=0.10", "license": "ISC",
+                    "license_flags": []}] if proposed_counts else []),
                 {"name": "rtmo-m", "version": "body7", "license": "Apache-2.0", "license_flags": []},
                 {"name": "bytetrack", "version": "upstream-main", "license": "MIT", "license_flags": []},
                 {"name": "sam-3d-body-dinov3", "version": "hf:facebook/sam-3d-body-dinov3", "license": "SAM License",
@@ -364,4 +410,7 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
             "measured_performance": perf,
         },
     }
+    # Optional by contract: omitted, never null, when there is no proposal.
+    if proposed_counts:
+        doc["proposed_counts"] = proposed_counts
     return doc

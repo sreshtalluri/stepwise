@@ -301,6 +301,11 @@ lessons.push({
   doc: (() => {
     const d = buildTwoDancers(lessons[0].doc, 2.2);
     d.job_id = "job_dev_two_dancers_apart_00000000000000000";
+    // No beat proposal. `proposed_counts` is optional and absence is a normal
+    // outcome — a silent clip, no audio track, or a tracker that found fewer
+    // than two beats — so the viewer's "counts are not set for this clip"
+    // branch needs a fixture to be reachable in, or it is never looked at.
+    delete d.proposed_counts;
     return d;
   })(),
 });

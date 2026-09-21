@@ -270,6 +270,26 @@
     "hex": "#D9A441",
     "source": "sampled"
   },
+  "proposed_counts": {
+    "count_one_s": 0.4,
+    "seconds_per_count": 0.5,
+    "count_total": 28,
+    "confidence": 0.93,
+    "bpm": 120,
+    "alternates": [
+      {
+        "label": "double-time",
+        "seconds_per_count": 0.25,
+        "bpm": 240
+      },
+      {
+        "label": "half-time",
+        "seconds_per_count": 1,
+        "bpm": 60
+      }
+    ],
+    "warnings": []
+  },
   "joint_hierarchy": {
     "rotation_convention": "local-to-parent quaternion, relative to MHR rest (A-pose), glTF component order [x,y,z,w]",
     "root_joint_index": 0,

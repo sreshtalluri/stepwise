@@ -723,7 +723,7 @@ affected by these four merges, and neither is fixed here.**
   nothing** (§3.4). Grepping the whole tree for `@stepwise/navigation` and
   `beat_detect` outside their own directories returns zero hits. A separate
   agent is reportedly writing the contract; nothing in these four branches
-  touches it.
+  touches it. **Closed on branch `lesson-structure` — see §13 below.**
 
 Also unchanged and re-measured, not re-argued: **bone-length CV is not flat**
 (§5). Measured on this pass's GLB — mean 2.1504%, median 0.0002%, max 74.0992%,
@@ -915,3 +915,357 @@ Both known open items are confirmed unchanged and still unowned.
 - `docs/DESIGN.md` and `docs/OPEN-DECISIONS.md` carry only the edits the merged
   branches made to them, plus the E6/E7/E8 renumbering §8.2 forced. This pass
   opened no decisions of its own and closed none.
+
+---
+---
+
+# Closing §3.4 — branch `lesson-structure`
+
+Two finished, tested packages that nothing imported, and a contract with
+nowhere to put what one of them produced. That gap blocked the MVP's core
+promise — learning a dance **by counts** — so this branch closes it end to end:
+a beat proposal is computed on every job, carried in the contract, and rendered
+by W6's count strip against a real `MotionResult`.
+
+Base: `origin/integration-2`. Nothing from `main` merged. No other branch
+touched. `docs/DESIGN.md` is unchanged — this branch opened no design decisions
+of its own.
+
+---
+
+## 13. Where the beat proposal lives, and why
+
+**In `MotionResult`, as an optional top-level `proposed_counts` block.** Not in
+a second document, not on a second endpoint.
+
+The decision rests on the distinction the surface has to make anyway, which is
+between **two different kinds of count grid**:
+
+| | machine | human |
+|---|---|---|
+| what | `MotionResult.proposed_counts` | `LessonStructure` (W6's `{grid, parts}`) |
+| produced by | `beat_detect.propose_grid()` on the clip's audio | the learner, by hand |
+| scope | one per job | one per learner per lesson |
+| lifetime | immutable | edited constantly |
+| lives in | the contract | client storage today, a server store once D5 lands |
+
+The proposal is a per-clip, server-computed, immutable fact, produced by the
+same job from the same source file and wanted by the same consumer at the same
+moment as everything else in the document. It is in-family: the contract
+already carries `accent_color` (sampled from pixels) and
+`source_video.audio_offset_s` (which exists precisely so a video time can be
+mapped to an audio one), so "a fact about this clip that the viewer needs" is
+what this document already is.
+
+The alternatives were each worse in the same specific way. A separate stored
+artifact or endpoint would need its own serving path, its own versioning, and
+its own line in the deletion list that `OPEN-DECISIONS.md` **D7** promises —
+and that promise is kept by a literal list of filenames in
+`retention.clip_artifact_paths`. The cheapest way to break a deletion promise
+is to add a file to the system and forget to add it to that list. One field on
+a document that is already stored, served and deleted adds no such surface.
+(The pipeline *does* write one intermediate `{clip_id}.beats.json` for the
+hand-off between stages; it is in the list, and `test_retention.py`'s
+"survivors == [tombstone]" assertion now covers it, so it cannot be forgotten
+quietly.)
+
+**Authored structure deliberately does NOT go here and cannot.** `MotionResult`
+is the frozen output of a finished job and every consumer holds the same copy;
+authored counts are per-learner and mutable. Putting them in the same document
+would mean either a mutable `MotionResult` or one document per learner, and
+both are worse than the storage question they would be trying to avoid.
+
+### What travels with the grid
+
+All of it: `confidence`, `bpm`, `alternates` (the half- and double-time
+readings), and `warnings`. Stripping a `ProposedGrid` down to
+`{countOneS, secondsPerCount, countTotal}` is exactly the operation that turns
+W11's honest guess into an unmarked fact, and `.to_grid()` — which does that
+stripping — is for the last step into the UI, not for the wire.
+
+The half/double alternates matter more than they look. librosa's tracker
+locking onto 2x or 0.5x a human's tempo is not an exotic failure, it is the
+single most likely way the proposal is wrong, and carrying both readings means
+the correction is one tap rather than re-tapping the whole dance.
+
+### The honest limitation, stated where it is read
+
+`beat_track` finds **beats, not downbeats**. It has no notion of which beat
+begins an eight, so `count_one_s` is the first beat in the clip and is usually
+*not* count 1 of the dance. Measured on a synthetic 10 s 128 BPM click track
+(the first click at t = 0.000): spacing came back 0.9% high (129.2 a minute),
+confidence 0.96, and `count_one_s` came back **0.488 s** — not the first click.
+The strong number and the weak number in the same result.
+
+So the schema says it, the navigation copy says it, and the viewer says it
+above the count strip. One line of copy had to be *repaired* for this:
+`packages/navigation/src/copy.ts` read *"Set these by hand. Nothing here was
+detected from the music"*, which was true when beat detection was a cut-list
+item and became **false** the moment a proposal could reach the surface. That
+is a §7h failure of exactly the documented shape — a sentence written as an
+accurate statement of the world, left behind by the world.
+
+---
+
+## 14. The versioning rule, written down instead of inferred
+
+`schema_version` stays **`1.0.0`**.
+
+The rule is now in `motion-result.schema.json` and
+`packages/motion-contract/README.md` rather than in someone's head:
+
+- **Bump** when an existing valid document becomes invalid, or an existing
+  correct consumer becomes wrong: a field removed or renamed, a meaning
+  changed, a new *required* field, an enum value removed, a type narrowed.
+- **Do not bump** for an additive-optional field or a relaxation
+  (required → optional, enum widened).
+- Consumers detect an optional field **by checking for the field**, never by
+  comparing versions.
+
+The reason not to bump is not laziness, it is the field's own contract: the
+schema tells consumers to *refuse* an unrecognized version rather than guess,
+so a gratuitous bump makes every deployed consumer reject documents it could
+read perfectly well.
+
+This documents what already happened rather than inventing a policy.
+`caching-retention` relaxed `shape_params.vector` from required to optional and
+correctly kept `1.0.0`; that decision was right and unrecorded, and this branch
+had to reverse-engineer it. Both changes now sit under one stated rule.
+
+One new cross-field invariant, in both validators: `count_total` must equal the
+grid laid over `sample_times_s`, the same formula `normalizeStructure` uses.
+The realistic way to get it wrong is to size the grid against
+`source_video.duration_s` — off by exactly one count, and silent everywhere
+else. `services/motion-api/test_proposed_counts.py` asserts the service's
+number and the contract's validator agree, and that the invariant actually
+fails when the number is wrong.
+
+---
+
+## 15. Beat detection does not go in `cv_image`
+
+**It gets its own image, and that is measured rather than cautious.**
+
+`librosa` pulls `numba`, and `numba` pins `numpy` hard. `cv_image`'s numpy is
+load-bearing in three directions at once:
+
+1. Detectron2 compiles a CUDA extension against it;
+2. bytetrack needs the `lapx` fork *because* the stock `lap` C extension failed
+   to build against this image's numpy (AVX-512 FP16 intrinsics);
+3. `onnxruntime-gpu` is pinned to `1.20.2` for the CUDA-12.4 era.
+
+A pip that can move numpy puts all three at risk for a five-second audio job.
+And it would land **above** the Detectron2 compile in the layer stack, so every
+subsequent rebuild pays for it — §5 measured that at ~13 minutes.
+
+`gltf_image` is a non-starter for a duller reason: no ffmpeg, and no source
+video mounted.
+
+So: `beat_image` — `debian_slim` + `ffmpeg` + `librosa`, **CPU only**. It
+rebuilds independently and can break nothing else. `propose_counts` is
+**spawned** at the top of `run_clip` and collected after reconstruction, so its
+cold start disappears inside the ~90 s the GPU is busy rather than being added
+to every job's wall clock. On a 20 s clip the CPU work is seconds, which rounds
+to nothing against the $0.076 the L40S pass costs.
+
+Hand-off between stages is the pattern already in the file: a small JSON in the
+results Volume, exactly like `performance.json` — this stage has the video, the
+export stage has the timeline. `count_total` is re-derived at assembly time
+against `sample_times_s[-1]`, never taken from the beat module, which only ever
+saw ffprobe's container duration.
+
+**Failure is never fatal at any link.** No audio track, a silent clip, an
+ffmpeg error, fewer than two beats: all end as "no proposal", the field is
+omitted, and the lesson ships with hand-set counts. A lesson with hand-set
+counts is the product. A lesson that did not get made is not.
+
+**Not run on Modal in this pass.** No GPU session was available, so the numbers
+above are a local `ffmpeg → librosa → ProposedGrid → proposed_counts →
+validator` run on a synthetic click track, and they are labelled as such. What
+is unverified until a real Modal run: that `beat_image` builds, and the real
+per-clip cost of the extra container. W11's own measurements on real clips
+(solo-01 143.6 BPM at 0.93, solo-02 117.5 at 0.91, solo-07 129.2 at 0.94,
+group-synced-01 117.5 at 0.95) are what the confidence figures should look like
+in production.
+
+---
+
+## 16. Navigation is wired without a second clock
+
+`<LessonNavigator>` is mounted in `apps/web/components/LessonViewer.tsx`,
+driven by the `MotionResult` the page already loads.
+
+**The video is still the only clock.** `requestVideoFrameCallback` →
+`timeRef` → `mixer.setTime`, unchanged. The navigator is fully controlled: it
+receives `timeS` and emits `onSeek`, and it owns no time of its own. W6's
+`advance()` helper is exported and **deliberately not used** — it is for a host
+that owns a synthetic clock, and this host does not.
+
+Count-based looping is applied **inside the existing rVFC publish**, one
+`currentTime = ` per wrap. That is frame-accurate and cannot drift across forty
+minutes of repeats, because the time is *set*, never stepped. The obvious
+alternative — a `timeupdate` listener — fires about four times a second and
+would overshoot a loop edge by up to a quarter second, which is audible on an
+eight.
+
+What this replaced, in `apps/web`: a range-input whole-dance scrubber, a dancer
+chip row, and an A–B loop whose own comment said this was coming ("snapping
+loop edges to count boundaries belongs to the count strip, which is W6's
+package"). Their CSS went with them. The branch is a net deletion in the app.
+
+`space`, `L` and `←/→` moved out of the viewer's key map into the navigator's.
+Two `window` listeners for one key both fire, so this is a deletion rather than
+a duplication — and the arrow keys stepped a quarter-second as an admitted
+stand-in for stepping a count, which they now do. `M`, `S` and `F` stay with
+the viewer. Speed, mirror, follow and compare are passed into the navigator's
+transport row through `children`, which is the seam W6 left for exactly this.
+
+Two resolution findings, both new because this is the app's first cross-package
+**value** import (`lib/motion.ts`'s was type-only, so the bundler never saw
+it): Turbopack will not resolve above the project directory, so its root is now
+the repo; and it does not map `./core.js` onto `core.ts`, so the six `.js`
+specifiers inside `packages/navigation/src` are extensionless — which is what
+`moduleResolution: bundler` wants anyway.
+
+---
+
+## 17. Where authored structure lives, and where the server store attaches
+
+`apps/web/lib/structure.ts`, in `localStorage`, keyed per lesson.
+
+**Why not a server store today: `OPEN-DECISIONS.md` D5 is open.** Authored
+structure is per-learner by definition, and there is no learner to key it on
+until D5 (none / magic link / OAuth) is decided. A server store would have to
+invent an identity, which is the decision D5 exists to make.
+
+`load` and `save` are the entire seam. Once D5 lands:
+
+- `save` → `PUT /lessons/{clip_id}/structure`, identity from the session
+- `load` → `GET` the same, falling back to the local copy so an offline or
+  logged-out learner keeps working
+- the local copy becomes a write-through cache, so no caller changes shape
+
+One sub-question is **recorded rather than guessed at**: what happens when the
+stored structure and the local one disagree. Last-write-wins is wrong for a
+learner who authored parts on their phone during class. That needs deciding
+when D5 is decided, not before.
+
+**Retention note.** D6/D7 delete server-side artifacts; a browser's
+localStorage is outside that promise. That is honest today only because nothing
+in this blob is derived from the video — it is counts and part names the
+learner typed. If anything person-derived is ever added, it becomes an artifact
+D7 has to be able to delete.
+
+**Manual always wins**, and it is checkable rather than implied: the stored
+blob carries an `authored` flag, a saved structure always beats the proposal on
+load, and the proposal is never re-applied once the learner has edited
+anything.
+
+---
+
+## 18. The honesty surface
+
+A proposed count 1 presented as a fact is precisely the failure this project
+exists to guard against, and the count grid is **worse** for it than the mesh:
+a learner who trusts a wrong count 1 practises the whole dance off the beat.
+
+So the note lives **above the count strip and is always visible**, not inside
+the `Counts and parts` disclosure — that disclosure is closed by default, and a
+learner who never opened it would never be told. It disappears the moment the
+learner edits anything, because still calling their own grid a guess is the
+same lie reversed. Three branches, all reachable in a fixture:
+
+| state | line |
+|---|---|
+| strong proposal | "Counts proposed from the music, at 120 a minute. Count 1 is a guess — set it under Counts and parts." |
+| weak proposal (confidence < 0.5) | "Counts are a weak guess from the music, at 196 a minute, and the tempo may be double or half that. Set them under Counts and parts." |
+| no proposal | "Counts are not set for this clip. The 120 a minute on screen is a placeholder, not the music — set count 1 and the tempo under Counts and parts." |
+
+The 0.5 threshold sits just above the 0.4 the beat module caps *itself* at when
+the tempo lands outside the plausible dance band, so every implausible-tempo
+proposal reads as weak.
+
+`proposed_counts.warnings` is **not** rendered verbatim. Those strings are the
+producer's, written for a log (*"tempo 196 BPM is outside the typical 70-180
+dance-practice range…"*) — wrong voice for §11, and the §5 ALL-CAPS rule would
+reject "BPM" outright. `confidence` picks between two app-owned lines instead.
+
+`packages/navigation`'s copy is now swept by `apps/web`'s §11 lint, which its
+own header had asked for.
+
+---
+
+## 19. Test matrix
+
+| Suite | Before | Now | Result |
+|---|---|---|---|
+| `packages/motion-contract` — TypeScript | 14 | **17** | **17 pass** |
+| `packages/motion-contract/python` | 14 | **17** | **17 pass** |
+| `packages/navigation` (`test/core.test.ts`) | 17 | 17 | **17 pass** |
+| `packages/beat-detect/python` | 2 | 2 | **2 pass** |
+| `apps/web` (`lib/*.test.ts` + `test/*.test.ts`) | 27 | 27 | **27 pass** |
+| `services/motion-api/test_proposed_counts.py` (new) | — | **4** | **4 pass** |
+| `services/motion-api/test_retention.py` | 10 | 10 | **10 pass** (2 extended) |
+| `services/motion-api/test_api_rotations.py` | 6 | 6 | **6 pass** |
+| `services/motion-api/test_grounding.py` | 15 | 15 | **15 pass** |
+
+`apps/web`: `npm run build` and `tsc --noEmit` both clean; `packages/navigation`
+`tsc --noEmit` clean. No test was loosened, skipped or deleted. The two changed
+`test_retention.py` assertions were **tightened**: `.beats.json` is now seeded
+into the fixture lesson, so the "survivors == [tombstone]" check fails if the
+new artifact ever escapes the deletion path.
+
+The CV and glTF suites under `services/motion-api/vendor` were not re-run —
+nothing on this branch touches them, and they need `onnxruntime`/`filterpy`/
+`pygltflib` plus a Python 3.11/3.12 environment. `integration-2`'s §10 numbers
+stand for them.
+
+---
+
+## 20. Real-browser evidence that counts drive playback
+
+Production build, real Chromium at `localhost:3311`, `/lesson/good-lesson`
+(proposal: 120 a minute, count 1 at 0.400 s, 28 counts).
+
+| Check | Measured |
+|---|---|
+| Counts follow the video clock | played from 0; at `currentTime` **3.052 s** the active count was **6**. The grid says `floor((3.052 − 0.4) / 0.5) + 1 = 6`. |
+| Arrow steps a count, on the boundary | 2.000 → **2.400** → **2.900** — exactly `timeOfCount(5)` and `timeOfCount(6)` |
+| Shift-arrow steps a part | → **4.400** = `timeOfCount(9)`, part line reads **"Part 2 · counts 9–16"** |
+| Loop stays inside its counts | loop part 2 `[4.4, 8.4]` and part 3 `[8.4, 12.4]`, sampled once a second across repeated wraps: never outside; a wrap observed at 11.823 → 8.901 |
+| Sections are semantic, never timestamps | "Part 3 · counts 17–24" — no `0:07–0:12` anywhere on the surface |
+| The proposal is overridable | "Set count 1 here" at 4.40 s re-anchored the grid to **20 counts, count 1 at 4.40 s** |
+| …and the override wins | the proposal note disappeared, the editor line flipped to "Set by hand — nothing here came from the music", and both survived a full reload out of `localStorage` |
+| All three copy branches render | strong (`good-lesson`), weak (`failure-lesson`, 196 a minute), none (`two-dancers-apart`) |
+| Console / network | no errors, no failed requests; one pre-existing three.js `PCFSoftShadowMap` deprecation warning |
+
+**Two defects found by the browser that review had not.** Both are recorded
+because neither is visible in a diff:
+
+1. **The loop button lied about what it would do.** In "play all" the loop span
+   was whatever was last set, so the button read "Loop part 1" while the
+   playhead sat in part 2 — and looped part 2 when pressed. §8's state-in-label
+   rule failing in its easiest place to miss: the label was true of the *state*
+   and false of the *action*.
+2. **The loop wrapped on its leading edge as well as its trailing one.** It
+   looked symmetric and silently undid any deliberate seek before the loop, so
+   dragging the overview bar in loop mode read as broken. Only the trailing
+   edge wraps now, which is all §7 asks for.
+
+---
+
+## 21. Open, and deliberately not answered here
+
+- **A4 (part editor)** and **A5 (count anchoring)** are still OPEN. Nothing
+  gestural was invented: every edit on this surface is still a labelled button
+  acting on the playhead, which is W6's own choice and the right default while
+  the decision is open. What this branch *adds* to A5's brief, from having
+  built against a real proposal: the correction UI has to handle a grid that is
+  right about spacing and wrong about phase, which is the normal case rather
+  than an edge one; and the half/double swap is a one-tap affordance the
+  contract now carries the data for but nothing yet renders.
+- **D5** blocks the server-side structure store (§17), including the conflict
+  rule between a stored structure and a local one.
+- **A real Modal run** of `beat_image` (§15).
+- **§3.3 / §9.4's other open item** — W9's per-joint visibility, computed and
+  discarded — is untouched by this branch and still unowned.

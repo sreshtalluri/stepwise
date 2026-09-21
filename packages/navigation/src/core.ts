@@ -15,7 +15,7 @@
  *     (DESIGN.md §12.7).
  */
 
-import type { MotionResult } from "../../motion-contract/src/ts/generated/motion-result.js";
+import type { MotionResult } from "../../motion-contract/src/ts/generated/motion-result";
 
 // ---------------------------------------------------------------- timeline
 

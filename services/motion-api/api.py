@@ -346,6 +346,7 @@ def get_job_result(job_id: str) -> dict:
                 _volume_read_bytes(results_volume, f"/{clip_id}.npz"),
                 _volume_read_json(results_volume, f"/{clip_id}.export-manifest.json"),
                 _volume_read_json(results_volume, f"/{clip_id}.performance.json"),
+                _volume_read_json(results_volume, f"/{clip_id}.beats.json"),
             )
         except motion_result.MotionResultUnavailable as e:
             raise HTTPException(e.status, e.detail) from e

@@ -73,6 +73,9 @@ def clip_artifact_paths(results_listing: list[str], clip_id: str, job_id: str | 
         f"/{clip_id}.motion-result.json.gz",    # the materialised contract document
         f"/{clip_id}.export-manifest.json",
         f"/{clip_id}.performance.json",
+        # The beat proposal. Derived from the audio of a person's video, so it
+        # goes with everything else -- D7's promise is kept by this list.
+        f"/{clip_id}.beats.json",
         f"/{clip_id}.last-access.json",
     ]
     # Every dancer's GLB. `{clip_id}_track{n}.glb` per modal_app.export_clip_gltf.

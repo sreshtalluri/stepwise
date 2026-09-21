@@ -173,6 +173,72 @@ class Grounding(BaseModel):
     )
 
 
+class Label(Enum):
+    """
+    Which re-reading of the same anchor this is.
+    """
+
+    double_time = 'double-time'
+    half_time = 'half-time'
+
+
+class TempoAlternate(BaseModel):
+    """
+    The same beat grid, same count_one_s, re-hypothesized at half or double the subdivision. Autocorrelation beat trackers routinely lock onto 2x or 0.5x the tempo a human would tap, so these are not exotic edge cases — they are the single most likely way the proposal is wrong, and they travel with it so a UI can offer the swap in one tap instead of making the learner re-tap the whole dance.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    label: Label = Field(
+        ..., description='Which re-reading of the same anchor this is.'
+    )
+    seconds_per_count: PositiveFloat
+    bpm: PositiveFloat
+
+
+class ProposedCounts(BaseModel):
+    """
+    A MACHINE PROPOSAL for the count grid, from the clip's audio. OPTIONAL — absent means no proposal was produced (no audio track, silent clip, the beat stage failed, or it was never run), which is a normal outcome and not an error; the learner sets counts by hand, which they can always do anyway.
+
+    WHAT THIS IS NOT: it is not the lesson's counts. A learner's authored count grid and named parts (`LessonStructure` in packages/navigation/src/core.ts) are per-learner, mutable, and re-authored freely; this document is server-produced, immutable, and one-per-job, so authored structure cannot live here and does not. This field exists so the authoring surface can OPEN on something better than a blind 120 BPM default — nothing more. A human edit always wins and is never written back here.
+
+    Why it lives in MotionResult rather than its own document: it is a per-clip, server-computed, immutable fact produced by the same job from the same source file, needed by the same consumer at the same moment, and every alternative (a second endpoint, a second stored artifact) would have to be separately served, separately versioned, and separately enumerated in the deletion path that docs/OPEN-DECISIONS.md D7 promises — a promise that is kept by a literal list of filenames, and the cheapest way to break it is to add a file to it. The shape is field-for-field `beat_detect.ProposedGrid`; see its `to_grid()` for the camelCase `CountGrid` the navigation package consumes.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    count_one_s: confloat(ge=0.0) = Field(
+        ...,
+        description="Timeline seconds at which the proposal puts count 1. READ THE HONESTY NOTE: this is the first BEAT the tracker found, not a downbeat. librosa's beat_track locates beats, not bar starts — it has no notion of which beat begins an eight. So this is the weakest number in this object and the one a learner will most often need to move. A surface that renders it as a settled fact violates DESIGN.md §7h exactly as an overclaim about an occluded limb would.",
+    )
+    seconds_per_count: PositiveFloat = Field(
+        ...,
+        description='Proposed seconds per count (one count = one beat). The strongest number here: interval spacing is what a beat tracker is actually good at.',
+    )
+    count_total: conint(ge=1) = Field(
+        ...,
+        description="How many counts this grid puts on the clip. Derived from the authoritative timeline, NOT from source_video.duration_s: max(1, floor((sample_times_s[N-1] - count_one_s) / seconds_per_count) + 1), which is `normalizeStructure`'s formula in packages/navigation/src/core.ts. Cross-checked by the validator, so a producer that drifts from that formula fails rather than shipping a grid that disagrees with the surface that renders it.",
+    )
+    confidence: confloat(ge=0.0, le=1.0) = Field(
+        ...,
+        description='The beat module\'s own trust in this proposal: interval regularity scaled by how much evidence there was, then capped when the tempo lands outside the plausible dance-practice band. 0 means "this is barely a guess". It exists so a UI can be quieter about a weak proposal instead of presenting every proposal identically.',
+    )
+    bpm: PositiveFloat = Field(
+        ...,
+        description="The tracker's tempo estimate, kept alongside seconds_per_count because it is the number a dancer recognises and the one that makes a half/double-time error obvious at a glance.",
+    )
+    alternates: list[TempoAlternate] = Field(
+        ...,
+        description='Always present. Empty only if the producer genuinely had no alternate reading to offer.',
+    )
+    warnings: list[str] = Field(
+        ...,
+        description='Plain-language reasons this proposal may be wrong, from the producer. Meant to be shown, not logged.',
+    )
+
+
 class Source(Enum):
     """
     "sampled": median hue of the middle third of frames, clamped to the DESIGN.md §3 S/L bounds. "fallback": one of the fixed --dancer-N swatches, used when sampling fails or there is more than one person (OPEN-DECISIONS.md E4 — sampling quality is still unproven).
@@ -483,7 +549,7 @@ class MotionResult(BaseModel):
     )
     schema_version: Literal['1.0.0'] = Field(
         ...,
-        description='MotionResult contract version. Bump on any breaking field change; consumers should refuse to parse an unrecognized version rather than guess.',
+        description="MotionResult contract version. It answers exactly one question: can a consumer that was written against version X parse this document? It is NOT a build number and does not track every edit to this file. The rule, written down here because two changes have now been made without one (`shape_params.vector` relaxed from required to optional; `proposed_counts` added) and the next person should not have to guess: BUMP when an existing valid document would become invalid, or an existing correct consumer would become wrong — a field removed or renamed, a field's meaning changed, a new REQUIRED field, an enum value removed, a type narrowed. DO NOT BUMP for a purely additive-optional change (a new optional field) or a relaxation (required -> optional, enum widened): every document that validated before still validates, and every consumer written before still reads correctly, because it simply does not look at the new field. Bumping for those is not the safe choice — this field's own contract is that consumers refuse an unrecognized version rather than guess, so a gratuitous bump makes every deployed consumer reject documents it could read perfectly well. Consumers detect an optional field by checking for the field, never by comparing versions.",
     )
     job_id: constr(min_length=1) = Field(
         ...,
@@ -497,6 +563,7 @@ class MotionResult(BaseModel):
     )
     camera: Camera
     grounding: Grounding
+    proposed_counts: ProposedCounts | None = None
     accent_color: AccentColor
     joint_hierarchy: JointHierarchy
     persons: list[PersonResult] = Field(

@@ -157,3 +157,41 @@ export const reveal = {
 
 /** Legend under every 3D stage — DESIGN.md §4, one persistent line. */
 export const legend = "Solid = seen · sketchy = unsure · dotted = out of frame";
+
+export const lesson = {
+  /**
+   * Where the counts on screen came from, while they are still a guess. One of
+   * these shows above the count strip until the learner edits anything; after
+   * that the grid is theirs and none of them applies.
+   *
+   * DESIGN.md §7h, pointed at the counts rather than at the 3D. A learner who
+   * believes a wrong count 1 practises the whole dance off the beat, so this is
+   * the one place the honesty rule is *more* load-bearing than it is on the
+   * mesh, not less.
+   *
+   * The tempo is "a minute", never "BPM" — §11's plain voice, and the same
+   * wording the navigation surface uses two lines below it.
+   *
+   * `MotionResult.proposed_counts.warnings` is deliberately NOT rendered
+   * verbatim. Those strings are the producer's, written for a log
+   * ("tempo 196 BPM is outside the typical 70-180 dance-practice range;
+   * half/double-time confusion is the likely explanation (see alternates)") —
+   * they are not this voice, and the ALL-CAPS rule in §5 would reject them. The
+   * `confidence` number picks between these two instead.
+   */
+  counts: {
+    proposed: (perMinute: number) =>
+      `Counts proposed from the music, at ${perMinute} a minute. Count 1 is a guess — set it under Counts and parts.`,
+    weak: (perMinute: number) =>
+      `Counts are a weak guess from the music, at ${perMinute} a minute, and the tempo may be double or half that. Set them under Counts and parts.`,
+    placeholder: (perMinute: number) =>
+      `Counts are not set for this clip. The ${perMinute} a minute on screen is a placeholder, not the music — set count 1 and the tempo under Counts and parts.`,
+  },
+};
+
+/**
+ * The navigation surface's strings, swept by the same §11 lint as everything
+ * above. `packages/navigation/src/copy.ts` asked for this line in its own
+ * header; it is here now that the package is actually mounted in this app.
+ */
+export { copy as navigation } from "../../../packages/navigation/src/copy";

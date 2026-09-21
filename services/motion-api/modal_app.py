@@ -360,6 +360,12 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     checkpoint_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/model.ckpt"
     mhr_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
 
+    # Beats are CPU-only and independent of reconstruction, so they run beside
+    # it rather than after it: spawned here, collected below, and the whole cost
+    # disappears inside the ~90 s the GPU is busy. Sequenced instead, a cold CPU
+    # container start would be pure added wall time on every job.
+    beats_call = propose_counts.spawn(clip_id)
+
     t0 = time.time()
     try:
         result = process_clip(
@@ -417,6 +423,20 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     }
     with open(f"{RESULTS_DIR}/{clip_id}.performance.json", "w") as f:
         json.dump(perf, f)
+
+    # Same hand-off pattern as performance.json above: this stage has the video,
+    # the export stage has the timeline, and a small JSON in the results Volume
+    # is how they already talk. Absent file == no proposal, which the reader
+    # treats as normal. Listed in retention.clip_artifact_paths so a removal
+    # request takes it with everything else.
+    try:
+        beats = beats_call.get()
+    except Exception as e:  # noqa: BLE001 -- a beat failure is never a job failure
+        print(f"[beats] {clip_id}: proposal stage failed ({type(e).__name__}: {e})")
+        beats = None
+    if beats:
+        with open(f"{RESULTS_DIR}/{clip_id}.beats.json", "w") as f:
+            json.dump(beats, f)
 
     print(
         f"\nSAVED {out_path}\n"
@@ -644,6 +664,82 @@ gltf_image = (
     .add_local_file(os.path.join(os.path.dirname(__file__), "grounding.py"),
                     "/app/grounding.py")
 )
+
+BEAT_DETECT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "packages", "beat-detect", "python", "beat_detect",
+)
+
+# W11's beat proposal. Its own image, CPU-only, and NOT a layer on cv_image --
+# that is a deliberate call with a measured cost behind it, not caution.
+#
+# librosa pulls numba, and numba pins numpy hard. cv_image's numpy is already
+# load-bearing in three directions at once: detectron2 compiles a CUDA
+# extension against it, bytetrack's lapx replacement exists because the stock
+# build broke on this image's numpy AVX-512 intrinsics, and onnxruntime-gpu is
+# pinned to 1.20.2 for the CUDA-12.4 era. Adding a pip that can move numpy puts
+# all three at risk for a 5-second audio job. Worse, it lands ABOVE the
+# detectron2 compile in the layer stack, so every rebuild pays for it:
+# docs/INTEGRATION.md §5 measured that at ~13 minutes.
+#
+# gltf_image was the other candidate and is a non-starter for a simpler reason:
+# it has neither ffmpeg nor the source video mounted.
+#
+# So: debian_slim + ffmpeg + librosa, no GPU. A 20 s clip is seconds of CPU,
+# which at Modal's CPU rate rounds to nothing against the $0.076 the L40S pass
+# costs. It rebuilds on its own and can break nothing else.
+beat_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .apt_install("ffmpeg")  # propose_grid shells out to it to pull the audio track
+    .pip_install("librosa>=0.10", "numpy>=1.26", "soundfile>=0.12")
+    .add_local_dir(BEAT_DETECT_DIR, remote_path="/app/beat_detect")
+)
+
+
+@app.function(image=beat_image, volumes={CLIPS_DIR: eval_clips, UPLOADS_DIR: uploads}, timeout=600)
+def propose_counts(clip_id: str) -> dict | None:
+    """Propose a count grid from the clip's audio. A PROPOSAL, never a decision.
+
+    Returns `beat_detect.ProposedGrid` as a dict, or None when there is nothing
+    to propose from. Returning None is a normal outcome -- a clip with no audio
+    track, a silent clip, or a tracker that found fewer than two beats -- and
+    the caller must treat it as such: the lesson still works, the learner sets
+    counts by hand, which they can always do anyway.
+
+    `count_total` is deliberately NOT computed here even though the duration is
+    to hand: the contract's grid is sized against `sample_times_s`, which only
+    exists after reconstruction. motion_result._proposed_counts does it.
+    """
+    import os
+    import sys
+    from dataclasses import asdict
+
+    sys.path.insert(0, "/app")
+    from beat_detect import propose_grid
+
+    upload_path = f"{UPLOADS_DIR}/{clip_id}.mp4"
+    if not os.path.exists(upload_path):
+        uploads.reload()  # same eventual-consistency guard run_clip uses
+    video_path = upload_path if os.path.exists(upload_path) else f"{CLIPS_DIR}/{clip_id}.mp4"
+    if not os.path.exists(video_path):
+        print(f"[beats] {clip_id}: no video to read")
+        return None
+
+    try:
+        grid = asdict(propose_grid(video_path))
+    except Exception as e:  # noqa: BLE001 -- a missing audio track raises from ffmpeg
+        # Never fail the job over a proposal. A lesson with hand-set counts is
+        # the product; a lesson that did not get made is not.
+        print(f"[beats] {clip_id}: no proposal ({type(e).__name__}: {e})")
+        return None
+    if not grid["seconds_per_count"] > 0:
+        print(f"[beats] {clip_id}: no proposal (degenerate spacing)")
+        return None
+    print(f"[beats] {clip_id}: {grid['bpm']:.1f} BPM, {grid['seconds_per_count']:.4f} s/count, "
+          f"count 1 at {grid['count_one_s']:.3f}s, confidence {grid['confidence']:.2f}"
+          + (f", warnings: {grid['warnings']}" if grid["warnings"] else ""))
+    return grid
+
 
 # CPU-only image for the retention sweeper: it moves no arrays, it only lists
 # and deletes Volume paths, so it has no business loading torch.
@@ -1336,10 +1432,12 @@ def export_clip_gltf(clip_id: str, job_id: str | None = None):
 
     perf_path = f"{RESULTS_DIR}/{clip_id}.performance.json"
     perf = json.load(open(perf_path)) if os.path.exists(perf_path) else None
+    beats_path = f"{RESULTS_DIR}/{clip_id}.beats.json"
+    beats = json.load(open(beats_path)) if os.path.exists(beats_path) else None
     try:
         doc = motion_result.build_motion_result(
             job_id or f"job_{clip_id}", clip_id,
-            open(npz_path, "rb").read(), manifest, perf,
+            open(npz_path, "rb").read(), manifest, perf, beats,
         )
         with open(f"{RESULTS_DIR}/{clip_id}.motion-result.json.gz", "wb") as f:
             f.write(gzip.compress(json.dumps(doc, separators=(",", ":")).encode(), 6))

@@ -80,6 +80,22 @@ function checkInvariants(doc: MotionResult): string[] {
     errors.push('grounding.status is "grounded" but floor_plane is null');
   }
 
+  // A proposed grid that disagrees with the timeline it is laid over is worse
+  // than no proposal: the count strip would run out of counts, or show counts
+  // past the end of the dance, with nothing anywhere saying why. Same formula as
+  // `normalizeStructure` in packages/navigation/src/core.ts, against
+  // sample_times_s rather than source_video.duration_s.
+  const pc = doc.proposed_counts;
+  if (pc) {
+    const endS = doc.sample_times_s[n - 1];
+    const expected = Math.max(1, Math.floor((endS - pc.count_one_s) / pc.seconds_per_count) + 1);
+    if (pc.count_total !== expected) {
+      errors.push(
+        `proposed_counts.count_total is ${pc.count_total} but the grid over sample_times_s gives ${expected} — a proposal must be sized against the authoritative timeline`,
+      );
+    }
+  }
+
   return errors;
 }
 

@@ -44,13 +44,29 @@ export const copy = {
 
   counts: {
     editor: "Counts and parts",
-    /**
-     * Says plainly that the grid is hand-set. Beat detection is a later,
-     * proposal-only feature (PRD §5 cut-list), and a guessed grid must never be
-     * presented as a detected one.
-     */
     summary: (total: number, perMinute: number, countOneS: string) =>
-      `${total} counts, ${perMinute} a minute, count 1 at ${countOneS}. Set these by hand. Nothing here was detected from the music.`,
+      `${total} counts, ${perMinute} a minute, count 1 at ${countOneS}.`,
+    /**
+     * Where the grid came from, said plainly — one of these always follows the
+     * summary above.
+     *
+     * This used to be a single sentence ending "Nothing here was detected from
+     * the music", written when beat detection was a cut-list item. Detection
+     * now runs (`packages/beat-detect`, carried in `MotionResult.proposed_counts`),
+     * so that sentence became false the moment a proposal could reach this
+     * surface — a §7h failure pointed at the learner's counts instead of at the
+     * 3D. The host passes `countsFrom` because a proposed grid and a hand-set
+     * one are the same shape and this component cannot tell them apart.
+     *
+     * `byMusic` names the weak part rather than the strong one on purpose.
+     * librosa's tracker finds beats, not downbeats — it has no notion of which
+     * beat starts an eight — so the spacing is usually close and count 1 is
+     * usually wrong. Saying "proposed from the music" alone would be true and
+     * still misleading.
+     */
+    byHand: "Set by hand — nothing here came from the music.",
+    byMusic:
+      "Proposed from the music. Count 1 is the first beat in the clip, not necessarily the first count of the dance.",
     setOne: "Set count 1 here",
     tap: (taps: number) => `Tap the counts (${taps})`,
     tapping: (perMinute: number) => `Tapping at ${perMinute} a minute`,

@@ -615,30 +615,26 @@ button {
 .lesson .chip small { font-size: 0.72rem; font-weight: 400; color: var(--ink-faint); }
 .lesson .chip.on small { color: #c9c2b7; }
 .lesson .chip:active { transform: translateY(1px) scale(0.98); }
-.lesson .swatch { width: 12px; height: 12px; border-radius: 50%; }
 
-/* ----------------------------------------------------------- overview bar */
+/* ---------------------------------------------------------------- transport
+ *
+ * The overview bar, the dancer chips, their swatch and the A–B loop veil used
+ * to live here as placeholders for W6. `<LessonNavigator>` renders all four now
+ * (`.sw-overview`, `.sw-chips`, `.sw-swatch`, `.sw-veil` in
+ * packages/navigation/src/navigation.css), so those rules are deleted rather
+ * than left to rot — two stylesheets describing the same bar is how a phantom
+ * style survives long enough to confuse someone.
+ *
+ * `.btn` stays: the viewer's own controls (speed, mirror, follow, compare) are
+ * passed into the navigator's transport row through `children`, which is the
+ * seam W6 left for them.
+ */
 
-.lesson .overview { position: relative; padding: 8px 0 2px; }
-.lesson .scrub { width: 100%; accent-color: var(--ink); height: 28px; }
-/* Loop de-emphasizes the outside; it never highlights the inside. */
-.lesson .loop-out {
-  position: absolute;
-  top: 8px;
-  bottom: 2px;
-  background: var(--paper-sunk);
-  opacity: 0.85;
-  pointer-events: none;
-  border-radius: 4px;
-}
+/* The host's buttons share the row with `.sw-btn`, so they share its metrics.
+ * They keep their own stacked label/`small` layout — the second line is a
+ * measured fact ("travels 3.2 m") or a key hint, not a caption. */
+.lesson .sw-transport .btn { flex: 1 1 auto; border-radius: 12px; }
 
-/* ---------------------------------------------------------------- transport */
-
-.lesson .transport {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 9px;
-}
 .lesson .btn {
   min-height: 88px; /* DESIGN.md §8 — the phone is on the floor three metres away */
   border: 1px solid var(--line);
@@ -668,7 +664,6 @@ button {
   .lesson .stages > .stage { flex: 1; height: 44vh; }
   .lesson .stage.promoted { flex: 3; }
   .lesson .stage.demoted { flex: 1; height: 44vh; }
-  .lesson .transport { grid-template-columns: repeat(5, 1fr); }
 }
 
 /* -------------------------------------------------------------- desktop */
