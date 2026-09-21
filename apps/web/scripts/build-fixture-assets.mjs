@@ -128,7 +128,6 @@ function buildClip(doc, person, rig, clipName) {
   const tracks = [];
 
   const rootDef = doc.joint_hierarchy.joints[doc.joint_hierarchy.root_joint_index];
-  const pos = new Float32Array(n * 3);
   const rootQuat = new Float32Array(n * 4);
   const restRoot = new THREE.Quaternion().fromArray(rootDef.rest_rotation);
   const q = new THREE.Quaternion();
@@ -136,7 +135,6 @@ function buildClip(doc, person, rig, clipName) {
 
   for (let i = 0; i < n; i++) {
     const rt = person.root_trajectory[i];
-    pos.set(rt.position, i * 3);
     // Root node = world root orientation, then the rest pose, then the pelvis's own
     // local rotation. In the shipped fixtures the last two are identity; composing
     // them anyway keeps the exporter correct for a pipeline that uses them.
@@ -145,7 +143,17 @@ function buildClip(doc, person, rig, clipName) {
       .multiply(qLocal.fromArray(person.samples[i].joints[rootDef.index].rotation));
     rootQuat.set([q.x, q.y, q.z, q.w], i * 4);
   }
-  tracks.push(new THREE.VectorKeyframeTrack(`${rootDef.glb_node_name}.position`, times, pos));
+  // NO root `.position` track, deliberately, and this is the whole point of the
+  // fixtures being fixtures. They used to bake `root_trajectory[].position` into the
+  // root node, which made them the ONE regime no real clip is in: the pipeline's
+  // export (`modal_app.export_clip_gltf`) writes `skel_state`, whose root
+  // translation is a character-local constant and carries no travel at all —
+  // verified on real solo-01 output, where the `root` node has no translation
+  // channel and a static [0, 0.924, 0]. Baking it here is why the gap in
+  // OPEN-DECISIONS E6 item 5 survived review: the only travelling clip anyone had
+  // opened travelled for a reason the real pipeline does not have. Placement is the
+  // viewer's job now (E6, route B), so leaving it out is what makes these fixtures
+  // exercise the same code path a real lesson does.
   tracks.push(new THREE.QuaternionKeyframeTrack(`${rootDef.glb_node_name}.quaternion`, times, rootQuat));
 
   for (const def of doc.joint_hierarchy.joints) {
@@ -250,18 +258,25 @@ function buildTwoDancers(good, half = 0.62) {
 /**
  * A dancer who actually crosses the floor.
  *
- * WHY THIS IS SYNTHETIC AND MUST STAY LABELLED SO. `root_trajectory` in every real
- * document today is effectively constant — the pipeline pins the dancer to the origin
- * and world placement is unresolved (OPEN-DECISIONS E6, under research on the
- * `world-placement` branch). So there is nothing for a follow camera to follow, and
- * no way to tell a working follow rig from a broken one on the shipped fixtures.
+ * WHY THIS IS SYNTHETIC AND MUST STAY LABELLED SO. It is still synthetic, but no
+ * longer for the reason this note used to give ("the pipeline pins the dancer to the
+ * origin"). World placement was wired on `grounding-wiring` and real documents do
+ * travel — solo-01 measures 8.63 m of XZ extent over 27.35 m of path. This fixture
+ * stays because nobody has checked a real placed clip into the repo, and a real one
+ * is a real person's reconstruction, which is not a thing to commit (see
+ * docs/research/rights-and-privacy.md). Derived here rather than added to
+ * `packages/motion-contract/fixtures/` because it is not pipeline output, and
+ * inventing a travelling clip in the frozen contract package would suggest it is.
  *
  * This document adds travel and CHANGES NOTHING ELSE: the same joint rotations, the
  * same visibility, the same timeline. It is the second regime the viewer has to work
- * in. It is derived here rather than added to `packages/motion-contract/fixtures/`
- * precisely because it is not pipeline output — inventing a travelling clip in the
- * frozen contract package would suggest the pipeline produces one. Delete this the
- * day E6 lands and a real travelling clip exists.
+ * in.
+ *
+ * It is a GENTLE version of that regime, and knowingly so: 2.6 m at well under
+ * 1 m/s, where real solo-01 sustains 4.42 m/s over a one-second window. The follow
+ * rig's lag clamp (`FOLLOW.maxLagFactor`) is the constant that only binds at real
+ * speed, so it cannot be tuned against this fixture — it was tuned against the real
+ * document, and the numbers are in the branch report.
  *
  * The path: 2.6 m laterally and 1.5 m in depth — lateral so the dancer would slide
  * out of frame without follow, depth so they would visibly shrink without it. Both
@@ -284,6 +299,55 @@ function buildTravellingDancer(good) {
     p.root_trajectory[i].position[0] += swing * 2.6;
     p.root_trajectory[i].position[2] += Math.sin(s * Math.PI) * 1.5;
   }
+  return doc;
+}
+
+/* --------------------------------- derived never-placed dancer (see note) */
+
+/**
+ * One dancer the pipeline placed, and one it could not — solo-07's regime, which
+ * had no fixture at all.
+ *
+ * `world_placement_probe.place_track` needs 25 frames of evidence. Below that the
+ * solve never runs and `motion_result.py` falls back to `skel_state`'s pinned
+ * character-local constant, which in this document's world space is NOT a spot in
+ * the room: on solo-07 it sits 2.16 m above the fitted floor, next to the camera.
+ * The contract requires a Vec3 on every sample, so there is nowhere to write "no
+ * answer" except the provenance, and that is what it does: never `observed`.
+ *
+ * Which makes this the fixture for the one way the viewer could turn this feature
+ * into a lie. Offsetting person_2 by its own `root_trajectory` would fling it into
+ * the air on a number nobody measured. Leaving it standing where its animation clip
+ * puts it is an honest, visible limitation — a dancer that does not travel
+ * (DESIGN.md §7h). Person 1 travels in the same frame, so the two behaviours are
+ * side by side and the wrong one is not subtle.
+ */
+function buildUnplacedDancer(travelling) {
+  const doc = structuredClone(travelling);
+  doc.job_id = "job_dev_unplaced_0000000000000000000000000";
+  doc.accent_color = { hex: "#E8952F", source: "fallback" };
+
+  const n = doc.sample_times_s.length;
+  const shift = 23; // not a frame-for-frame twin, same as buildTwoDancers
+  const a = doc.persons[0];
+  const b = structuredClone(a);
+  b.person_id = "person_2";
+  b.track_id = 2;
+  b.animation = { ...a.animation, glb_asset_id: `${a.animation.glb_asset_id}_b` };
+  b.samples = Array.from({ length: n }, (_, i) => structuredClone(a.samples[(i + shift) % n]));
+  b.crop_rects = {
+    hands: Array.from({ length: n }, (_, i) => structuredClone(a.crop_rects.hands[(i + shift) % n])),
+    feet: Array.from({ length: n }, (_, i) => structuredClone(a.crop_rects.feet[(i + shift) % n])),
+  };
+  // Position replaced, rotation kept: the fallback in motion_result.py only
+  // substitutes the translation — the root's world ORIENTATION is still real.
+  const floorY = doc.grounding.floor_plane ? doc.grounding.floor_plane.point[1] : 0;
+  b.root_trajectory = Array.from({ length: n }, (_, i) => ({
+    position: [0, floorY + 2.16, 0],
+    rotation: structuredClone(a.root_trajectory[(i + shift) % n].rotation),
+    provenance: { observed: false, interpolated: false, suppressed: "low_confidence" },
+  }));
+  doc.persons = [a, b];
   return doc;
 }
 
@@ -321,6 +385,7 @@ lessons.push({
     return d;
   })(),
 });
+lessons.push({ name: "unplaced-dancer", doc: buildUnplacedDancer(buildTravellingDancer(lessons[0].doc)) });
 
 for (const { name, doc } of lessons) {
   writeFileSync(path.join(outDir, `${name}.json`), JSON.stringify(doc));

@@ -14,6 +14,8 @@ import {
   followStep,
   deadzoneFor,
   damp,
+  rootPlacementObserved,
+  rootPositionAt,
   FOLLOW,
   VIEW_PRESETS,
   type MotionResult,
@@ -190,9 +192,53 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
   const box = useRef(new THREE.Box3());
   const scratch = useRef(new THREE.Vector3());
 
+  /**
+   * World placement (OPEN-DECISIONS E6, route B). The GLB is a pose clip in the
+   * character's own frame — its `root` node carries a CONSTANT translation
+   * (measured on real solo-01 output: no translation channel at all, a static
+   * `[0, 0.924, 0]`), so animating it alone dances the dancer in place. The travel
+   * lives in `root_trajectory`, and this group is what puts it back.
+   *
+   * Two refs, and the second one is the reason this is not simply
+   * `group.position = root_trajectory[t]`: the offset is measured as
+   * `world − wherever the clip alone put the root`. On today's export that
+   * subtrahend is the constant above; on a fixture or a future export that DOES
+   * compose the translation into the GLB it is the world position itself and the
+   * offset collapses to zero. Same code, no regime flag, no double-counting.
+   */
+  const placeRef = useRef<THREE.Group>(null);
+  const rootBone = useMemo(() => {
+    const def = doc.joint_hierarchy.joints[doc.joint_hierarchy.root_joint_index];
+    return (def && bonesByName.get(def.glb_node_name)) ?? null;
+  }, [doc, bonesByName]);
+  // Whole-clip fact, so it is read once, not 60 times a second.
+  const placed = useMemo(() => rootPlacementObserved(doc, personIndex), [doc, personIndex]);
+
   useFrame((_, delta) => {
     const t = timeRef.current ?? 0;
     mixer.setTime(t);
+
+    // Placement BEFORE anything reads a world position: the focus box below, and
+    // through it the follow camera and the video pane's crop, are all supposed to
+    // be about where the dancer is IN THE ROOM.
+    //
+    // Same clock as the pose, by construction — one `t`, read once, feeding
+    // mixer.setTime and rootPositionAt in the same frame. Nothing here samples an
+    // index, a React state or a second timer.
+    //
+    // `placed` false means this track was never solved; it stays exactly where the
+    // clip puts it rather than being offset by a placeholder that is not a place.
+    // See rootPlacementObserved.
+    const place = placeRef.current;
+    if (place && placed && rootBone) {
+      const world = rootPositionAt(doc, personIndex, t);
+      // Where the clip alone puts the root, expressed in this group's own frame, so
+      // it is independent of the offset we are about to write (and already includes
+      // the mirror flip, which is applied on the child). getWorldPosition refreshes
+      // the bone's world matrix from the pose mixer.setTime just wrote.
+      place.worldToLocal(rootBone.getWorldPosition(scratch.current));
+      place.position.set(world[0] - scratch.current.x, world[1] - scratch.current.y, world[2] - scratch.current.z);
+    }
 
     // Visibility is a step lookup on sample_times_s — never interpolated across a
     // suppressed span, and never derived from index/fps arithmetic.
@@ -245,7 +291,19 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
     }
   });
 
-  return <primitive object={scene} scale-x={mirrored ? -1 : 1} />;
+  // The mirror stays on the inner object, not on the placement group: it is meant to
+  // flip the BODY so a learner can copy a limb, and it flips about the group's own
+  // origin, i.e. about the dancer. Hoisting it onto the placement group would reflect
+  // the travel about world x = 0 instead — which is the camera's optical axis, not a
+  // wall — and would also double-flip the video pane's crop, which is projected from
+  // these same bounds and then CSS-mirrored (`useVideoCrop`). Whether a mirrored
+  // lesson should mirror the PATH as well as the body is a real question and an open
+  // one; it is not answered here, and today's behaviour is preserved exactly.
+  return (
+    <group ref={placeRef}>
+      <primitive object={scene} scale-x={mirrored ? -1 : 1} />
+    </group>
+  );
 }
 
 /** World-space bounds of a named set of joints, padded for the surface around them. */
@@ -263,10 +321,35 @@ function boneBox(bones: Map<string, THREE.Bone>, doc: MotionResult, names: strin
 
 function Floor({ doc }: { doc: MotionResult }) {
   // DESIGN.md §10 / contract: when grounding failed, draw NO floor. Never fake a plane.
-  if (doc.grounding.status === "none" || !doc.grounding.floor_plane) return null;
-  const y = doc.grounding.floor_plane.point[1];
+  const plane = doc.grounding.status === "none" ? null : doc.grounding.floor_plane;
+
+  /**
+   * The disc sits ON the fitted plane — at its point, tilted to its normal — rather
+   * than horizontally at `point[1]`.
+   *
+   * This used to be `position={[0, point[1], 0]}` with a fixed −90° rotation, which
+   * is only correct for a level camera, and it was invisible while the dancer stood
+   * at the origin: at one spot every plane through that spot looks the same.
+   * `root_trajectory` now carries real travel, and solo-01's camera is pitched 13°
+   * up, so the error is no longer a rounding detail. Measured on the shipped
+   * document: over the dancer's own 8.25 m of depth the fitted plane drops 1.92 m,
+   * and against a flat disc at `point[1]` the root height ranges −0.94 m to +0.94 m
+   * — the dancer walks a metre under the floor at the far end. Against the real
+   * plane it stays 0.63–1.05 m above it for the whole clip, which is a pelvis
+   * height that crouches. Drawing the plane the grounding solver actually fitted is
+   * also the only version that is honest: the document states a normal.
+   */
+  const quaternion = useMemo(
+    () =>
+      plane
+        ? new THREE.Quaternion().setFromUnitVectors(UP, new THREE.Vector3(...plane.normal).normalize())
+        : null,
+    [plane],
+  );
+  if (!plane || !quaternion) return null;
+
   return (
-    <group position={[0, y, 0]}>
+    <group position={plane.point as [number, number, number]} quaternion={quaternion}>
       {/* A real surface first. Mockup finding §13.2: a 1px line is not a floor — the
           material has to sit clearly above --stage so the horizon is unmistakable.
           The fog below is what turns the far edge into that horizon rather than a
@@ -291,9 +374,62 @@ function Floor({ doc }: { doc: MotionResult }) {
  */
 const UP = new THREE.Vector3(0, 1, 0);
 const FILL_OFFSET = THREE.MathUtils.degToRad(40);
+/** Today's key-light position, kept as the key DIRECTION once the rig has to move. */
+const KEY_DIR = new THREE.Vector3(2.6, 4.2, 1.9).normalize();
 
-function Lights({ grounded }: { grounded: boolean }) {
+/**
+ * Where the key light stands, and how big its shadow volume has to be.
+ *
+ * A directional light's shadow is an orthographic box hung at the light and aimed at
+ * its target, so the constants that used to be literals here (`±4` wide, `far 12`,
+ * light at `[2.6, 4.2, 1.9]` aimed at the origin) silently assumed the dancer stands
+ * at the origin. They did, until `root_trajectory` started carrying travel. On real
+ * solo-01 the dancer walks to z = −11 m, which is 14.4 m from that light — past
+ * `far`, and far outside the box — so the contact shadow, the thing DESIGN.md §9
+ * makes the body read as standing on the floor rather than floating, simply stops
+ * being drawn partway through the clip.
+ *
+ * So the box is sized from the document instead. The light's DIRECTION is unchanged
+ * (`KEY_DIR` is the old position normalized), which is all a directional light
+ * contributes to shading — the two-tone break and the direction the shadow falls are
+ * byte-for-byte what they were. Only the frustum moves, and it stays as tight as the
+ * clip allows: solo-01 costs 5.7 mm per shadow texel against the old 3.9 mm.
+ *
+ * The origin is always included because that is where a never-placed dancer stands
+ * (see rootPlacementObserved) — their `root_trajectory` is a placeholder that is not
+ * a place, and sizing a shadow box to it would stretch the map over empty room.
+ */
+function keyLightRig(doc: MotionResult) {
+  const box = new THREE.Box3().setFromPoints([new THREE.Vector3(0, 0, 0)]);
+  doc.persons.forEach((person, i) => {
+    if (!rootPlacementObserved(doc, i)) return;
+    for (const s of person.root_trajectory) box.expandByPoint(new THREE.Vector3(...(s.position as Vec3)));
+  });
+  const centre = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  // +1.5 m for the body around the root it is hung from; floor of 4 keeps the old
+  // "several dancers side by side" width on a clip that does not travel.
+  const half = Math.max(4, Math.max(size.x, size.y, size.z) / 2 + 1.5);
+  const distance = half + 6;
+  return {
+    position: centre.clone().addScaledVector(KEY_DIR, distance),
+    target: centre,
+    half,
+    far: distance + half + 4,
+  };
+}
+
+function Lights({ doc, grounded }: { doc: MotionResult; grounded: boolean }) {
   const fill = useRef<THREE.DirectionalLight>(null);
+  const key = useRef<THREE.DirectionalLight>(null);
+  const rig = useMemo(() => keyLightRig(doc), [doc]);
+  // The target is not mounted in the scene graph, so its world matrix is ours to
+  // keep — three reads `light.target.matrixWorld` and never updates it for us.
+  useEffect(() => {
+    if (!key.current) return;
+    key.current.target.position.copy(rig.target);
+    key.current.target.updateMatrixWorld();
+  }, [rig]);
   useFrame(({ camera }) => {
     if (!fill.current) return;
     // Offset 40 degrees off the view axis. Head-on it would light the body flat and
@@ -309,19 +445,21 @@ function Lights({ grounded }: { grounded: boolean }) {
           collapses into one flat fill, which is the pictogram failure mode. */}
       <ambientLight intensity={0.18} />
       <directionalLight
-        position={[2.6, 4.2, 1.9]}
+        ref={key}
+        position={rig.position}
         intensity={grounded ? 0.3 : 0.5}
         castShadow={grounded}
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0015}
         shadow-normalBias={0.02}
-        // Wide enough for several dancers side by side, not just one.
-        shadow-camera-left={-4}
-        shadow-camera-right={4}
-        shadow-camera-top={4}
-        shadow-camera-bottom={-1}
+        // Wide enough for several dancers side by side, and for a dancer who
+        // crosses the room — see keyLightRig.
+        shadow-camera-left={-rig.half}
+        shadow-camera-right={rig.half}
+        shadow-camera-top={rig.half}
+        shadow-camera-bottom={-rig.half}
         shadow-camera-near={0.5}
-        shadow-camera-far={12}
+        shadow-camera-far={rig.far}
       />
       <directionalLight ref={fill} intensity={0.68} />
     </>
@@ -556,7 +694,7 @@ export default function Stage3D({
       <color attach="background" args={["#1C1917"]} />
       {/* The far edge of the floor dissolving into the backdrop IS the horizon. */}
       <fog attach="fog" args={["#1C1917", 9, 24]} />
-      <Lights grounded={doc.grounding.status === "grounded"} />
+      <Lights doc={doc} grounded={doc.grounding.status === "grounded"} />
       <Floor doc={doc} />
       {doc.persons.map((person, i) => (
         <Dancer

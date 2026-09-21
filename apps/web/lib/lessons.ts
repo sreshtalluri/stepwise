@@ -11,4 +11,8 @@ export const LESSONS: Record<string, { title: string }> = {
   // has yet checked in a real placed clip to replace them. Titled accordingly.
   travelling: { title: "Synthetic travel — a dancer crossing the floor" },
   "travelling-no-floor": { title: "Synthetic travel, no floor — the usual case" },
+  // The honesty case for world placement (OPEN-DECISIONS E6): a track too short for
+  // the placement solve keeps a placeholder position that is not a place in the room.
+  // One dancer travels, the other stays where their clip puts them.
+  "unplaced-dancer": { title: "One dancer placed, one the pipeline could not place" },
 };

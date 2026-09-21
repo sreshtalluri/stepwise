@@ -24,12 +24,15 @@ import {
   deadzoneFor,
   travelExtent,
   travelsMeaningfully,
+  rootPlacementObserved,
+  rootPositionAt,
   projectBoxToFrame,
   cropTransform,
   MAX_CROP_ZOOM,
   CROP_TARGET_HEIGHT,
   FOLLOW,
   BODY_HEIGHT_M,
+  type FollowTuning,
   type Vec3,
   type MotionResult,
 } from "./motion";
@@ -41,6 +44,7 @@ const good = load("good-lesson");
 const failure = load("failure-lesson");
 const two = load("two-dancers");
 const travelling = load("travelling");
+const unplaced = load("unplaced-dancer");
 
 test("sampleIndexAt is a step function on sample_times_s, not index/fps arithmetic", () => {
   const t = good.sample_times_s;
@@ -152,6 +156,50 @@ test("only the camera preset may call itself camera evidence", () => {
   assert.equal(viewLabel("top", true), "top · mirrored · estimated view");
 });
 
+/* ------------------------------------------------------- world placement */
+
+test("a never-placed track is not offset by a placeholder that is not a place", () => {
+  // OPEN-DECISIONS E6 item 4. The short track's position is a character-local
+  // constant sitting 2.16 m above the floor; every sample says so by never being
+  // `observed`. Reading provenance is the only thing separating it from a real one,
+  // since both are just three finite numbers.
+  assert.equal(rootPlacementObserved(unplaced, 0), true);
+  assert.equal(rootPlacementObserved(unplaced, 1), false);
+  assert.equal(rootPlacementObserved(travelling, 0), true);
+  assert.equal(rootPlacementObserved(good, 0), true);
+
+  // And the placeholder really would fly: if the gate were dropped the dancer would
+  // be lifted more than a metre off the plane the same document fits.
+  const floorY = good.grounding.floor_plane!.point[1];
+  const placeholder = unplaced.persons[1]!.root_trajectory[0].position[1];
+  assert.ok(placeholder - floorY > 1, `the placeholder must be visibly wrong, got ${placeholder - floorY} m`);
+});
+
+test("the world position is lerped the way the GLB's LINEAR channels are, not stepped", () => {
+  const t = travelling.sample_times_s;
+  const rt = travelling.persons[0].root_trajectory;
+  // Exactly on a sample: exactly that sample, no drift from the interpolation.
+  for (const i of [0, 37, 120, t.length - 1]) {
+    assert.deepEqual(rootPositionAt(travelling, 0, t[i]), rt[i].position.slice(0, 3));
+  }
+  // Half way between two: half way, not either end — the whole point, since a step
+  // would hold for a 15 Hz sample while the mixer lerps the pose at display rate.
+  const i = 100;
+  const mid = rootPositionAt(travelling, 0, (t[i] + t[i + 1]) / 2);
+  for (let k = 0; k < 3; k++) {
+    assert.ok(
+      Math.abs(mid[k] - (rt[i].position[k] + rt[i + 1].position[k]) / 2) < 1e-9,
+      `axis ${k}: ${mid[k]}`,
+    );
+  }
+  assert.notDeepEqual(mid, rt[i].position.slice(0, 3));
+
+  // Outside the timeline it holds the end samples rather than extrapolating a
+  // position the pipeline never claimed.
+  assert.deepEqual(rootPositionAt(travelling, 0, -5), rt[0].position.slice(0, 3));
+  assert.deepEqual(rootPositionAt(travelling, 0, 1e6), rt[rt.length - 1].position.slice(0, 3));
+});
+
 /* --------------------------------------------------------------- follow rig */
 
 test("the follow deadzone makes a pinned trajectory a no-op, and travel still moves the camera", () => {
@@ -196,6 +244,31 @@ test("follow trails by more than the deadzone while travelling — travel never 
   for (let i = 0; i < 4 / dt; i++) aim = followStep(aim, [x, 1, 0], dz, dt);
   assert.ok(Math.abs(x - aim[0]) <= dz + 1e-3, `settled lag ${x - aim[0]}`);
   assert.ok(Math.abs(x - aim[0]) > dz * 0.99, `must not overshoot into the deadzone: ${x - aim[0]}`);
+});
+
+test("the follow lag is capped, so a real sprint cannot leave the dancer off the panel", () => {
+  // solo-01's measured worst case: 4.42 m/s sustained over a second. Without the cap
+  // the steady-state trail is deadzone + v*tau = 2.34 m, and the body preset frames
+  // from 3.57 m with a 0.93 m horizontal half-frame on a phone — the dancer is not
+  // off-centre, they are gone.
+  const dz = deadzoneFor(BODY_HEIGHT_M);
+  const dt = 1 / 60;
+  let aim: Vec3 = [0, 1, 0];
+  let x = 0;
+  for (let i = 0; i < 2 / dt; i++) {
+    x += 4.42 * dt;
+    aim = followStep(aim, [x, 1, 0], dz, dt);
+  }
+  const lag = x - aim[0];
+  assert.ok(lag <= dz * FOLLOW.maxLagFactor + 1e-9, `lag ${lag} must not exceed the cap ${dz * FOLLOW.maxLagFactor}`);
+  assert.ok(lag > dz, `lag ${lag} must still exceed the deadzone — travel must still read`);
+
+  // The cap is a ceiling, not a lock: below it nothing changes, so the deadzone
+  // behaviour and the slow-walk easing are reached exactly as they were tuned.
+  const slow = followStep([0, 1, 0], [dz * 0.9, 1, 0], dz, dt);
+  assert.deepEqual(slow, [0, 1, 0]);
+  const capped: FollowTuning = { ...FOLLOW, maxLagFactor: 1e6 };
+  assert.deepEqual(followStep([0, 1, 0], [dz + 0.01, 1, 0], dz, dt), followStep([0, 1, 0], [dz + 0.01, 1, 0], dz, dt, capped));
 });
 
 test("damp is frame-rate independent", () => {

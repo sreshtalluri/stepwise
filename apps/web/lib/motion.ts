@@ -243,6 +243,21 @@ export interface FollowTuning {
   tauDistance: number;
   /** Switching between dancers further apart than this is a cut, not a glide. Metres. */
   cutDistance: number;
+  /**
+   * Hard ceiling on the lag above, as a MULTIPLE OF THE DEADZONE — so it scales with
+   * the framing the same way the deadzone does, and a close-up gets a proportionally
+   * tighter one.
+   *
+   * The lag is `deadzone + speed * tauPosition` at steady state and is otherwise
+   * unbounded, which was fine for as long as nothing in the repo travelled faster
+   * than the synthetic fixture (under 1 m/s). Real output is not that. Measured on
+   * the shipped solo-01 document: the dancer sustains **4.42 m/s** over a one-second
+   * window, which at `tauPosition` 0.45 s trails the camera by 0.35 + 1.99 = 2.34 m
+   * while the rig frames from ~3.6 m at a 16-degree horizontal half-angle. That is
+   * 33 degrees off axis: the dancer is not merely off-centre, they are outside the
+   * panel entirely, which is the exact failure the follow camera exists to prevent.
+   */
+  maxLagFactor: number;
 }
 
 /**
@@ -262,6 +277,25 @@ export interface FollowTuning {
  * speed makes the camera breathe in and out continuously — far more distracting than
  * the drift it was meant to fix. At 2 s the rig ignores pose and only answers genuine
  * changes of depth.
+ *
+ * `maxLagFactor` 1.6 — 0.56 m at body framing.
+ *
+ * Where 1.6 comes from, rather than taste: the body preset frames from 3.57 m at
+ * fov 34, and the narrowest panel that matters (a 390 px phone, compare mode on, so
+ * ~0.85 aspect) has a horizontal half-frame of 0.93 m there. A dancer is about 0.4 m
+ * half-width, so the aim point has to stay inside ~0.55 m or part of the body is off
+ * the panel. 1.6 x deadzone is 0.56 m, and it scales with the framing exactly as the
+ * deadzone does, so a close-up inherits a proportionally tighter ceiling instead of
+ * an absolute one tuned for a whole body.
+ *
+ * It binds above 0.47 m/s — i.e. not only at solo-01's sprint but also on the
+ * travelling fixture's 1.21 m/s peak, where the unclamped lag was 0.90 m and already
+ * put the dancer's leading edge off a phone panel. That was a latent bug, not a
+ * regression introduced here; the fixture was only ever checked with follow on at
+ * desktop width. What the ceiling costs is the last of the lag cue at speed; what
+ * pays for it is the floor, which is now drawn from the real fitted plane and is
+ * world-fixed, and which DESIGN.md §9 already names as the thing that makes travel
+ * legible.
  */
 export const FOLLOW: FollowTuning = {
   deadzoneFraction: 0.19,
@@ -269,6 +303,7 @@ export const FOLLOW: FollowTuning = {
   tauPosition: 0.45,
   tauDistance: 2.0,
   cutDistance: 2.5,
+  maxLagFactor: 1.6,
 };
 
 /** A typical framed body height, metres — only used to state the deadzone in metres. */
@@ -308,11 +343,80 @@ export function followStep(
   const k = deadzone / len;
   const aim: Vec3 = [subject[0] + d[0] * k, subject[1] + d[1] * k, subject[2] + d[2] * k];
   const step = Math.min(dt, 0.1);
-  return [
+  const next: Vec3 = [
     damp(current[0], aim[0], tuning.tauPosition, step),
     damp(current[1], aim[1], tuning.tauPosition, step),
     damp(current[2], aim[2], tuning.tauPosition, step),
   ];
+  // Ceiling on the trail. Applied AFTER the damp rather than by shortening tau, so
+  // ordinary travel keeps its measured easing and only a sprint is caught — see
+  // FOLLOW.maxLagFactor. Clamped rather than snapped: the camera still arrives late,
+  // it just cannot be left behind.
+  const maxLag = deadzone * tuning.maxLagFactor;
+  const trail: Vec3 = [next[0] - subject[0], next[1] - subject[1], next[2] - subject[2]];
+  const trailLen = Math.hypot(trail[0], trail[1], trail[2]);
+  if (trailLen <= maxLag) return next;
+  const c = maxLag / trailLen;
+  return [subject[0] + trail[0] * c, subject[1] + trail[1] * c, subject[2] + trail[2] * c];
+}
+
+/* ------------------------------------------------------- world placement */
+
+/**
+ * Did the pipeline ever solve a world position for this dancer (OPEN-DECISIONS E6)?
+ *
+ * THE GATE FOR DRAWING A DANCER ANYWHERE BUT WHERE THE CLIP PUTS THEM. A track too
+ * short to place — under `world_placement_probe`'s 25-frame minimum, e.g. solo-07's
+ * tracks 5 and 9 at 21 and 14 frames — still carries a `root_trajectory`, because
+ * the contract requires a Vec3 on every sample. That Vec3 is `skel_state`'s pinned
+ * character-local constant, and in this document's world space it is **not a place
+ * in the room**: on solo-07 it sits 2.16 m above the fitted floor, next to the
+ * camera. `motion_result.py` says so the only way it can, by never marking any of
+ * those samples `observed`.
+ *
+ * So: any `observed` root sample at all means the solve ran and the trajectory is a
+ * claim about the room. None means it never ran, and the honest render is to leave
+ * the dancer exactly where the animation clip puts them — a dancer who does not
+ * travel is a visible limitation; a dancer flung two metres into the air is a
+ * confident lie (DESIGN.md §7h).
+ *
+ * Back-filled and held samples inside a placed track are deliberately NOT excluded.
+ * They are `observed: false` too, but their position is a real solved placement
+ * carried forward, which is why `motion_result.py` back-fills rather than leaving
+ * the leading gap on the constant.
+ */
+export function rootPlacementObserved(doc: MotionResult, personIndex: number): boolean {
+  return doc.persons[personIndex].root_trajectory.some((s) => s.provenance.observed);
+}
+
+/**
+ * This dancer's world root position at time `t`, LINEARLY INTERPOLATED between the
+ * two samples either side.
+ *
+ * Interpolated, unlike `sampleIndexAt`'s step lookup, and the difference is not an
+ * inconsistency — it is what keeps the mesh and its placement on one clock. The GLB
+ * root's pose is sampled by `AnimationMixer` from LINEAR channels keyed at exactly
+ * `sample_times_s` (verify_glb.py: 218/218 LINEAR). Stepping the offset at 15 Hz
+ * while the mixer lerps the pose at display rate would make the body swim inside its
+ * own placement — the desync reads as "the mesh feels laggy", not as an obvious bug.
+ * Lerping the same channel the same way means the two agree at every instant, not
+ * just at keyframes.
+ *
+ * This does not reopen the "never interpolate across a suppressed span" rule, which
+ * is about visibility: a held span's positions are already constant (the pipeline
+ * forward-fills them), so lerping across one is the identity.
+ */
+export function rootPositionAt(doc: MotionResult, personIndex: number, t: number): Vec3 {
+  const times = doc.sample_times_s;
+  const rt = doc.persons[personIndex].root_trajectory;
+  const i = sampleIndexAt(times, t);
+  const a = rt[i].position;
+  const b = rt[i + 1]?.position;
+  // Last sample, or a zero-length span in a malformed timeline: hold, never divide.
+  const span = b ? times[i + 1] - times[i] : 0;
+  if (!b || span <= 0) return [a[0], a[1], a[2]];
+  const u = Math.min(Math.max((t - times[i]) / span, 0), 1);
+  return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
 }
 
 /**
