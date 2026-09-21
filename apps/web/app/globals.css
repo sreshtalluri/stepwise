@@ -1,0 +1,227 @@
+/* Tokens are DESIGN.md §3 and §5 verbatim. Do not invent values here. */
+:root {
+  --paper: #f2efe9;
+  --paper-sunk: #e7e1d6;
+  --line: #d8d0c3;
+  --stage: #1c1917;
+  --stage-deep: #12100f;
+  --ink: #221e1c;
+  --ink-muted: #6b635c;
+  --ink-faint: #9a9188;
+
+  --font-display: "Cabinet Grotesk", "Switzer", system-ui, sans-serif;
+  --font-ui: "Switzer", system-ui, sans-serif;
+
+  --ease: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* DESIGN.md §9: MOTION_INTENSITY 3. The contact shadow keeps moving under
+   reduced-motion because it is information; only the transitions stop. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+.lesson {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px 14px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lesson-head { padding: 0 2px; }
+.title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.sub { font-size: 0.8125rem; color: var(--ink-muted); margin-top: 3px; }
+
+/* ------------------------------------------------------------------- stages */
+
+.stages { display: flex; flex-direction: column; gap: 10px; }
+
+/* D2: the two stages start equal and either can be promoted to full height. */
+.stage {
+  position: relative;
+  overflow: hidden;
+  background: var(--stage);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: inset 0 2px 14px rgba(0, 0, 0, 0.55);
+  height: 240px;
+  transition: height var(--ease);
+}
+.stage.promoted { height: 62vh; }
+.stage.demoted { height: 96px; }
+.stage canvas { display: block; touch-action: none; }
+.video { width: 100%; height: 100%; object-fit: contain; }
+
+/* Mockup finding §13.5: anything near the canvas edge clips. Keep a safe inset. */
+.view-label {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 2;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  pointer-events: none;
+}
+.swap {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  background: rgba(242, 239, 233, 0.12);
+  color: #ede7dd;
+  border: 1px solid rgba(242, 239, 233, 0.25);
+  border-radius: 9px;
+  padding: 7px 11px;
+  font: 500 0.75rem var(--font-ui);
+  cursor: pointer;
+  transition: background var(--ease);
+}
+.swap:active { transform: translateY(1px) scale(0.98); }
+
+.vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 45%, var(--stage-deep) 100%);
+  opacity: 0.75;
+}
+
+/* DESIGN.md §7b: on phone and tablet the second angle is an inset over the first. */
+.inset {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 38%;
+  aspect-ratio: 3 / 4;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(242, 239, 233, 0.22);
+  z-index: 3;
+}
+.inset .view-label { top: 6px; left: 8px; font-size: 0.65rem; }
+
+/* --------------------------------------------------------------- annotations */
+
+.legend { font-size: 0.8125rem; color: var(--ink-muted); }
+.note { font-size: 0.8125rem; color: var(--ink-muted); }
+
+/* -------------------------------------------------------------------- chips */
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--paper-sunk);
+  color: var(--ink);
+  font: 500 0.9375rem var(--font-ui);
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+/* State is weight and paper/sunk contrast, never a second saturated colour. */
+.chip.on { background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 600; }
+.chip small { font-size: 0.72rem; font-weight: 400; color: var(--ink-faint); }
+.chip.on small { color: #c9c2b7; }
+.chip:active { transform: translateY(1px) scale(0.98); }
+.swatch { width: 12px; height: 12px; border-radius: 50%; }
+
+/* ----------------------------------------------------------- overview bar */
+
+.overview { position: relative; padding: 8px 0 2px; }
+.scrub { width: 100%; accent-color: var(--ink); height: 28px; }
+/* Loop de-emphasizes the outside; it never highlights the inside. */
+.loop-out {
+  position: absolute;
+  top: 8px;
+  bottom: 2px;
+  background: var(--paper-sunk);
+  opacity: 0.85;
+  pointer-events: none;
+  border-radius: 4px;
+}
+
+/* ---------------------------------------------------------------- transport */
+
+.transport {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+}
+.btn {
+  min-height: 88px; /* DESIGN.md §8 — the phone is on the floor three metres away */
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--paper-sunk);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font: 600 0.9375rem var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.btn small { font-weight: 400; font-size: 0.72rem; color: var(--ink-muted); }
+.btn.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.btn.active small { color: #c9c2b7; }
+.btn:active { transform: translateY(1px) scale(0.98); }
+
+/* ------------------------------------------------- tablet / landscape phone */
+
+@media (min-width: 768px) {
+  .stages { flex-direction: row; }
+  .stages > .stage { flex: 1; height: 44vh; }
+  .stage.promoted { flex: 3; }
+  .stage.demoted { flex: 1; height: 44vh; }
+  .transport { grid-template-columns: repeat(5, 1fr); }
+}
+
+/* -------------------------------------------------------------- desktop */
+
+@media (min-width: 1024px) {
+  .lesson { padding: 22px 24px 28px; }
+  .stages > .stage { height: 56vh; }
+  .stage.demoted { height: 56vh; }
+  /* The second angle earns an equal panel instead of an inset. */
+  .lesson[data-compare="on"] .inset {
+    /* relative, not static: the inset's own "estimated view" label is absolutely
+       positioned, and against a static parent it would stack on top of the primary
+       panel's label instead of sitting in its own corner. */
+    position: relative;
+    inset: auto;
+    width: auto;
+    aspect-ratio: auto;
+    flex: 1;
+    border: none;
+    border-left: 1px solid rgba(242, 239, 233, 0.22);
+  }
+  .lesson[data-compare="on"] .stages > .stage:first-child {
+    display: flex;
+    padding: 0;
+  }
+  .lesson[data-compare="on"] .stages > .stage:first-child > :not(.view-label):not(.swap) { flex: 1; }
+}

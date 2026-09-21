@@ -1,0 +1,29 @@
+{
+  "name": "@stepwise/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "assets": "node --import tsx scripts/build-fixture-assets.mjs",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "node --import tsx --test lib/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-three/drei": "10.7.8",
+    "@react-three/fiber": "9.7.0",
+    "next": "16.3.5",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "three": "0.186.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/three": "0.186.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.7.3"
+  }
+}
