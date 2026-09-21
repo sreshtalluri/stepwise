@@ -212,12 +212,56 @@ def _quat_conj(q):
     return (-x, -y, -z, w)
 
 
-def _rest_relative_rotation(rest_xyzw, skel_xyzw):
+def _rest_relative_rotation(rest_xyzw, local_xyzw):
     """JointHierarchy.rotation_convention: identity == exactly the rest pose.
-    skel_state's rotation (verified against a real run, see report) is the
-    ABSOLUTE local-to-parent rotation, not already rest-relative -- so the
-    contract value is rest_rotation^-1 * skel_rotation."""
-    return _quat_mul(_quat_conj(rest_xyzw), skel_xyzw)
+    Given a joint's PARENT-RELATIVE rotation, the contract value is
+    rest_rotation^-1 * local_rotation. See _local_rotations for why the
+    caller has to compute that parent-relative rotation first."""
+    return _quat_mul(_quat_conj(rest_xyzw), local_xyzw)
+
+
+def _local_rotations(skel_state, parents):
+    """skel_state quaternions are WORLD rotations -- convert to parent-relative.
+
+    This was the bug. skel_state's rotation was being fed straight into
+    _rest_relative_rotation as though it were already local-to-parent, so every
+    joint below the root was served the *accumulated* orientation of its whole
+    chain instead of its own bend. Measured on the real solo-01 reconstruction
+    (291 frames, 127 joints) the two differ by a median of 125.7 degrees, p90
+    168.2, and 125 of 127 joints are off by more than 20 degrees on average --
+    this was not a subtle sign error, the served skeleton was wrong everywhere
+    below the pelvis.
+
+    Confirmed from the data rather than from the format docs, two ways. A rig's
+    bone offset -- a child's position expressed in its parent's frame -- is a
+    property of the skeleton, so it must not move as the dancer moves. Treating
+    the quaternions as WORLD makes it rigid; treating them as parent-relative
+    does not:
+
+        offset vector wander / bone length   q as WORLD   q as parent-relative
+          median                               0.000574              0.949570
+        |mean offset - rest_translation|, m
+          median                               0.004111              0.048569
+
+    That second row is checked against joint_hierarchy's own rest_translation,
+    dumped independently from the FBX skeleton, which neither hypothesis can
+    tune itself against. Corroborating: skel_state[:, :3] are plainly absolute
+    world positions -- c_head_null sits 1.678 m from the origin, which no local
+    bone offset could be.
+
+    Matches `decompose()` on branch `smoothing`, which independently reached
+    the same conclusion (its decompose/recompose round-trips to 5.7e-14 cm).
+    Scale is deliberately ignored here: it cancels in a pure rotation.
+    """
+    out = [None] * len(parents)
+    for ji, parent in enumerate(parents):
+        world = tuple(float(v) for v in skel_state[ji, 3:7])
+        if parent < 0:
+            out[ji] = world  # root: its parent IS the world, so local == world
+        else:
+            parent_world = tuple(float(v) for v in skel_state[parent, 3:7])
+            out[ji] = _quat_mul(_quat_conj(parent_world), world)
+    return out
 
 
 def _build_motion_result(job_id: str, clip_id: str) -> dict:
@@ -241,6 +285,7 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
     joints_def = JOINT_HIERARCHY["joints"]
     n_joints = len(joints_def)
     rest_rotations = [tuple(j["rest_rotation"]) for j in joints_def]
+    parents = [j["parent_index"] for j in joints_def]
     root_idx = JOINT_HIERARCHY["root_joint_index"]
 
     persons = []
@@ -283,10 +328,13 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
                 # "uncertain", never "observed" or "absent" -- a frozen pose
                 # is honestly disclosed, not claimed as tracked motion.
                 visibility = "observed" if observed else "uncertain"
+                # skel_state carries WORLD rotations; the contract wants each
+                # joint's own bend relative to its parent. Convert once per
+                # sample, not per joint -- see _local_rotations.
+                local_rots = _local_rotations(held, parents)
                 joints_sample = []
                 for ji in range(n_joints):
-                    skel_xyzw = tuple(float(v) for v in held[ji, 3:7])
-                    rel = _rest_relative_rotation(rest_rotations[ji], skel_xyzw)
+                    rel = _rest_relative_rotation(rest_rotations[ji], local_rots[ji])
                     joints_sample.append({
                         "rotation": list(rel),
                         "provenance": provenance,
@@ -301,6 +349,10 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
                     # into true world space -- see report's open item on
                     # root-trajectory world placement.
                     "position": [float(root_pos_cm[0]) / 100.0, float(root_pos_cm[1]) / 100.0, float(root_pos_cm[2]) / 100.0],
+                    # Unconverted on purpose, unlike the per-joint rotations
+                    # above: the root has no parent, so its world rotation IS
+                    # its local one, and the body's world orientation is
+                    # exactly what root_trajectory is asking for.
                     "rotation": list(tuple(float(v) for v in held[root_idx, 3:7])),
                     "provenance": provenance,
                 })
