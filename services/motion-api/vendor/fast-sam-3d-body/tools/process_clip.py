@@ -348,6 +348,40 @@ def process_clip(
     }
 
 
+# Persisted by accident, read by nothing. save_clip_result used to pickle the
+# estimator's whole per-person output dict, so every byproduct of one forward
+# pass landed on disk forever.
+#
+# Measured on the real solo-01 npz (61.30 MB): `pred_vertices` is 57.90 MB of
+# it -- 94.8% of the entire file -- at 18,439 x 3 floats per person per frame.
+# Nothing reads it back: the export path rebuilds geometry from lod3.fbx plus
+# skel_state, and the only two npz consumers in the repo (modal_app's
+# export_clip_gltf and services/motion-api/motion_result.py) touch skel_state
+# and shape_params and nothing else.
+#
+# `expr_params` is 0.02 MB and is here for the other reason: 72 facial
+# expression coefficients per person per frame are the most face-shaped thing
+# the system stores, they exist purely because the whole dict got pickled, and
+# nothing has ever read them (docs/research/rights-and-privacy.md section 6.2).
+# Dropping the persistence costs no capability -- the model still emits them on
+# demand if a future feature wants expression.
+#
+# ponytail: a denylist, not an allowlist. An allowlist would be smaller and
+# would also silently break sibling branches that legitimately read
+# bone_length_ratio / hand_crop_rect / foot_crop_rect out of the same npz.
+# Deny only what has been verified unread.
+UNREAD_PER_FRAME_KEYS = ("pred_vertices", "expr_params")
+
+
+def _strip_unread(per_frame: list) -> list:
+    return [
+        {tid: {k: v for k, v in person.items() if k not in UNREAD_PER_FRAME_KEYS}
+         for tid, person in frame.items()}
+        if isinstance(frame, dict) else frame
+        for frame in per_frame
+    ]
+
+
 def save_clip_result(result: dict, out_path: str) -> None:
     """Pack process_clip's output into one npz (object arrays for the
     per-frame dict list -- pickled, but this stays inside numpy's own npz
@@ -370,12 +404,20 @@ def save_clip_result(result: dict, out_path: str) -> None:
         out_path,
         refused=False,
         sample_times_s=result["sample_times_s"],
-        per_frame=np.array(result["per_frame"], dtype=object),
+        per_frame=np.array(_strip_unread(result["per_frame"]), dtype=object),
         # W9: smoothed motion + per-joint visibility/provenance, keyed by
         # track id. Additive -- `per_frame` still holds the raw estimates, and
         # the export stage keeps reading those until it is switched over.
         # Read it back with `np.load(...)["smoothed"].item()`: a dict stored
         # this way comes back as a 0-d object array, not a dict.
+        #
+        # NOT passed through `_strip_unread`, on purpose: it drops
+        # `pred_vertices`/`expr_params`, which are per-person estimator
+        # byproducts that only ever existed in `per_frame`. `smoothed` holds
+        # the four per-joint tracks (visibility, suppression, prov_observed,
+        # prov_interpolated) and nothing else, so there is nothing in it to
+        # strip and filtering it would only risk deleting the one signal
+        # INTEGRATION.md §3.3 is waiting on an owner for.
         smoothed=np.array(result.get("smoothed", {}), dtype=object),
         raw_detections=np.array(result["raw_detections"], dtype=object),
         confident_track_ids=np.array(result["confident_track_ids"], dtype=np.int64),

@@ -53,6 +53,7 @@ turns an HTTP upload into a dispatched Modal job and serves its status/result.
 It never imports torch/CUDA/pymomentum -- run it anywhere with a Modal token:
 
 ```sh
+brew install ffmpeg                # or: apt install ffmpeg. See "Dedupe" below.
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements-api.txt
 modal deploy modal_app.py          # api.py looks up run_clip via Function.from_name
@@ -64,7 +65,8 @@ immediately), `GET /jobs/{job_id}` (poll -- the real job-status.schema.json
 document, unmodified), `GET /jobs/{job_id}/result` (once succeeded -- the
 assembled, schema-validated `MotionResult`), `POST /jobs/{job_id}/retry`
 (only for `retryable: true` failures), `GET /assets/{asset_id}` (resolves a
-`source_video.asset_id` / `AnimationRef.glb_asset_id` to bytes).
+`source_video.asset_id` / `AnimationRef.glb_asset_id` to bytes),
+`POST /lessons/{clip_id}/removal` (the takedown path -- see below).
 
 ## The floor solve (`grounding.py`)
 
@@ -99,6 +101,51 @@ already tried and measured, and the reason they failed is not the one you would
 guess.
 
 See `api.py`'s module docstring for the object-storage decision (Modal
-Volumes, not S3) and the known scope boundary in `_build_motion_result`
+Volumes, not S3) and the known scope boundary in `motion_result.py`
 (per-joint visibility/suppression and true world-space root placement are
 Milestone A/W9 work, not built here).
+
+## Dedupe, retention, and removal
+
+Three connected things, added together because they only work together.
+
+**Dedupe on upload** (`fingerprint.py`). Every upload is fingerprinted before
+a GPU is spawned; if this dance is already reconstructed, the existing lesson
+is handed back and nothing is dispatched. Needs the `ffmpeg`/`ffprobe`
+binaries; without them it falls back to exact-sha256 matching and logs that it
+did. Catches re-encodes, fps changes, rescales, brightness shifts and ~5%
+crops; does not catch a 10%-per-side crop, and deliberately does *not* match a
+mirrored clip (left and right matter in a dance) or a trimmed one. Thresholds
+are measured, not guessed -- the numbers are in the module docstring and the
+measurement is re-runnable:
+
+```sh
+mkdir -p /tmp/fpclips
+modal volume get stepwise-eval /solo-01.mp4 /tmp/fpclips/solo-01.mp4   # and solo-02, solo-07, group-synced-01
+STEPWISE_FP_CLIPS=/tmp/fpclips python3 -m pytest test_fingerprint.py -s
+```
+
+**Retention** (`retention.py` + `modal_app.sweep_expired`). Lessons expire
+`retention.TTL_DAYS` (180) after they were last opened. The sweeper runs daily
+and also reaps npz files whose MotionResult has been materialised. Inspect
+before trusting it:
+
+```sh
+modal run modal_app.py::sweep_expired --dry-run
+```
+
+**Removal** (`POST /lessons/{clip_id}/removal`). Deletes the video, every GLB,
+the MotionResult, the manifests, the job records and the fingerprint, and
+leaves a tombstone so the link answers 410 Gone. Immediate, not queued.
+
+```sh
+python3 -m pytest test_retention.py -q
+```
+
+**The npz is no longer the storage cost it was.** `export_clip_gltf` now
+materialises the `MotionResult` once and stores it gzipped, so `api.py` stops
+rebuilding it from the npz on every request and the sweeper can delete the
+npz. Combined with dropping `pred_vertices`/`expr_params` at write time
+(`tools/process_clip.py`), a solo lesson went from **63.93 MB to 4.12 MB**,
+measured on solo-01. Details and the retention reasoning: `docs/OPEN-DECISIONS.md`
+D6/D7.

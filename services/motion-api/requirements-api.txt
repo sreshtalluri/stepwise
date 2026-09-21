@@ -10,6 +10,22 @@
 # Also requires packages/motion-contract/python's `motion_contract` package
 # to be importable -- api.py adds it to sys.path directly rather than
 # packaging this as an installable dependency, since both live in this repo.
+#
+# And the `ffmpeg` + `ffprobe` BINARIES on PATH (brew install ffmpeg / apt
+# install ffmpeg), for the upload fingerprint that skips a GPU reconstruction
+# when the same dance has already been processed (fingerprint.py). Not listed
+# below because it is not a Python package: it is invoked as a subprocess, not
+# linked, so none of ffmpeg's licence terms reach this repo. It is also
+# optional -- without it, dedupe falls back to exact-sha256 matching, which
+# catches a byte-identical re-upload and nothing else. That degradation is
+# logged per upload, never silent.
+#
+# Deliberately NOT added: any perceptual-hash or video-fingerprint library.
+# pHash is GPL-3.0 and videohash is copyleft, both unusable in something that
+# ships (docs/research/grounding-models.md §1.5); `imagehash` is BSD-2 but
+# would drag in Pillow and scipy for what is four lines of numpy. The two
+# hashes are implemented directly in fingerprint.py against numpy, which is
+# already here for the npz.
 fastapi>=0.115
 uvicorn>=0.30
 python-multipart>=0.0.9

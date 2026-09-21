@@ -15,7 +15,10 @@ import math
 
 import pytest
 
-from api import _local_rotations, _quat_conj, _quat_mul, _rest_relative_rotation
+# These moved out of api.py into motion_result.py when `caching-retention`
+# made the assembly runnable on the GPU worker. Same functions, same
+# behaviour, new home -- the test follows them rather than being relaxed.
+from motion_result import _local_rotations, _quat_conj, _quat_mul, _rest_relative_rotation
 
 
 def _axis_angle(axis, degrees):

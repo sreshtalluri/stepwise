@@ -275,9 +275,9 @@
     "ShapeParams": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["vector", "source"],
+      "required": ["source"],
       "properties": {
-        "vector": { "type": "array", "items": { "type": "number" }, "minItems": 1, "description": "MHR shape (beta) coefficients, frozen for the whole clip (PRD §4: shape is estimated once from well-observed frames, not per-sample)." },
+        "vector": { "type": "array", "items": { "type": "number" }, "minItems": 1, "description": "MHR shape (beta) coefficients, frozen for the whole clip (PRD §4: shape is estimated once from well-observed frames, not per-sample). OPTIONAL, and the API no longer sends it: these are 45 floats describing one identifiable person's body proportions — the most person-specific value the pipeline produces — and no consumer has ever read them (verified across every branch carrying viewer code). Shipping them to every browser that opens a lesson was gratuitous, and they are the artifact most likely to be argued over under the broader state biometric definitions (docs/research/rights-and-privacy.md §4d, §6.2). The vector is still computed and still used server-side to bake body shape into the exported mesh; it simply stops leaving the server. Relaxed from required rather than deleted so that existing fixtures and any stored document that still carries it stay valid — a consumer must treat it as absent." },
         "source": {
           "enum": ["well_observed_frames", "default_assumed"],
           "description": "\"default_assumed\" means no frame in the clip was confident enough to fit shape; the vector is the MHR default and consumers should not present body proportions as measured."

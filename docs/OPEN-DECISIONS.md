@@ -43,9 +43,9 @@ Status key: **OPEN** · **LEANING** (a recommendation exists) · **DEFER** (safe
 
 | # | Decision | Status | Note |
 |---|---|---|---|
-| D5 | Accounts: none, magic link, or OAuth? | OPEN | Invite-only cohort needs *some* identity. Magic link is least friction. Affects A3 and A6. |
-| D6 | How long is a lesson kept? | OPEN | Storage cost and a privacy promise. "We keep the clip while the lesson exists" is written on the landing mockup — needs to be true and stated. |
-| D7 | Can a lesson be deleted, and does the share link die with it? | OPEN | Should be yes to both; needs designing. |
+| D5 | Accounts: none, magic link, or OAuth? | OPEN | Invite-only cohort needs *some* identity. Magic link is least friction. Affects A3 and A6. **New dependency from D6/D7 below:** with no accounts, anyone holding a lesson link can remove that lesson, and deduplicated uploads share one link. See "What D5 would change" under D7. |
+| D6 | How long is a lesson kept? | **LEANING — recommendation below, implemented on `caching-retention`** | 180 days since the lesson was last opened. The promise on the landing mockup was untrue when written and is now true, with one copy change. |
+| D7 | Can a lesson be deleted, and does the share link die with it? | **LEANING — recommendation below, implemented on `caching-retention`** | Yes and yes. The removal path is built; the link answers 410 Gone. |
 | D8 | Who can upload video of whom? | LEANING | **Recommendation: `docs/research/rights-and-privacy.md`.** Keep W7's passive one-liner, add one sentence naming the people *in* the clip, build **no blocking checkbox** — the consent that matters is the dancer's and the uploader cannot give it. Highest-value item is a working removal path, not upload-screen friction; gate at *publication*, not upload. Interacts with D5 (no accounts = no subscriber to terminate under §512(i), and no owner to restore a wrongly-removed lesson) and D6/D7 (there is no retention or deletion code in the service at all today). |
 | D9 | What happens when the learner wants a dance longer than 60s? | OPEN | The cap is real. Do we say "trim it" and give them a trimmer, or just refuse? |
 | D10 | Public name | OPEN | `NAMES.md` has candidates. Needed before public launch, not before the gate. |
@@ -62,6 +62,71 @@ Status key: **OPEN** · **LEANING** (a recommendation exists) · **DEFER** (safe
 | E6 | **Placing the dancer in the room** (world placement: travel, jumps, and the floor) | OPEN — **but the reason it was blocked was wrong**; see `docs/research/world-placement.md` | The symptom is unchanged: `skel_state`'s root translation is constant on every frame, so the exported GLB pins the pelvis, the dancer dances in place, and no floor can be fitted for a whole clip. **The diagnosis has been overturned.** The previous entry (and `GATE-REPORT.md`'s grounding addendum) said the 7.75 m depth swing on solo-01 was reconstruction error, because "bbox bottom is steady while the top swings — a dancer getting low in one spot". The source video says otherwise: solo-01's dancer starts ~10 m from a static camera, **runs toward it between t=5 s and t=7 s**, and retreats at the end. The 7.75 m is choreography; the −0.93 correlation with bbox height is the pinhole relation `size ∝ 1/depth`; the independent PnP agreeing at r = 0.983 was two estimators confirming real travel. The bbox bottom barely moves because the camera is **0.15 m off the ground pitched 13° up**, so an approaching dancer's feet move *down* the image. Measured replacement: a 3-DoF perspective fit of the bone-constrained rigid body (branch `bone-constraints`) against the *detector's* COCO-17 keypoints puts **90% of solo-01's foot contacts on one plane across 8.7 m of depth (2.2 cm RMS)** vs 52% for `pred_cam_t`, cuts the worst crouch's spurious depth slide from 1.63 m to 0.12 m, and makes three independently-placed dancers in `group-synced-01` agree on the floor height to **5 cm instead of 37 cm**. Reproduce: `python services/motion-api/world_placement_probe.py <clip.npz>`. Still OPEN because it is a product decision that touches the export and `grounding.py`'s coordinate frame, and because three things are unverified: absolute metric scale (±10% undetectable by the floor test), short/distant tracks (solo-07 track 3 is 53 cm off), and that any of it renders correctly in the viewer. **Measured and rejected:** contact-gated foot locking — it drives the planted-foot slide to zero and in exchange drifts the body a median 37 cm away from where the video shows the dancer (reprojection 11.3 → 43.7 px). A 5-frame median on the translation gets 57% of the benefit for 1.9 px. |
 | E7 | **Reconstruction frame rate: stay at 15 fps, or go to 30?** | OPEN — **evidence now attached, decision not made** | Measured end to end on `solo-01` (`GATE-REPORT.md` § Export-quality addendum §3). What 30 fps buys *on top of* LINEAR interpolation, against a same-source-frame noise floor: the typical body joint is only **1.2 cm** better, but **wrists and striking feet are a median 3.8–4.0 cm off, p90 ~9–10 cm**, i.e. real lost accents, not noise. Cost is **$0.0839 → $0.1597 (1.90×)**, VRAM unchanged at 3.69 GB (so no bigger GPU, only more time). Recurring on a free public platform — and `caching-retention`'s dedupe changes that arithmetic, so **decide this after that branch lands, not before**. Deliberately NOT shipped as a default change. Third option nobody has priced: reconstruct at 30 fps only around high-acceleration frames (detection is already the cheap pass), which should buy most of the accent fidelity well under 1.90×. |
 | E8 | **Bone direction living in the glTF translation channel** | OPEN | pymomentum puts part of some joints' bone *direction* in the translation channel rather than the parent's rotation (`l_index1`'s local offset swings 79° between adjacent keyframes at constant length). Since glTF has no "slerp the translation" mode, LINEAR lerps the chord and those bones shrink transiently between keyframes — median 0.00006 mm, p90 0.44 mm, but up to **18 mm (23% of its length) on a finger**. Exact again at every keyframe, so `bone-constraints`' CV is untouched. CUBICSPLINE is marginally worse, so this is not an argument for switching modes. The real fix is re-deriving the local decomposition at export time so bone direction lives in the rotation channel — a change to the export, not to a sampler attribute. Mostly lands on finger bones, which are already the weakest part of the reconstruction (see the `hands` branch), so the cost/benefit is genuinely unclear. |
+
+---
+
+## D6 — how long is a lesson kept?
+
+**Recommendation: 180 days since the lesson was last opened. No cap on total age.**
+
+### The honest reason, which is not the expected one
+
+The expected argument for a retention policy is storage cost. Measured, that argument does not exist. Per solo lesson, after the changes on `caching-retention`:
+
+| artifact | before | after |
+|---|---|---|
+| `{clip_id}.npz` | **61.30 MB** | **0** — deleted once the MotionResult is materialised |
+| `{clip_id}.motion-result.json.gz` | — | 1.49 MB (7.15 MB of JSON, gzipped) |
+| GLB, per dancer | 1.53 MB | 1.53 MB |
+| source video | 1.10 MB | 1.10 MB |
+| **total** | **63.93 MB** | **4.12 MB** — 15.5× smaller |
+
+Modal charges **$0.09/GiB/month with the first 1 TiB free**. So one lesson costs **$0.00035 a month**, and 100,000 lessons fit inside the free tier. A lesson is cheaper to store for **twenty years** than to reconstruct once ($0.0839 measured, solo-01, 19.7 s, L40S). A short TTL is economically backwards: every expiry the learner then re-uploads spends two decades of storage to save nothing.
+
+So the policy is justified on privacy, not cost, and the document should say so rather than inventing a cost pressure. The system holds video of people who never agreed to be in it (`docs/research/rights-and-privacy.md` §1). Holding it after it has stopped being useful to anyone is exposure with no upside.
+
+### Why last-accessed, and why 180 days
+
+Last-accessed, not upload date, because it matches how attention actually distributes: a dance people keep coming back to stays warm, and a clip uploaded once and never reopened ages out. Upload-date expiry would delete the one lesson that is working.
+
+180 days because the number is a product judgement once cost is off the table, and the cost of being wrong is one-sided: too short and a learner loses a lesson they would have come back to; too long and we hold a stranger's video a while more. Six months covers a season away from dancing and a summer off. `docs/research/rights-and-privacy.md` §8 lists this as the builder's call — "pick a number, state it, honour it" — so it is a number, stated, and honoured by `retention.TTL_DAYS`.
+
+**No hard ceiling on total age**, deliberately. A "delete at two years regardless" rule takes a lesson away from someone actively using it, for a privacy gain last-access expiry already delivers — the lessons that linger are the ones being opened. Add one only if the retention promise ever has to name a maximum.
+
+### The copy, which was untrue and is the reason this was urgent
+
+The landing mockup says **"we keep the clip while the lesson exists."** When it was written there was no deletion, expiry or retention code anywhere in the service — so the sentence was not merely vague, it was **false in both directions**: nothing was kept *because* the lesson existed, and nothing stopped being kept when it did not. That is the §7h failure pointed at users' own data rather than at the 3D.
+
+It is now true, and needs one more clause because the lesson itself can now end:
+
+> **We keep the clip while the lesson exists. Lessons nobody opens for six months are deleted, and a removal request deletes one straight away.**
+
+Every clause is a promise the code keeps. Do not ship the first sentence alone: with expiry live, "while the lesson exists" reads as *indefinitely* to anyone who has not been told the lesson expires, which is the same failure in a new place. **If `TTL_DAYS` changes, this sentence changes in the same commit.**
+
+## D7 — can a lesson be deleted, and does the share link die with it?
+
+**Recommendation: yes and yes. Built on `caching-retention`.**
+
+`POST /lessons/{clip_id}/removal`. The request *is* the removal — no review queue and no response-time target, because a stated target is a promise and §7h forbids promising one the code does not keep. `docs/research/rights-and-privacy.md` §6.1 ranks this the highest-value, lowest-cost mitigation available, and notes the person most likely to use it is the **dancer**, who has no copyright claim at all — so it accepts any reason, in free text, not a menu of legal categories.
+
+**What is deleted:** the source video, every dancer's GLB, the materialised MotionResult, the npz if one survives, the export manifest, the performance record, the last-access marker, the job status, the job meta, and the content fingerprint. What remains is a tombstone holding a timestamp and a reason word — nothing derived from the person.
+
+**The share link dies.** It answers **410 Gone**, not 404: whoever holds the link deserves to know the lesson existed and was removed rather than be told it never existed, and 410 tells caches to drop it permanently. The video and GLB endpoints refuse the same way, so nothing stays individually fetchable.
+
+**Removal beats retention.** A removed lesson goes now, not at the next sweep, and the tombstone makes the sweeper skip it forever.
+
+**Deduplication makes deletion genuinely better, and this is the main argument for it.** Because uploads are content-addressed, two people uploading the same clip land on one canonical lesson. A dancer asking for removal gets it removed *for everyone who uploaded it*, once — instead of having to find every scattered copy. Without dedupe, "we removed it" would be a claim about one copy dressed up as a claim about all of them.
+
+**Two consequences, recorded rather than smoothed over:**
+
+1. **A re-upload of removed content is reconstructed afresh.** The fingerprint is deleted with everything else, so nothing recognises the video if it comes back. Keeping the fingerprint as a blocklist would be more effective at keeping removed content off the platform — and would mean retaining a derivative of exactly the content someone asked us to delete. Deleting it is what was promised. Revisit only with a deliberate decision.
+2. **A deduplicated lesson can be removed by any of its uploaders.** That is the correct behaviour for a takedown and a sharp edge for the uploader who did not ask.
+
+### What D5 would change (not resolved here)
+
+With no accounts, **anyone holding a lesson link can remove it**. A link is a 128-bit `uuid4`, so it is not enumerable — you have to have been given it — but an uploader's lesson can be removed by anyone they shared it with, and deduplicated uploads share one link.
+
+Magic-link accounts would make the natural rules cheap: the uploader deletes their own outright; anyone else's request still takes it down immediately but becomes **restorable** by the uploader. That is §6.1's own suggestion and it needs D5 decided, so it is recorded here as a dependency rather than guessed at. Until then, restoring a removed lesson is a per-case email, which is the honest state.
 
 ---
 

@@ -29,14 +29,33 @@ chains export_clip_gltf.remote() internally once reconstruction succeeds
 (modal_app.py), so "dispatch run_clip, then export only if it succeeds" is
 enforced inside the one spawned worker, not by this service polling and
 re-dispatching.
+
+Three things live here that are about a lesson's whole life rather than its
+first two minutes:
+
+  * **Dedupe on upload** (`POST /clips`). Fingerprint the clip; if this exact
+    dance is already reconstructed, hand back the existing lesson and spend no
+    GPU. See fingerprint.py for what it catches, measured.
+  * **Removal** (`POST /lessons/{clip_id}/removal`). The takedown path. It
+    deletes, it does not queue.
+  * **Last-accessed marking**, which is the clock retention.py's sweeper runs
+    on.
+
+New external requirement: the `ffmpeg` and `ffprobe` BINARIES on PATH, for
+fingerprinting. Not a Python dependency and not linked against -- invoked as a
+subprocess, so no licence reaches this repo. Optional: without them the
+service still runs and still dedupes byte-identical re-uploads, it just stops
+catching re-encodes (and says so in the log rather than pretending).
 """
 from __future__ import annotations
 
+import gzip
 import io
 import json
 import os
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -46,6 +65,10 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+import fingerprint
+import motion_result
+import retention
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "packages" / "motion-contract" / "python"))
 from motion_contract import validate_job_status, validate_motion_result  # noqa: E402
 
@@ -53,14 +76,18 @@ from grounding import camera_intrinsics_from_clip, solve_grounding_for_clip  # n
 
 APP_NAME = "stepwise-motion"
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # generous; PRD's real limit is 60s of video, not a byte count
-JOINT_HIERARCHY = json.loads((Path(__file__).resolve().parent / "mhr_joint_hierarchy.json").read_text())
-DANCER_FALLBACK_COLORS = ["#E8952F", "#1E7A6F", "#C2417E", "#3F51B5"]  # DESIGN.md §3
+JOINT_HIERARCHY = motion_result.JOINT_HIERARCHY
+DANCER_FALLBACK_COLORS = motion_result.DANCER_FALLBACK_COLORS
 
 uploads_volume = modal.Volume.from_name("stepwise-uploads", create_if_missing=True)
 results_volume = modal.Volume.from_name("stepwise-results", create_if_missing=True)
 eval_volume = modal.Volume.from_name("stepwise-eval", create_if_missing=True)
 
 app = FastAPI(title="stepwise motion-api")
+
+# clip_id -> unix time we last recorded an access. Purely a write-throttle for
+# _touch(); losing it on restart costs one extra small Volume write.
+_TOUCHED: dict[str, float] = {}
 
 
 def _run_clip_fn():
@@ -90,18 +117,59 @@ def _volume_read_bytes(volume: modal.Volume, path: str) -> Optional[bytes]:
 # ---------------------------------------------------------------------------
 # POST /clips -- upload, store, dispatch. Returns immediately (spec item 2:
 # .spawn(), never .remote()).
+#
+# Content-addressed: before spending a GPU, ask whether this exact dance has
+# already been reconstructed. A reconstruction costs $0.0839 measured (solo-01,
+# 19.7s, L40S) and two to four minutes of the learner's attention, and the same
+# clip genuinely does get uploaded twice -- a retry, a second device, two
+# friends learning the same TikTok. See fingerprint.py for what "the same
+# dance" means and what it measurably does and does not catch.
+#
+# A hit returns the EXISTING clip_id and job_id, so both uploads land on one
+# lesson. That is not only cheaper, it is what makes a takedown complete: one
+# canonical entry, deleted once, and it is gone for everyone who uploaded it,
+# instead of the dancer having to find every scattered copy.
+#
+# The line this deliberately does not cross (docs/research/rights-and-privacy.md):
+# this is dedupe-on-upload only. You still upload your own clip. Nothing here
+# builds a browsable or searchable index of who is in what -- no lookup by
+# fingerprint, no "find this dancer", no public list. The index is keyed by
+# content and readable only by this service.
 # ---------------------------------------------------------------------------
 
 class DispatchResponse(BaseModel):
     clip_id: str
     job_id: str
+    # True when this upload matched an existing reconstruction and no GPU work
+    # was started. The client needs no special handling -- the job it is handed
+    # is already "succeeded", so the normal poll goes straight to the lesson.
+    deduplicated: bool = False
+
+
+def _find_existing(fp: dict) -> dict | None:
+    """The canonical lesson for this content, if there is a usable one.
+
+    'Usable' is checked against live state, not just the index: the entry must
+    point at a job that actually succeeded and has not been taken down. A stale
+    index entry therefore degrades to "reconstruct it again" -- which costs
+    $0.08 -- and can never serve a lesson that is gone.
+    """
+    for entry in retention.read_index(results_volume):
+        if not fingerprint.same_clip(entry, fp):
+            continue
+        clip_id, job_id = entry.get("clip_id"), entry.get("job_id")
+        if not clip_id or not job_id:
+            continue
+        if _volume_read_json(results_volume, f"/{clip_id}.removed.json") is not None:
+            continue  # taken down: never resurrect it, and never dedupe onto it
+        status = _volume_read_json(results_volume, f"/{job_id}.job-status.json")
+        if status and status.get("state") == "succeeded":
+            return entry
+    return None
 
 
 @app.post("/clips", response_model=DispatchResponse)
 async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
-    clip_id = uuid.uuid4().hex
-    job_id = f"job_{clip_id}"  # resumable: DESIGN.md §7c's copyable link is just this job_id
-
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
         total = 0
         while chunk := await file.read(1024 * 1024):
@@ -113,6 +181,21 @@ async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
         tmp_path = tmp.name
 
     try:
+        fp = fingerprint.fingerprint(tmp_path)
+        if not fp["frames"]:
+            # Degraded, but not silently: without ffmpeg only byte-identical
+            # re-uploads dedupe. Never a wrong match, just fewer matches.
+            print("[dedupe] no perceptual fingerprint (ffmpeg unavailable or "
+                  "decode failed) -- exact-sha256 matching only for this upload")
+        existing = _find_existing(fp)
+        if existing:
+            print(f"[dedupe] hit: reusing {existing['clip_id']} "
+                  f"(job {existing['job_id']}) -- no GPU run dispatched")
+            return DispatchResponse(clip_id=existing["clip_id"],
+                                    job_id=existing["job_id"], deduplicated=True)
+
+        clip_id = uuid.uuid4().hex
+        job_id = f"job_{clip_id}"  # resumable: DESIGN.md §7c's copyable link is just this job_id
         with uploads_volume.batch_upload() as batch:
             batch.put_file(tmp_path, f"/{clip_id}.mp4")
     finally:
@@ -120,13 +203,10 @@ async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
 
     # job_id -> clip_id is needed later (retry, result-building) without
     # parsing it back out of the job_id string -- write it once, here.
-    meta_path = Path(tempfile.mkstemp(suffix=".json")[1])
-    meta_path.write_text(json.dumps({"clip_id": clip_id}))
-    try:
-        with results_volume.batch_upload() as batch:
-            batch.put_file(str(meta_path), f"/{job_id}.job-meta.json")
-    finally:
-        meta_path.unlink()
+    retention.write_json(results_volume, f"/{job_id}.job-meta.json", {"clip_id": clip_id})
+    retention.write_index(results_volume, retention.read_index(results_volume) + [
+        dict(fp, clip_id=clip_id, job_id=job_id, created_at=time.time()),
+    ])
 
     _run_clip_fn().spawn(clip_id=clip_id, job_id=job_id)
     return DispatchResponse(clip_id=clip_id, job_id=job_id)
@@ -138,10 +218,39 @@ async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
 # results Volume, unmodified (no reinterpretation, spec item 5).
 # ---------------------------------------------------------------------------
 
+def _clip_id_for(job_id: str) -> str:
+    meta = _volume_read_json(results_volume, f"/{job_id}.job-meta.json")
+    return meta["clip_id"] if meta else job_id.removeprefix("job_")
+
+
+def _refuse_if_removed(clip_id: str) -> None:
+    """410 Gone, not 404, for a lesson that was taken down.
+
+    The distinction is the honest one and also the useful one: whoever is
+    holding this link deserves to know the lesson existed and was removed,
+    rather than being told it never existed. 410 is exactly that status, and
+    it tells caches to drop it permanently.
+    """
+    tomb = _volume_read_json(results_volume, f"/{clip_id}.removed.json")
+    if tomb is not None:
+        raise HTTPException(410, "This lesson was removed and is not coming back.")
+
+
 @app.get("/jobs/{job_id}")
 def get_job_status(job_id: str) -> dict:
     doc = _volume_read_json(results_volume, f"/{job_id}.job-status.json")
     if doc is None:
+        # Removal deletes the job-status document, so a MISSING one is the only
+        # case that can be a removed lesson -- which is why the tombstone is
+        # checked here and not at the top. This endpoint is polled every second
+        # or so by the processing screen, and the common path (a job that is
+        # genuinely running) must stay at exactly one Volume read, the way it
+        # was before removal existed.
+        #
+        # Without this check a removed lesson would report "queued" forever:
+        # the most misleading possible answer, since the thing it is waiting
+        # for is never coming.
+        _refuse_if_removed(_clip_id_for(job_id))
         # Not a 404: a job that was just spawned and hasn't written its first
         # "queued" doc yet is a real, valid state, not a missing job. Distinct
         # from "job_id never existed" only by convention -- this service does
@@ -187,6 +296,10 @@ def retry_job(job_id: str) -> dict:
     meta = _volume_read_json(results_volume, f"/{job_id}.job-meta.json")
     if meta is None:
         raise HTTPException(500, "No job-meta record for this job_id -- cannot recover its clip_id.")
+    # A removal deletes the source video, so a retry here would burn GPU time
+    # on a clip that no longer exists -- and must not put a removed lesson back
+    # on its feet even if it somehow could.
+    _refuse_if_removed(meta["clip_id"])
 
     retry_count = doc["retry_count"] + 1
     _run_clip_fn().spawn(clip_id=meta["clip_id"], job_id=job_id, retry_count=retry_count)
@@ -194,310 +307,75 @@ def retry_job(job_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# GET /jobs/{job_id}/result -- build MotionResult from the real npz +
-# export-manifest once the job has succeeded (spec item 4).
+# GET /jobs/{job_id}/result -- serve the MotionResult.
+#
+# The assembly itself moved to motion_result.py so the GPU worker can run it
+# ONCE, at export time, and store the document (modal_app.export_clip_gltf).
+# That is what finally makes the npz droppable: this endpoint used to reload
+# and re-derive a 61.30 MB npz on every single request, so "nothing reads the
+# npz after export" was not true until now.
+#
+# Two paths, and the fallback is not dead code: lessons reconstructed before
+# this shipped have an npz and no stored document.
 # ---------------------------------------------------------------------------
-
-def _quat_mul(a, b):
-    ax, ay, az, aw = a
-    bx, by, bz, bw = b
-    return (
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    )
-
-
-def _quat_conj(q):
-    x, y, z, w = q
-    return (-x, -y, -z, w)
-
-
-def _rest_relative_rotation(rest_xyzw, local_xyzw):
-    """JointHierarchy.rotation_convention: identity == exactly the rest pose.
-    Given a joint's PARENT-RELATIVE rotation, the contract value is
-    rest_rotation^-1 * local_rotation. See _local_rotations for why the
-    caller has to compute that parent-relative rotation first."""
-    return _quat_mul(_quat_conj(rest_xyzw), local_xyzw)
-
-
-def _local_rotations(skel_state, parents):
-    """skel_state quaternions are WORLD rotations -- convert to parent-relative.
-
-    This was the bug. skel_state's rotation was being fed straight into
-    _rest_relative_rotation as though it were already local-to-parent, so every
-    joint below the root was served the *accumulated* orientation of its whole
-    chain instead of its own bend. Measured on the real solo-01 reconstruction
-    (291 frames, 127 joints) the two differ by a median of 125.7 degrees, p90
-    168.2, and 125 of 127 joints are off by more than 20 degrees on average --
-    this was not a subtle sign error, the served skeleton was wrong everywhere
-    below the pelvis.
-
-    Confirmed from the data rather than from the format docs, two ways. A rig's
-    bone offset -- a child's position expressed in its parent's frame -- is a
-    property of the skeleton, so it must not move as the dancer moves. Treating
-    the quaternions as WORLD makes it rigid; treating them as parent-relative
-    does not:
-
-        offset vector wander / bone length   q as WORLD   q as parent-relative
-          median                               0.000574              0.949570
-        |mean offset - rest_translation|, m
-          median                               0.004111              0.048569
-
-    That second row is checked against joint_hierarchy's own rest_translation,
-    dumped independently from the FBX skeleton, which neither hypothesis can
-    tune itself against. Corroborating: skel_state[:, :3] are plainly absolute
-    world positions -- c_head_null sits 1.678 m from the origin, which no local
-    bone offset could be.
-
-    Matches `decompose()` on branch `smoothing`, which independently reached
-    the same conclusion (its decompose/recompose round-trips to 5.7e-14 cm).
-    Scale is deliberately ignored here: it cancels in a pure rotation.
-    """
-    out = [None] * len(parents)
-    for ji, parent in enumerate(parents):
-        world = tuple(float(v) for v in skel_state[ji, 3:7])
-        if parent < 0:
-            out[ji] = world  # root: its parent IS the world, so local == world
-        else:
-            parent_world = tuple(float(v) for v in skel_state[parent, 3:7])
-            out[ji] = _quat_mul(_quat_conj(parent_world), world)
-    return out
-
-
-def _build_motion_result(job_id: str, clip_id: str) -> dict:
-    import numpy as np
-
-    npz_bytes = _volume_read_bytes(results_volume, f"/{clip_id}.npz")
-    if npz_bytes is None:
-        raise HTTPException(404, "No pipeline output for this job yet.")
-    data = np.load(io.BytesIO(npz_bytes), allow_pickle=True)
-    if bool(data["refused"]):
-        raise HTTPException(409, "This job was refused; there is no MotionResult to serve.")
-
-    manifest = _volume_read_json(results_volume, f"/{clip_id}.export-manifest.json")
-    if manifest is None:
-        raise HTTPException(409, "Reconstruction finished but the GLB export manifest is missing.")
-    perf = _volume_read_json(results_volume, f"/{clip_id}.performance.json")
-
-    sample_times_s = data["sample_times_s"].tolist()
-    per_frame = data["per_frame"]
-    n_samples = len(per_frame)
-    joints_def = JOINT_HIERARCHY["joints"]
-    n_joints = len(joints_def)
-    rest_rotations = [tuple(j["rest_rotation"]) for j in joints_def]
-    parents = [j["parent_index"] for j in joints_def]
-    root_idx = JOINT_HIERARCHY["root_joint_index"]
-
-    persons = []
-    for pi, track_id in enumerate(data["confident_track_ids"].tolist()):
-        held = None  # most recent observed skel_state (127, 8) for this track
-        samples_out = []
-        root_traj = []
-        n_observed = 0
-        shape_vec = None
-        # branch `hands`: crop rects are computed in the GPU stage (they need the
-        # detector keypoints and the real post-rotation frame size, both of which
-        # only exist there) and carried per-person in the npz, same as
-        # bone_length_confidence. Here they are only collected, never invented --
-        # a frame the pipeline did not localize stays None.
-        hand_rects, foot_rects = [], []
-
-        for i in range(n_samples):
-            frame = per_frame[i]
-            person = frame.get(track_id) if isinstance(frame, dict) else None
-            observed = person is not None and "skel_state" in person
-            hand_rects.append(person.get("hand_crop_rect") if person is not None else None)
-            foot_rects.append(person.get("foot_crop_rect") if person is not None else None)
-            if observed:
-                held = np.asarray(person["skel_state"], dtype=np.float64)
-                n_observed += 1
-                if shape_vec is None:
-                    # Fallback only, for GLBs exported before the shape bake: one
-                    # frame's estimate, which is a noisy sample of the body rather
-                    # than the clip-wide fit ShapeParams.source promises.
-                    shape_vec = person["shape_params"].tolist()
-
-            if held is None:
-                # Leading gap: never reconstructed yet at all for this track.
-                joints_sample = [
-                    {"rotation": [0, 0, 0, 1], "provenance": {"observed": False, "interpolated": False, "suppressed": "out_of_frame"}, "visibility": "absent"}
-                    for _ in range(n_joints)
-                ]
-                root_traj.append({
-                    "position": [0.0, 0.0, 0.0],
-                    "rotation": [0, 0, 0, 1],
-                    "provenance": {"observed": False, "interpolated": False, "suppressed": "out_of_frame"},
-                })
-            else:
-                provenance = {"observed": observed, "interpolated": not observed, "suppressed": None if observed else "low_confidence"}
-                # ponytail: every joint in a reconstructed frame gets the SAME
-                # observed/uncertain state -- SAM 3D Body reconstructs a whole
-                # body per frame, it doesn't classify per-joint occlusion.
-                # Real per-joint visibility (which limb is actually occluded
-                # this frame) is Milestone A's Kalman/suppression chain (W9),
-                # not built here. Held (non-observed) frames render as
-                # "uncertain", never "observed" or "absent" -- a frozen pose
-                # is honestly disclosed, not claimed as tracked motion.
-                visibility = "observed" if observed else "uncertain"
-                # skel_state carries WORLD rotations; the contract wants each
-                # joint's own bend relative to its parent. Convert once per
-                # sample, not per joint -- see _local_rotations.
-                local_rots = _local_rotations(held, parents)
-                joints_sample = []
-                for ji in range(n_joints):
-                    rel = _rest_relative_rotation(rest_rotations[ji], local_rots[ji])
-                    joints_sample.append({
-                        "rotation": list(rel),
-                        "provenance": provenance,
-                        "visibility": visibility,
-                    })
-                root_pos_cm = held[root_idx, 0:3]
-                root_traj.append({
-                    # cm -> meters, same scale factor verified against
-                    # joint_hierarchy.rest_translation (see dump_joint_hierarchy).
-                    #
-                    # This is skel_state's own character-local frame, and on
-                    # real clips it is CONSTANT -- (0, 0.924, 0) on all 291
-                    # solo-01 frames -- so the dancer dances in place instead
-                    # of travelling across the stage.
-                    #
-                    # CORRECTION (docs/research/world-placement.md): the reason
-                    # previously recorded here was WRONG. It said composing
-                    # pred_cam_t would "slide the dancer 7.75 m because they
-                    # crouched". The source video says solo-01's dancer really
-                    # does start ~10 m away and run toward the camera -- the
-                    # 7.75 m is the choreography, and the -0.93 correlation
-                    # with bbox height is the pinhole relation working. The
-                    # independent PnP agreeing at r = 0.983 was confirmation,
-                    # not a shared error.
-                    #
-                    # Still pinned here only because composing a per-frame
-                    # translation changes what the export and the viewer mean
-                    # by world space, which is OPEN-DECISIONS E6 and the
-                    # builder's call. world-placement.md measures what the
-                    # composed version buys (foot contacts on one floor: 52%
-                    # -> 90%; five dancers agreeing on that floor to 5 cm
-                    # instead of 37 cm) and services/motion-api/
-                    # world_placement_probe.py reproduces it from an npz.
-                    "position": [float(root_pos_cm[0]) / 100.0, float(root_pos_cm[1]) / 100.0, float(root_pos_cm[2]) / 100.0],
-                    # Unconverted on purpose, unlike the per-joint rotations
-                    # above: the root has no parent, so its world rotation IS
-                    # its local one, and the body's world orientation is
-                    # exactly what root_trajectory is asking for.
-                    "rotation": list(tuple(float(v) for v in held[root_idx, 3:7])),
-                    "provenance": provenance,
-                })
-
-            samples_out.append({"joints": joints_sample})
-
-        # Report the vector the exporter actually baked into this dancer's GLB
-        # (per-dim median over its observed frames) rather than a per-frame
-        # sample, so the contract and the mesh cannot disagree.
-        shape_vec = manifest.get("shape_params", {}).get(str(track_id), shape_vec)
-        glb_name = manifest["glb_paths"].get(str(track_id))
-        persons.append({
-            "person_id": f"person_{track_id}",
-            "track_id": int(track_id),
-            "animation": {"clip_id": f"{clip_id}_track{track_id}", "glb_asset_id": glb_name},
-            "shape_params": {
-                "vector": shape_vec if shape_vec is not None else [0.0] * 45,
-                "source": "well_observed_frames" if shape_vec is not None else "default_assumed",
-            },
-            "root_trajectory": root_traj,
-            "samples": samples_out,
-            "crop_rects": {"hands": hand_rects, "feet": foot_rects},
-        })
-
-    width = int(data["frame_width"]) if "frame_width" in data else 0
-    height = int(data["frame_height"]) if "frame_height" in data else 0
-
-    # One floor per clip, from every dancer's foot contacts pooled. The
-    # diagnostics are deliberately NOT put in the document (Grounding is
-    # additionalProperties: false, and they are engineering numbers, not a
-    # product claim) -- they go to the log so a "none" is explainable without
-    # re-running the job.
-    solved = solve_grounding_for_clip(data, [j["name"] for j in joints_def])
-    grounding = solved.grounding
-    print(f"[grounding] {clip_id}: {grounding['status']} -- {json.dumps(solved.diagnostics)}")
-    intrinsics = camera_intrinsics_from_clip(data)
-
-    doc = {
-        "schema_version": "1.0.0",
-        "job_id": job_id,
-        "source_video": {
-            "asset_id": f"video:{clip_id}",
-            "width_px": width or 1,
-            "height_px": height or 1,
-            "rotation_deg": 0,
-            "duration_s": sample_times_s[-1] + (1.0 / (manifest.get("fps") or 15.0)) if sample_times_s else 1.0,
-            "fps_nominal": manifest.get("fps", 15.0),
-            "audio_offset_s": 0.0,
-        },
-        "sample_times_s": sample_times_s,
-        "camera": {
-            "model": "pinhole",
-            # Real now, not the old fx=fy=max(w,h) placeholder: the pipeline's
-            # own FOV estimate is in the npz per person (exactly constant per
-            # clip), and the pinhole model it belongs to was verified by
-            # reprojection at 0.00 px median error -- see
-            # grounding.camera_intrinsics_from_clip. The placeholder was 12.8%
-            # low on solo-01 (1024 vs 1174.88). Falls back to the placeholder
-            # only for older npz files with no frame size recorded.
-            "intrinsics": intrinsics or {
-                "fx": float(max(width, height, 1)),
-                "fy": float(max(width, height, 1)),
-                "cx": width / 2.0,
-                "cy": height / 2.0,
-                "reference_width_px": width or 1,
-                "reference_height_px": height or 1,
-            },
-            # ponytail: identity, i.e. this document's "world space" IS the
-            # exported GLB's own character-local frame -- which is what
-            # root_trajectory and grounding.floor_plane are both expressed in,
-            # so the document is self-consistent. It is NOT camera space, and
-            # it cannot be until the dancer can be placed in the room at all
-            # (OPEN-DECISIONS E6). Writing a real camera_to_world here while
-            # the body is still pinned at the origin would make the document
-            # internally inconsistent, not more truthful.
-            "camera_to_world": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-        },
-        # Real floor solve (grounding.py). Still returns "none" whenever the
-        # evidence does not earn a plane -- DESIGN.md §10 forbids faking one,
-        # and the solve's own diagnostics (logged above) say which gate
-        # refused and what it measured.
-        "grounding": grounding,
-        "accent_color": {"hex": DANCER_FALLBACK_COLORS[0], "source": "fallback"},  # E4 sampling not built here
-        "joint_hierarchy": JOINT_HIERARCHY,
-        "persons": persons,
-        "model_report": {
-            "pipeline_git_sha": "808b53c",
-            "models": [
-                {"name": "rtmo-m", "version": "body7", "license": "Apache-2.0", "license_flags": []},
-                {"name": "bytetrack", "version": "upstream-main", "license": "MIT", "license_flags": []},
-                {"name": "sam-3d-body-dinov3", "version": "hf:facebook/sam-3d-body-dinov3", "license": "SAM License",
-                 "license_flags": ["itar-military-use-prohibited", "citation-required-for-research-publication"]},
-                {"name": "mhr", "version": "v1.0.1", "license": "Apache-2.0", "license_flags": ["body-model-asset-license-see-zip"]},
-            ],
-            "measured_performance": perf,
-        },
-    }
-    return doc
-
 
 @app.get("/jobs/{job_id}/result")
 def get_job_result(job_id: str) -> dict:
     status = get_job_status(job_id)
     if status["state"] != "succeeded":
         raise HTTPException(409, f"Job is '{status['state']}', not 'succeeded'.")
-    meta = _volume_read_json(results_volume, f"/{job_id}.job-meta.json")
-    clip_id = meta["clip_id"] if meta else job_id.removeprefix("job_")
-    doc = _build_motion_result(job_id, clip_id)
+    clip_id = _clip_id_for(job_id)
+    # Checked explicitly rather than relying on get_job_status: this is the
+    # endpoint that hands over the actual reconstruction, so it does not get to
+    # assume some earlier call already refused. Once per lesson open, not per
+    # poll, so the extra read is free where it matters.
+    _refuse_if_removed(clip_id)
+
+    stored = _volume_read_bytes(results_volume, f"/{clip_id}.motion-result.json.gz")
+    if stored is not None:
+        doc = json.loads(gzip.decompress(stored))
+        # The stored document was written by whichever job first reconstructed
+        # this clip. A second, deduplicated upload is handed that same job_id,
+        # so this is normally a no-op -- but stamping it is cheap and keeps the
+        # contract's "id of the job that produced this result" honest either way.
+        doc["job_id"] = job_id
+    else:
+        try:
+            doc = motion_result.build_motion_result(
+                job_id, clip_id,
+                _volume_read_bytes(results_volume, f"/{clip_id}.npz"),
+                _volume_read_json(results_volume, f"/{clip_id}.export-manifest.json"),
+                _volume_read_json(results_volume, f"/{clip_id}.performance.json"),
+            )
+        except motion_result.MotionResultUnavailable as e:
+            raise HTTPException(e.status, e.detail) from e
+
     result = validate_motion_result(doc)
     if not result.valid:
         raise HTTPException(500, f"Assembled MotionResult failed contract validation: {result.errors}")
+
+    _touch(clip_id)
     return doc
+
+
+def _touch(clip_id: str) -> None:
+    """Record that this lesson was opened, for the last-accessed expiry.
+
+    ponytail: throttled by a plain in-process dict, so a learner reloading the
+    page twenty times writes once. The cache is per-replica, so the real worst
+    case is one small write per replica per day per lesson -- fine, and much
+    better than a Volume write on every request. It is also best-effort: a
+    failure here must never break serving a lesson, it only risks the lesson
+    ageing out earlier than it should.
+    """
+    now = time.time()
+    if now - _TOUCHED.get(clip_id, 0.0) < 86400:
+        return
+    try:
+        retention.write_json(results_volume, retention.touch_path(clip_id), {"at": now})
+        _TOUCHED[clip_id] = now
+    except Exception as e:  # noqa: BLE001
+        print(f"[retention] could not record access for {clip_id}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -512,16 +390,100 @@ def get_job_result(job_id: str) -> dict:
 def get_asset(asset_id: str) -> Response:
     if asset_id.startswith("video:"):
         clip_id = asset_id[len("video:"):]
+        _refuse_if_removed(clip_id)
         video = _volume_read_bytes(uploads_volume, f"/{clip_id}.mp4") or _volume_read_bytes(eval_volume, f"/{clip_id}.mp4")
         if video is None:
             raise HTTPException(404, "No video for this asset id.")
         return Response(content=video, media_type="video/mp4")
     if asset_id.endswith(".glb"):
+        # `{clip_id}_track{n}.glb`, per modal_app.export_clip_gltf. Checked
+        # against the tombstone too: the GLB is the dancer's motion, and a
+        # removal that left it individually fetchable would not be a removal.
+        _refuse_if_removed(asset_id.rsplit("_track", 1)[0])
         glb = _volume_read_bytes(results_volume, f"/{asset_id}")
         if glb is None:
             raise HTTPException(404, "No GLB for this asset id.")
         return Response(content=glb, media_type="model/gltf-binary")
     raise HTTPException(404, "Unrecognized asset id.")
+
+
+# ---------------------------------------------------------------------------
+# POST /lessons/{clip_id}/removal -- the takedown path.
+#
+# docs/research/rights-and-privacy.md section 1 and 6.1: the largest real
+# exposure is not a lawsuit, it is a dancer finding their own body
+# reconstructed on a site they never heard of with no way to ask for it to
+# stop. This is the way to ask. It is the highest-value, lowest-cost item in
+# that whole document and it must accept more than copyright complaints -- the
+# person most likely to use it is the dancer, who has no copyright claim.
+#
+# The request IS the removal. No review queue, no 48-hour target to miss: the
+# lesson goes immediately and getting it back requires contacting whoever made
+# it. That is section 6.1's own "cheap resolution that does not require solving
+# D5", and it is the honest shape -- a queue would mean promising a response
+# time, and DESIGN.md section 7h says do not state a guarantee the code does
+# not keep.
+#
+# **D5 (accounts) is where this would change, and is not mine to resolve.**
+# With no accounts, anyone holding the lesson link can remove it. A link is a
+# 128-bit uuid4, so this is not enumerable -- you have to have been given it --
+# but it does mean an uploader's lesson can be removed by anyone they shared it
+# with. With magic-link accounts the natural rules are: the uploader can delete
+# their own outright; anyone else's request still takes it down immediately but
+# becomes restorable by the uploader. Recorded in OPEN-DECISIONS.md D5/D7 as a
+# dependency rather than guessed at here.
+#
+# Removal beats retention, always: a removed clip is gone now, not at the next
+# sweep, and the tombstone means the TTL sweeper skips it forever after.
+# ---------------------------------------------------------------------------
+
+class RemovalRequest(BaseModel):
+    # Free text, and deliberately not a fixed enum of legal categories: a
+    # dancer saying "that's me and I don't want it up" must not have to find
+    # the right box to tick. Stored on the tombstone as a category only.
+    reason: str = "requested"
+
+
+class RemovalResponse(BaseModel):
+    clip_id: str
+    removed: list[str]
+    already_absent: list[str]
+
+
+@app.post("/lessons/{clip_id}/removal", response_model=RemovalResponse)
+def remove_lesson(clip_id: str, request: RemovalRequest | None = None) -> RemovalResponse:
+    """Delete every stored byte of one lesson, now.
+
+    Goes away: the source video, every dancer's GLB, the materialised
+    MotionResult, the npz if one still exists, the export manifest, the
+    performance record, the last-access marker, the job status and job meta,
+    and the content fingerprint. What is left is a tombstone holding a
+    timestamp and a reason word -- nothing derived from the person.
+
+    Because uploads are deduplicated, there is exactly one canonical copy of a
+    given clip, so this removes it for everyone who uploaded it rather than for
+    whichever copy happened to be found.
+    """
+    if _volume_read_json(results_volume, f"/{clip_id}.removed.json") is not None:
+        # Already gone. Idempotent and truthful rather than an error: the
+        # answer to "please remove this" is the same either way.
+        return RemovalResponse(clip_id=clip_id, removed=[], already_absent=[])
+
+    job_id = f"job_{clip_id}"
+    if _volume_read_json(results_volume, f"/{job_id}.job-meta.json") is None:
+        # Older lessons (and the eval clips) used other job_id shapes; find it
+        # rather than leaving a live job-status record pointing at deleted bytes.
+        for entry in retention.read_index(results_volume):
+            if entry.get("clip_id") == clip_id and entry.get("job_id"):
+                job_id = entry["job_id"]
+                break
+
+    reason = (request.reason if request else "requested")[:200]
+    outcome = retention.delete_clip(uploads_volume, results_volume, clip_id, job_id, reason)
+    _TOUCHED.pop(clip_id, None)
+    print(f"[removal] {clip_id}: deleted {len(outcome['deleted'])} artifacts ({reason})")
+    return RemovalResponse(clip_id=clip_id, removed=outcome["deleted"],
+                           already_absent=outcome["already_absent"])
 
 
 @app.get("/health")
