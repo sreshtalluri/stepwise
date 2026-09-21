@@ -88,6 +88,47 @@ def clip_artifact_paths(results_listing: list[str], clip_id: str, job_id: str | 
     }
 
 
+def _delete_r2_objects(clip_id: str, results_listing: list[str]) -> list[str]:
+    """The same lesson, in the other place its bytes live.
+
+    Delivered artifacts moved to R2 (storage.py). A deletion path that knows
+    about only one of the two storage systems is not a storage leak, it is a
+    privacy leak: the dancer asked for the video to be gone and the video is
+    exactly what R2 is holding. So it goes here, inside the one function both
+    the takedown endpoint and the sweeper call, for the same reason
+    `clip_artifact_paths` is one function.
+
+    Returns `r2:<key>` entries so the caller's report distinguishes them from
+    Volume paths. Best-effort: an R2 failure must not stop the Volume deletion
+    that already happened, but it is printed rather than swallowed, because an
+    object left in R2 after a takedown is the failure that matters most here.
+
+    **Not done, and named rather than hidden:** with a CDN in front, deleting
+    the origin object does not delete the edge copy (infrastructure.md §9, D7).
+    There is no custom domain yet, so there is no edge copy yet -- today's
+    presigned URLs read through to the origin. When `R2_PUBLIC_BASE_URL` is set
+    this function must also issue a Cloudflare cache purge for the same keys,
+    and that needs an API token that does not exist yet. Tracked in
+    docs/DEPLOYMENT.md as a blocking item on the custom-domain cutover.
+    """
+    try:
+        import storage
+    except ImportError:  # storage.py not on the path (a caller that predates it)
+        return []
+    if not storage.enabled():
+        return []
+    glbs = [n for n in results_listing
+            if n.startswith(f"{clip_id}_track") and n.endswith(".glb")]
+    out = []
+    for key in storage.clip_keys(clip_id, glbs):
+        try:
+            if storage.delete(key):
+                out.append(f"r2:{key}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[removal] WARNING: could not delete r2:{key}: {e}")
+    return out
+
+
 def delete_clip(uploads_volume, results_volume, clip_id: str, job_id: str | None,
                 reason: str) -> dict:
     """Remove every artifact of one lesson and leave a tombstone.
@@ -116,6 +157,8 @@ def delete_clip(uploads_volume, results_volume, clip_id: str, job_id: str | None
                 deleted.append(path)
             except FileNotFoundError:
                 missing.append(path)
+
+    deleted += _delete_r2_objects(clip_id, listing)
 
     remove_fingerprint(results_volume, clip_id)
 
