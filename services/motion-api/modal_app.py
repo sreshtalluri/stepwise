@@ -607,11 +607,20 @@ def inspect_mhr():
 # pymomentum-gpu's wheels are cp312/cp313 only and pin torch==2.8 -- verified
 # against its real PyPI metadata, not assumed from the PRD. Exchanges plain
 # arrays (npz) with cv_image's output, never a live Python object.
+GLTF_TOOLS_DIR = os.path.join(os.path.dirname(__file__), "tools")
+
 gltf_image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install("torch==2.8.0")
     .pip_install("pymomentum-gpu==0.1.114.post0")
-    .pip_install("numpy", "trimesh")
+    # pygltflib: W10's region_mask.py post-processes the GLB
+    # save_gltf_from_skel_states writes, splitting its one mesh into named
+    # region_<id> sub-meshes (docs/OPEN-DECISIONS.md E3) -- plain glTF JSON/
+    # buffer manipulation, no pymomentum/trimesh API needed for it.
+    .pip_install("numpy", "trimesh", "pygltflib")
+    # Mounted at container start, same pattern as cv_image's VENDOR_DIR --
+    # editing region_mask.py doesn't force a rebuild of the layers above.
+    .add_local_dir(GLTF_TOOLS_DIR, remote_path="/app/motion-api-tools")
 )
 
 
@@ -880,6 +889,56 @@ def _character_with_shape(character, shape_vec, shape_vectors, lod_to_mhr):
     return character.with_mesh_and_skin_weights(shaped_mesh, character.skin_weights), shaped - rest
 
 
+@app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights}, timeout=600)
+def inspect_mhr_region_mapping():
+    """W10 diagnostic (not required by export_clip_gltf, which resolves this
+    itself): prints the real `lod3.fbx` skeleton's joint names and whether
+    region_mask.resolve_canonical_joints can match all 18 REGIONS bones
+    against them -- the single biggest unverified assumption this pass makes
+    (see the W10 report). Run this BEFORE trusting export_clip_gltf's output
+    on a real clip; if it raises RegionMappingError, read the message (it
+    names exactly which canonical joints didn't match) and extend
+    tools/region_mask.py's _CATEGORY_MATCHERS rather than guessing.
+
+    `character.skeleton`'s parent-index attribute name was never confirmed in
+    this pass either (only `.joint_names`/`.size` were, per inspect_pymomentum
+    above) -- this tries the plausible attribute names and reports which one
+    worked, rather than assuming.
+    """
+    import sys
+
+    import pymomentum.geometry as pym_geo
+
+    sys.path.insert(0, "/app/motion-api-tools")
+    from region_mask import resolve_canonical_joints
+
+    lod_path = f"{WEIGHTS_DIR}/mhr-assets/lod3.fbx"
+    character = pym_geo.Character.load_fbx(lod_path)
+    skeleton = character.skeleton
+    joint_names = list(skeleton.joint_names)
+
+    parent_indices = None
+    for attr in ("joint_parents", "parents", "parent", "parent_indices"):
+        if hasattr(skeleton, attr):
+            candidate = list(getattr(skeleton, attr))
+            if len(candidate) == len(joint_names):
+                parent_indices = candidate
+                print(f"parent indices via skeleton.{attr}")
+                break
+    if parent_indices is None:
+        raise RuntimeError(
+            f"couldn't find a parent-index attribute on Skeleton (tried joint_parents/parents/"
+            f"parent/parent_indices); dir(skeleton)={[a for a in dir(skeleton) if not a.startswith('_')]}"
+        )
+
+    print(f"{len(joint_names)} joints: {joint_names}")
+    mapping = resolve_canonical_joints(joint_names, parent_indices)
+    print("resolved canonical -> real joint name:")
+    for canonical, idx in sorted(mapping.items()):
+        print(f"  {canonical:16s} -> [{idx}] {joint_names[idx]}")
+    return {"joint_names": joint_names, "resolved": {k: joint_names[v] for k, v in mapping.items()}}
+
+
 @app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results}, timeout=600)
 def export_clip_gltf(clip_id: str):
     """Stage 6c: the real fix (W8) -- export the ACTUAL reconstructed motion
@@ -913,11 +972,22 @@ def export_clip_gltf(clip_id: str):
     real interpolation/suppression chain (out of W8 scope, see
     docs/GATE-REPORT.md) replaces this; a held pose plays as a visible freeze,
     which is honest -- it does not claim motion that wasn't observed.
+
+    W10: after pymomentum writes the GLB, region_mask.split_glb_by_region
+    rewrites it in place, splitting the one MHR mesh into named `region_<id>`
+    sub-meshes (docs/OPEN-DECISIONS.md E3) -- see that module's docstring for
+    why this is a one-time structural GLB edit, not a per-frame one, and why
+    it resolves REGIONS' canonical joint names against the real skeleton via
+    a tolerant matcher instead of a hardcoded naming guess.
     """
     import os
+    import sys
 
     import numpy as np
     import pymomentum.geometry as pym_geo
+
+    sys.path.insert(0, "/app/motion-api-tools")
+    from region_mask import RegionMappingError, split_glb_by_region
 
     npz_path = f"{RESULTS_DIR}/{clip_id}.npz"
     print(f"loading {npz_path}")
@@ -1041,8 +1111,26 @@ def export_clip_gltf(clip_id: str):
 
         out_path = f"{RESULTS_DIR}/{clip_id}_track{track_id}.glb"
         pym_geo.Character.save_gltf_from_skel_states(out_path, character, fps, skel_states)
+        print(f"SAVED {out_path} (single mesh, pre-region-split)")
+
+        # In place: same path, same animation/skin, mesh now split into named
+        # region_<id> sub-meshes. Fails loudly rather than shipping a GLB with
+        # no masking surface -- DESIGN.md §7h's honesty standard applies to
+        # this mapping just as much as to what gets rendered from it.
+        try:
+            region_triangle_counts = split_glb_by_region(out_path, out_path)
+        except RegionMappingError as e:
+            raise RuntimeError(
+                f"{clip_id} track {track_id}: real MHR skeleton's joint names didn't match "
+                f"REGIONS closely enough to mask body parts safely: {e}"
+            ) from e
+        empty_regions = [r for r, n in region_triangle_counts.items() if n == 0]
+        if empty_regions:
+            print(f"track {track_id}: regions with NO surface (check before trusting masking): {empty_regions}")
+        print(f"track {track_id}: region triangle counts: {region_triangle_counts}")
+
         out_paths[track_id] = out_path
-        print(f"SAVED {out_path}")
+        print(f"SAVED {out_path} (region-split)")
 
     # W4: api.py builds MotionResult from the npz + this manifest without
     # needing pymomentum/CUDA installed -- it never needs to know the GLB
