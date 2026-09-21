@@ -592,6 +592,25 @@ def _touch(clip_id: str) -> None:
 # to presign against yet, see the storage-decision docstring above).
 # ---------------------------------------------------------------------------
 
+@app.get("/jobs/{job_id}/video")
+def get_job_video(job_id: str) -> Response:
+    """The clip itself, addressed by job_id instead of asset id.
+
+    W7's ProcessingScreen plays the learner's own file from a local blob URL
+    and falls back to this while the job runs (DESIGN.md §7c: the video is
+    useful immediately, there is no dead time). A pasted link has no local
+    blob -- the visitor never held the file -- so for the link path this
+    fallback is not a fallback, it is the only source, and without it the
+    "your clip plays the whole time it is working" promise is not kept for
+    half the front door.
+
+    A thin alias rather than a second implementation: it resolves job_id to
+    clip_id and hands off to `get_asset`, so the tombstone check and the 410
+    behaviour are the same code and cannot drift apart.
+    """
+    return get_asset(f"video:{_clip_id_for(job_id)}")
+
+
 @app.get("/assets/{asset_id:path}")
 def get_asset(asset_id: str) -> Response:
     if asset_id.startswith("video:"):

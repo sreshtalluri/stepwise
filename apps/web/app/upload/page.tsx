@@ -86,8 +86,12 @@ export default function UploadPage() {
     setBusy(true);
     try {
       const body = new FormData();
-      body.append("video", file);
-      const res = await fetch("/api/jobs", { method: "POST", body });
+      // Field name and route both match services/motion-api's `POST /clips`.
+      // They did not before: this posted `video` to `/api/jobs`, which is not
+      // an endpoint the service has, so the file door has been 404ing since
+      // W7 built it against the fixture. Found while wiring the link door.
+      body.append("file", file);
+      const res = await fetch("/api/clips", { method: "POST", body });
       if (!res.ok) throw new Error(String(res.status));
       const { job_id: jobId } = (await res.json()) as { job_id: string };
       // Not revoked: the processing screen plays this immediately, so there is
