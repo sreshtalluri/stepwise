@@ -24,7 +24,13 @@ import { load, openingStructure, save } from "../lib/structure";
 // Relative, same as lib/motion.ts reaches into motion-contract — there is no
 // workspace root and no node_modules link between these packages.
 import { LessonNavigator } from "../../../packages/navigation/src/LessonNavigator";
-import { loopTimesS, timelineEndS } from "../../../packages/navigation/src/core";
+import {
+  currentCount,
+  loopSpanForPart,
+  loopTimesS,
+  partRangeAtCount,
+  timelineEndS,
+} from "../../../packages/navigation/src/core";
 import type { LessonStructure, LoopSpan, PlaybackMode } from "../../../packages/navigation/src/core";
 import "../../../packages/navigation/src/navigation.css";
 
@@ -62,7 +68,12 @@ function useVideoClock(
 
     const publish = (t: number) => {
       const loop = loopRef.current;
-      if (loop && (t >= loop[1] || t < loop[0] - 0.25)) {
+      // Only the trailing edge. An earlier version also snapped a playhead that
+      // was BEFORE the loop, which sounds symmetric and is wrong: it silently
+      // undid any deliberate seek outside the loop, so dragging the overview bar
+      // in loop mode looked broken. Running into the loop from before it is
+      // harmless — it loops once it arrives.
+      if (loop && t >= loop[1]) {
         // Wrap on the same value the compositor just showed. `currentTime` is
         // set, not stepped, so no arithmetic accumulates and the loop cannot
         // drift over forty minutes of repeats.
@@ -373,19 +384,26 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
     [video],
   );
 
-  // Entering loop mode with the playhead outside the loop would otherwise wrap
-  // on the next frame and look like a jump nobody asked for. Land on the first
-  // count of the loop instead, which is where a learner means to be.
-  const chooseMode = useCallback(
-    (next: PlaybackMode) => {
-      setMode(next);
-      if (next === "loop") {
-        const [a, b] = loopTimesS(structure.grid, loopSpan);
-        if (timeRef.current < a || timeRef.current >= b) seek(a);
-      }
-    },
-    [structure.grid, loopSpan, seek, timeRef],
-  );
+  const chooseMode = useCallback((next: PlaybackMode) => setMode(next), []);
+
+  /**
+   * While "play all" is the mode, the loop button is an OFFER, not a state — so
+   * it has to name the part it would actually loop, which is the one under the
+   * playhead. Without this it kept whatever span was last set and read
+   * "Loop part 1" while sitting in part 2, then looped part 2 when pressed.
+   * That is DESIGN.md §8's state-in-label rule failing in the one place it is
+   * easiest to miss: the label was true of the state and false of the action.
+   *
+   * Caught in the browser, not in review. Only runs in "all" — in "loop" the
+   * span is the learner's, including handles they have dragged off a boundary.
+   */
+  useEffect(() => {
+    if (mode !== "all") return;
+    const span = loopSpanForPart(partRangeAtCount(structure, currentCount(structure.grid, displayTime)));
+    setLoopSpan((prev) =>
+      prev.startCount === span.startCount && prev.endCount === span.endCount ? prev : span,
+    );
+  }, [mode, structure, displayTime]);
 
   /**
    * DESIGN.md §8 keyboard map, minus the four keys the navigator owns.
