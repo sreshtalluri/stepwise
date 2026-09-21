@@ -49,6 +49,8 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "packages" / "motion-contract" / "python"))
 from motion_contract import validate_job_status, validate_motion_result  # noqa: E402
 
+from grounding import camera_intrinsics_from_clip, solve_grounding_for_clip  # noqa: E402 -- same dir, pure numpy
+
 APP_NAME = "stepwise-motion"
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # generous; PRD's real limit is 60s of video, not a byte count
 JOINT_HIERARCHY = json.loads((Path(__file__).resolve().parent / "mhr_joint_hierarchy.json").read_text())
@@ -296,10 +298,21 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
                 root_traj.append({
                     # cm -> meters, same scale factor verified against
                     # joint_hierarchy.rest_translation (see dump_joint_hierarchy).
-                    # ponytail: this is skel_state's own (character-local)
-                    # frame, NOT composed with camera extrinsics/pred_cam_t
-                    # into true world space -- see report's open item on
-                    # root-trajectory world placement.
+                    #
+                    # This is skel_state's own character-local frame, and on
+                    # real clips it is CONSTANT -- (0, 0.924, 0) on all 291
+                    # solo-01 frames -- so the dancer dances in place instead
+                    # of travelling across the stage. Deliberately left that
+                    # way rather than composed with pred_cam_t: measured, that
+                    # composition would slide the dancer 7.75 m in depth on
+                    # solo-01, and an independent full-frame PnP against the
+                    # detector's own keypoints agrees with it (r = 0.983), so
+                    # the swing is the per-frame reconstruction, not just the
+                    # camera fit. A dancer sliding 8 m backwards because they
+                    # crouched is a worse lie than one who stands still.
+                    # Pinned-and-honest until OPEN-DECISIONS E6 is resolved;
+                    # docs/GATE-REPORT.md's grounding addendum has the numbers
+                    # and grounding.GroundingResult.evidence has the arrays.
                     "position": [float(root_pos_cm[0]) / 100.0, float(root_pos_cm[1]) / 100.0, float(root_pos_cm[2]) / 100.0],
                     "rotation": list(tuple(float(v) for v in held[root_idx, 3:7])),
                     "provenance": provenance,
@@ -323,6 +336,17 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
 
     width = int(data["frame_width"]) if "frame_width" in data else 0
     height = int(data["frame_height"]) if "frame_height" in data else 0
+
+    # One floor per clip, from every dancer's foot contacts pooled. The
+    # diagnostics are deliberately NOT put in the document (Grounding is
+    # additionalProperties: false, and they are engineering numbers, not a
+    # product claim) -- they go to the log so a "none" is explainable without
+    # re-running the job.
+    solved = solve_grounding_for_clip(data, [j["name"] for j in joints_def])
+    grounding = solved.grounding
+    print(f"[grounding] {clip_id}: {grounding['status']} -- {json.dumps(solved.diagnostics)}")
+    intrinsics = camera_intrinsics_from_clip(data)
+
     doc = {
         "schema_version": "1.0.0",
         "job_id": job_id,
@@ -338,12 +362,14 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
         "sample_times_s": sample_times_s,
         "camera": {
             "model": "pinhole",
-            # ponytail: NOT a real calibration -- Milestone A hasn't built
-            # camera-intrinsics estimation. A plausible-looking but unverified
-            # focal length would be a confidently-wrong claim (DESIGN.md §7h),
-            # so this is deliberately a naive, clearly-placeholder guess
-            # (fx=fy=max(w,h), centered principal point), not a measurement.
-            "intrinsics": {
+            # Real now, not the old fx=fy=max(w,h) placeholder: the pipeline's
+            # own FOV estimate is in the npz per person (exactly constant per
+            # clip), and the pinhole model it belongs to was verified by
+            # reprojection at 0.00 px median error -- see
+            # grounding.camera_intrinsics_from_clip. The placeholder was 12.8%
+            # low on solo-01 (1024 vs 1174.88). Falls back to the placeholder
+            # only for older npz files with no frame size recorded.
+            "intrinsics": intrinsics or {
                 "fx": float(max(width, height, 1)),
                 "fy": float(max(width, height, 1)),
                 "cx": width / 2.0,
@@ -351,11 +377,21 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
                 "reference_width_px": width or 1,
                 "reference_height_px": height or 1,
             },
+            # ponytail: identity, i.e. this document's "world space" IS the
+            # exported GLB's own character-local frame -- which is what
+            # root_trajectory and grounding.floor_plane are both expressed in,
+            # so the document is self-consistent. It is NOT camera space, and
+            # it cannot be until the dancer can be placed in the room at all
+            # (OPEN-DECISIONS E6). Writing a real camera_to_world here while
+            # the body is still pinned at the origin would make the document
+            # internally inconsistent, not more truthful.
             "camera_to_world": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
         },
-        # Never fake a plane (DESIGN.md §10) -- floor fitting isn't built yet,
-        # so "none" is the honest state, not a guessed floor at y=0.
-        "grounding": {"status": "none", "floor_plane": None},
+        # Real floor solve (grounding.py). Still returns "none" whenever the
+        # evidence does not earn a plane -- DESIGN.md §10 forbids faking one,
+        # and the solve's own diagnostics (logged above) say which gate
+        # refused and what it measured.
+        "grounding": grounding,
         "accent_color": {"hex": DANCER_FALLBACK_COLORS[0], "source": "fallback"},  # E4 sampling not built here
         "joint_hierarchy": JOINT_HIERARCHY,
         "persons": persons,

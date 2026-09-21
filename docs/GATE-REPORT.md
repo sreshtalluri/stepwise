@@ -355,3 +355,158 @@ still marked OPEN there. The `CONFIDENT_MIN_FRAMES` threshold and the
 job-status "refused → failed" mapping are implementation judgment calls
 within the existing contract, not new product/design decisions of the kind
 OPEN-DECISIONS.md tracks — flagged above rather than silently assumed.
+
+## Grounding addendum (2026-09-18): the floor solve, and why it says `none`
+
+Branch `grounding` off `w4-jobservice`. Real Modal GPU session this pass:
+`solo-07` (the `floor-work` clip) was run end to end for the first time, and
+`solo-01`'s existing npz was re-read. Every number below is measured.
+
+**Reproducibility note.** `solo-01` was re-run end to end on current code at
+the end of this pass (its stored npz predated W4 and had no frame size). The
+floor numbers reproduce to the digit — floor 0.0529 m, RMS 0.01454, planted
+fraction 0.1607, tilt 9.18° vs 9.20° — off a fresh reconstruction, so none of
+this is an artefact of one stale run. Note the ByteTrack id changed (4 → 1)
+between runs; nothing in the solve depends on it.
+
+**What was built.** `services/motion-api/grounding.py` — two deliberately
+separate, independently replaceable functions plus the honesty decision around
+them, wired into `api.py::_build_motion_result` in place of the hardcoded
+`{"status": "none", "floor_plane": null}`. 13 tests in
+`services/motion-api/test_grounding.py`, no GPU needed.
+
+**The measured result: both real clips honestly report `none`.** Not because
+the solve failed — it fits a tight plane on both — but because of what the
+plane turns out to describe.
+
+| | solo-01 (baseline) | solo-07 (floor work) |
+|---|---|---|
+| reconstructed frames | 291 / 296 | 436 (4 track ids) |
+| both feet visible | 96.2% | 97.9% |
+| contact candidates → inliers | 39 → 27 | 222 → 192 |
+| inlier RMS | **1.45 cm** | **1.25 cm** |
+| fitted floor height | 0.053 m | 0.109 m |
+| fitted tilt from +Y | 9.2° | 10.5° |
+| contact evidence covers | **7 of 20 s (0.35)** | **12 of 24 s (0.50)** |
+| lowest foot's median gap to that plane | **0.125 m** | **0.578 m** |
+| frames with a foot within 3 cm of it | 16.1% | 28.1% |
+| verdict | `none` (`contacts_not_spread_over_clip`) | `none` (same) |
+
+**Root cause, and it is structural, not statistical.** `skel_state`'s root
+translation is **constant for every frame of every clip** — `(0, 92.399, 0)` cm
+on solo-01, all 291 frames — and `body_world` is identity. So in the only frame
+the renderer and the pipeline share (the exported GLB's), the pelvis is pinned
+at a fixed height and the vertical datum rides the body: a plié lifts the whole
+skeleton off its own floor. Confirmed against an independent observable: the
+reconstruction's lowest-foot height correlates **-0.52** with the detector's
+image-space ankle position on solo-01 (i.e. when the model says the foot went
+up, the video says it went down) and **-0.89** with detector bbox height on
+solo-07 — the "float" tracks the crop box, not the dancer.
+
+**The obvious fix was tried and measured worse.** Placing the body on its own
+view ray at a clip-constant depth (`pred_cam_t * Z0/z`, justified by the MVP's
+static-camera assumption) widens the lowest-quartile spread of the floor
+estimate from 0.117 m to 0.284 m on solo-01 and 0.174 m to 0.210 m on solo-07.
+Raw `pred_cam_t` is worse still: its z swings 3.18→10.93 m on solo-01 and
+correlates -0.93 with bbox height, putting every foot point on one viewing ray
+(y/z correlation 0.98) — a degenerate configuration for plane fitting. **The
+character-local frame is the best vertical datum currently available, and it is
+still not good enough for a whole clip.**
+
+**The solve is not merely cautious.** On solo-01 frames 0–45 (3.0 s, dancer
+upright, pelvis near canonical height) it returns `grounded`: floor at 0.038 m,
+1.22 cm RMS, 5.3° tilt, coverage 0.67, and the lowest foot within 3 cm of the
+plane in 47.5% of frames with a 3.4 cm median gap. That document validates
+against the frozen contract. The gate is discriminating, not refusing.
+
+**What this blocks.** Grounding cannot become `grounded` for a whole real clip
+until the pipeline produces a per-frame global vertical placement for the body
+(see `docs/OPEN-DECISIONS.md` E6). Until then, every lesson renders floorless,
+which makes `OPEN-DECISIONS.md` B3 (what a floating body actually looks like)
+the live design question rather than an edge case.
+
+### World placement (the dancer travelling): investigated, not shipped, and why
+
+Asked during this pass, because the builder's complaint is real: *"the
+simulation just looks like it's always centered... in the actual video the
+dancer might be moving around the stage... jumping from one place to another."*
+He is right about the symptom. `root_trajectory` is exactly `(0, 0.924, 0)` on
+**all 291** solo-01 frames — zero range on every axis. The dancer dances in
+place.
+
+The reasoning for why it should now be tractable is sound as far as it goes:
+the camera is static by contract (`Camera.model` is `"pinhole"` const, one
+camera per clip), so there is no SLAM problem, and a known ground plane plus
+feet in contact should pin the depth. Three things were measured before
+accepting that, and they say don't ship it.
+
+**1. The floor constraint alone does not make it well-posed.** With per-frame
+depth `d_f` unknown *and* the plane `(n, c)` unknown, each contact frame
+contributes one equation and one unknown: `n·(jc_foot + d_f·r_f) = c`. The
+plane's three degrees of freedom stay free no matter how many contacts there
+are. Any plane admits a consistent set of depths. The missing constraint has to
+come from the body's metric size interacting with perspective — i.e. from the
+reconstruction, not from the floor.
+
+**2. So the reconstruction was tested directly, and it is what fails.** An
+independent full-frame PnP (the model's metric body `jc`, the *detector's*
+COCO-17 keypoints as observations — not the model's own, which are its fit by
+construction — under the exact pinhole model, 3-DoF Gauss-Newton per frame):
+
+| | model `pred_cam_t.z` | independent PnP `t.z` | agreement |
+|---|---|---|---|
+| solo-01 | 3.18–10.93 m (range **7.75 m**) | 2.85–10.95 m (range **8.10 m**) | **r = +0.983** |
+| solo-07 | 3.49–7.34 m (range 3.85 m) | 3.24–4.66 m (range **1.41 m**) | r = +0.393 |
+
+On solo-01 the independent solve *agrees* with the model: given this
+reconstruction, the dancer really does recede 8 m. So the swing is not a
+weak-perspective artefact that better camera fitting removes — the per-frame
+body itself is inconsistent with a dancer standing in one place. (Two cheaper
+fixes were tried first and both failed: rescaling every frame to a common
+metric body size, which is reprojection-preserving and therefore cannot
+contradict the image, moved solo-01's depth range only 7.75 → 7.80 m; placing
+the body on its own view ray at a clip-constant depth widened the floor
+estimate's lowest-quartile spread from 0.117 m to 0.284 m.)
+
+**3. The raw image says the dancer does not move like that.** Over solo-01 the
+detector bbox *bottom* stays at 779–894 px while its *top* swings 215–631 px.
+Feet planted, head dropping — a dancer getting low in one spot. Walking 8 m
+away would raise the feet in frame, and it does not happen. No cuts either
+(largest frame-to-frame bbox change is 82 px across smooth ramps). The
+reconstruction is turning "got low" into "moved away", which is also the same
+root cause as the grounding drift above, seen from the other side.
+
+**Decision: leave the dancer pinned, honestly.** Composing `pred_cam_t` would
+make the dancer slide metres backwards every time they crouch, and land jumps
+wherever the bbox happened to be — the §7h failure applied to trajectory, and
+the most visible kind. Pinned-in-place is a visible limitation; sliding is a
+confident lie. Same rule, same answer as the floor.
+
+**What a follow-on gets, so nothing is re-derived:**
+
+- **Verified projection model.** `u = fx·X/Z + cx`, `v = fy·Y/Z + cy` with the
+  principal point at the **image centre** reproduces `pred_keypoints_2d` from
+  `pred_keypoints_3d + pred_cam_t` at **0.00 px** median error on real solo-07
+  output. The obvious wrong guess, the crop bbox centre, gives 277.78 px.
+- **Real intrinsics, now in the contract.** `focal_length` in the npz is the
+  pipeline's own FOV estimate and is *exactly* constant per clip (one unique
+  value across all 291 solo-01 / 436 solo-07 person records): 1174.88 px on
+  solo-01, 1173.14 px on solo-07. `api.py` emitted a self-described placeholder
+  (`fx = fy = max(w, h)`) that was 12.8% low; it now emits the measured value
+  via `grounding.camera_intrinsics_from_clip`.
+- **`GroundingResult.evidence`**, populated *even when the verdict is `none`*:
+  the fitted `PlaneFit` (normal, point, inliers, RMS, tilt), per-track per-frame
+  per-foot contact weights, the contact points they refer to, and the foot
+  visibility mask. A refused plane is refused as a product claim, not as a
+  number.
+- **Camera height and tilt:** tilt relative to the body frame is measurable
+  (9.2° on solo-01, 10.5° on solo-07, from the fitted normal). Camera *height*
+  is not recoverable without trustworthy depth, so it is not reported rather
+  than guessed.
+
+**`camera_to_world` stays identity**, and that is a statement, not laziness:
+this document's "world space" IS the exported GLB's character-local frame,
+which is what `root_trajectory` and `grounding.floor_plane` are both expressed
+in, so the document is self-consistent. Writing a real camera extrinsic while
+the body is still pinned at the origin would make it internally inconsistent,
+not more truthful.
