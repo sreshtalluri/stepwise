@@ -103,6 +103,8 @@ def _seed_lesson(api, clip_id, job_id, fp=None):
     r[f"/{clip_id}.motion-result.json.gz"] = b"gz"
     r[f"/{clip_id}.export-manifest.json"] = b"{}"
     r[f"/{clip_id}.performance.json"] = b"{}"
+    # Derived from the audio of the person's video, so it must go with the rest.
+    r[f"/{clip_id}.beats.json"] = b"{}"
     r[f"/{job_id}.job-meta.json"] = json.dumps({"clip_id": clip_id}).encode()
     r[f"/{job_id}.job-status.json"] = json.dumps({
         "schema_version": "1.0.0", "job_id": job_id, "state": "succeeded",
@@ -206,7 +208,7 @@ def test_expiry_and_takedown_delete_the_same_set(api):
     import retention
     listing = ["abc.npz", "abc_track1.glb", "abc_track2.glb",
                "abc.motion-result.json.gz", "abc.export-manifest.json",
-               "abc.performance.json", "abc.last-access.json",
+               "abc.performance.json", "abc.beats.json", "abc.last-access.json",
                "job_abc.job-status.json", "job_abc.job-meta.json",
                "other_track1.glb"]
     paths = retention.clip_artifact_paths(listing, "abc", "job_abc")
@@ -214,7 +216,7 @@ def test_expiry_and_takedown_delete_the_same_set(api):
     assert "/other_track1.glb" not in flat, "must not delete another lesson's dancer"
     for expected in ("/abc.mp4", "/abc.npz", "/abc_track1.glb", "/abc_track2.glb",
                      "/abc.motion-result.json.gz", "/abc.export-manifest.json",
-                     "/abc.performance.json", "/abc.last-access.json",
+                     "/abc.performance.json", "/abc.beats.json", "/abc.last-access.json",
                      "/job_abc.job-status.json", "/job_abc.job-meta.json"):
         assert expected in flat, f"{expected} would survive deletion"
 
