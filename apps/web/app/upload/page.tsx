@@ -26,6 +26,47 @@ export default function UploadPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [url, setUrl] = useState("");
+  const [invite, setInvite] = useState("");
+
+  /**
+   * The pasted-link door. Unlike a file, there is nothing to show the learner
+   * while this runs — the service has to fetch the video before there is a
+   * clip at all — so the button states what it is doing and the wait is a few
+   * seconds, not a few minutes. Measured against the builder's own clips: 1–3s
+   * when the link is already a lesson, 8–10s when it has to be fetched.
+   *
+   * Failure text comes from the service and is rendered as-is. The service is
+   * the only thing that saw the failure, and inventing a friendlier local
+   * sentence for it is exactly the §7h mistake — see lib/copy.ts's note.
+   */
+  async function handleLink() {
+    setError(null);
+    if (!url.trim()) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/clips/link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Invite-Code": invite },
+        body: JSON.stringify({ url: url.trim() }),
+      });
+      const body = (await res.json()) as {
+        job_id?: string;
+        detail?: { error?: { message?: string } };
+      };
+      if (!res.ok) {
+        setBusy(false);
+        setError(body.detail?.error?.message ?? copy.linkErrors.unreachable);
+        return;
+      }
+      // No blob URL to hand the processing screen: the clip lives on the
+      // service, and ProcessingScreen already falls back to fetching it.
+      router.push(`/job/${body.job_id}`);
+    } catch {
+      setBusy(false);
+      setError(copy.linkErrors.unreachable);
+    }
+  }
 
   async function handleFile(file: File) {
     setError(null);
@@ -45,8 +86,12 @@ export default function UploadPage() {
     setBusy(true);
     try {
       const body = new FormData();
-      body.append("video", file);
-      const res = await fetch("/api/jobs", { method: "POST", body });
+      // Field name and route both match services/motion-api's `POST /clips`.
+      // They did not before: this posted `video` to `/api/jobs`, which is not
+      // an endpoint the service has, so the file door has been 404ing since
+      // W7 built it against the fixture. Found while wiring the link door.
+      body.append("file", file);
+      const res = await fetch("/api/clips", { method: "POST", body });
       if (!res.ok) throw new Error(String(res.status));
       const { job_id: jobId } = (await res.json()) as { job_id: string };
       // Not revoked: the processing screen plays this immediately, so there is
@@ -95,6 +140,48 @@ export default function UploadPage() {
           }}
         />
       </div>
+
+      <section className="link-ingest">
+        <h2 className="constraints-heading">{copy.link.heading}</h2>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleLink();
+          }}
+        >
+          <label className="sr-only" htmlFor="clip-url">
+            {copy.link.placeholder}
+          </label>
+          <input
+            id="clip-url"
+            type="url"
+            inputMode="url"
+            autoComplete="off"
+            placeholder={copy.link.placeholder}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <label className="sr-only" htmlFor="invite-code">
+            {copy.link.inviteLabel}
+          </label>
+          <input
+            id="invite-code"
+            type="text"
+            autoComplete="off"
+            placeholder={copy.link.invitePlaceholder}
+            value={invite}
+            onChange={(e) => setInvite(e.target.value)}
+          />
+          <button type="submit" className="btn" disabled={busy || !url.trim()}>
+            {copy.link.submit}
+          </button>
+        </form>
+        <p className="meta">{copy.link.gated}</p>
+        {/* The link rights line sits with the link field, not with the file
+            one: the two make different claims and must not be read as one.
+            See lib/copy.ts and docs/research/link-ingestion.md. */}
+        <p className="meta rights">{copy.link.rights}</p>
+      </section>
 
       {error && (
         <p role="alert" className="form-error">

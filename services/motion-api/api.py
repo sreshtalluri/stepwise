@@ -50,6 +50,7 @@ catching re-encodes (and says so in the log rather than pretending).
 from __future__ import annotations
 
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -61,11 +62,12 @@ from pathlib import Path
 from typing import Optional
 
 import modal
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 import fingerprint
+import ingest
 import motion_result
 import retention
 
@@ -146,26 +148,89 @@ class DispatchResponse(BaseModel):
     deduplicated: bool = False
 
 
-def _find_existing(fp: dict) -> dict | None:
-    """The canonical lesson for this content, if there is a usable one.
+def _usable(entry: dict) -> bool:
+    """Does this index entry still point at a lesson we can actually serve?
 
-    'Usable' is checked against live state, not just the index: the entry must
-    point at a job that actually succeeded and has not been taken down. A stale
-    index entry therefore degrades to "reconstruct it again" -- which costs
-    $0.08 -- and can never serve a lesson that is gone.
+    Checked against live state, not just the index: the entry must point at a
+    job that actually succeeded and has not been taken down. A stale index
+    entry therefore degrades to "reconstruct it again" -- which costs $0.08 --
+    and can never serve a lesson that is gone.
     """
+    clip_id, job_id = entry.get("clip_id"), entry.get("job_id")
+    if not clip_id or not job_id:
+        return False
+    if _volume_read_json(results_volume, f"/{clip_id}.removed.json") is not None:
+        return False  # taken down: never resurrect it, and never dedupe onto it
+    status = _volume_read_json(results_volume, f"/{job_id}.job-status.json")
+    return bool(status and status.get("state") == "succeeded")
+
+
+def _find_existing(fp: dict) -> dict | None:
+    """The canonical lesson for this *content*, if there is a usable one."""
     for entry in retention.read_index(results_volume):
-        if not fingerprint.same_clip(entry, fp):
-            continue
-        clip_id, job_id = entry.get("clip_id"), entry.get("job_id")
-        if not clip_id or not job_id:
-            continue
-        if _volume_read_json(results_volume, f"/{clip_id}.removed.json") is not None:
-            continue  # taken down: never resurrect it, and never dedupe onto it
-        status = _volume_read_json(results_volume, f"/{job_id}.job-status.json")
-        if status and status.get("state") == "succeeded":
+        if fingerprint.same_clip(entry, fp) and _usable(entry):
             return entry
     return None
+
+
+def _find_by_source(key: str) -> dict | None:
+    """The canonical lesson for this *link*, if there is a usable one.
+
+    The cheaper of the two dedupe layers and the reason it exists: a source_key
+    match is settled before anything is downloaded, so pasting a link someone
+    already turned into a lesson costs one metadata request and no transfer --
+    ours or the platform's.
+    """
+    for entry in retention.read_index(results_volume):
+        if entry.get("source_key") == key and _usable(entry):
+            return entry
+    return None
+
+
+def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict,
+                        source_key: str | None = None) -> DispatchResponse:
+    """The single path from "we have the bytes" to "a job is running".
+
+    Both front doors -- an uploaded file and a pasted link -- end here, so
+    there is exactly one place that mints a job, one index shape, and one set
+    of artifact names. That is what keeps a takedown complete: a lesson has one
+    clip_id no matter which door it came through, so removing it removes it.
+    """
+    job_id = f"job_{clip_id}"  # resumable: DESIGN.md §7c's copyable link is just this job_id
+    with uploads_volume.batch_upload(force=True) as batch:
+        batch.put_file(tmp_path, f"/{clip_id}.mp4")
+
+    # job_id -> clip_id is needed later (retry, result-building) without
+    # parsing it back out of the job_id string -- write it once, here.
+    retention.write_json(results_volume, f"/{job_id}.job-meta.json", {"clip_id": clip_id})
+    entry = dict(fp, clip_id=clip_id, job_id=job_id, created_at=time.time())
+    if source_key:
+        entry["source_key"] = source_key
+    retention.write_index(results_volume, retention.read_index(results_volume) + [entry])
+
+    # The race, handled rather than assumed away. Two people pasting the same
+    # link at the same moment both get this far, because the index entry that
+    # would have stopped the second one is written after a multi-second
+    # download. They agree on clip_id (it is derived from the link), so they
+    # can never produce two lessons -- the worst case is one wasted GPU run.
+    # This read closes most of that window: if the first job has already
+    # written its "queued" document, the second request adopts it instead of
+    # spawning again.
+    #
+    # ponytail: best-effort, and deliberately so. run_clip writes that document
+    # from inside a container via a mounted Volume, so there is a real
+    # propagation delay in which this read returns nothing for a job that does
+    # exist -- the same read-after-write window run_clip's own `uploads.reload()`
+    # exists for. Losing the race costs $0.08 and produces no wrong state, so
+    # the honest fix (a lease in a store with compare-and-set) is not worth
+    # standing up a second storage system for. Revisit if duplicate spawns show
+    # up in practice.
+    if _volume_read_json(results_volume, f"/{job_id}.job-status.json") is not None:
+        print(f"[dispatch] {job_id} is already running -- adopting it, not spawning again")
+        return DispatchResponse(clip_id=clip_id, job_id=job_id, deduplicated=True)
+
+    _run_clip_fn().spawn(clip_id=clip_id, job_id=job_id)
+    return DispatchResponse(clip_id=clip_id, job_id=job_id)
 
 
 @app.post("/clips", response_model=DispatchResponse)
@@ -194,22 +259,163 @@ async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
             return DispatchResponse(clip_id=existing["clip_id"],
                                     job_id=existing["job_id"], deduplicated=True)
 
-        clip_id = uuid.uuid4().hex
-        job_id = f"job_{clip_id}"  # resumable: DESIGN.md §7c's copyable link is just this job_id
-        with uploads_volume.batch_upload() as batch:
-            batch.put_file(tmp_path, f"/{clip_id}.mp4")
+        return _store_and_dispatch(tmp_path, uuid.uuid4().hex, fp)
     finally:
         os.unlink(tmp_path)
 
-    # job_id -> clip_id is needed later (retry, result-building) without
-    # parsing it back out of the job_id string -- write it once, here.
-    retention.write_json(results_volume, f"/{job_id}.job-meta.json", {"clip_id": clip_id})
-    retention.write_index(results_volume, retention.read_index(results_volume) + [
-        dict(fp, clip_id=clip_id, job_id=job_id, created_at=time.time()),
-    ])
 
-    _run_clip_fn().spawn(clip_id=clip_id, job_id=job_id)
-    return DispatchResponse(clip_id=clip_id, job_id=job_id)
+# ---------------------------------------------------------------------------
+# POST /clips/link -- the pasted-TikTok front door.
+#
+# PRD §5 lists paste-a-link as out of v1, and §8's milestone D parks it in the
+# buffer. This ships it early because it is the MVP's actual front door as the
+# builder describes it, and the scope note in PRD §5 was updated in the same
+# commit rather than left contradicting the code.
+#
+# **The rights question here is NOT the one rights-and-privacy.md answered.**
+# That document analysed people *uploading* clips. Fetching on a stranger's
+# behalf from a platform whose terms forbid automated downloading is a
+# different act with a different posture, and the conclusions there do not
+# transfer. docs/research/link-ingestion.md is the analysis that covers it, and
+# its finding is that this is defensible for an invite-only pilot and NOT
+# cleared for public launch. The invite gate below is what makes that
+# distinction a property of the code rather than of an intention.
+#
+# Why server-side rather than fetching in the browser: a browser cannot do it
+# at all (CORS, and no extractor), and shipping an extractor to the client
+# would put the fetch on the visitor's IP under their address while we keep the
+# result -- worse for them and no better for us. Doing it here means one place
+# to audit, one place to rate-limit, and one place to turn off.
+# ---------------------------------------------------------------------------
+
+class LinkRequest(BaseModel):
+    url: str
+
+
+def _refuse(e: ingest.FetchRefused) -> HTTPException:
+    """A FetchRefused as HTTP, carrying the job-status error object verbatim.
+
+    422 rather than a per-code status: the structured `error` is the thing the
+    client renders, and it is exactly job-status.schema.json's error shape, so
+    the failure screen that already handles a failed job handles this too
+    without a second vocabulary.
+    """
+    print(f"[ingest] refused: {e.code} (retryable={e.retryable})")
+    return HTTPException(422, detail={"error": e.as_error()})
+
+
+def _clip_id_for_source(key: str) -> str:
+    """One canonical clip_id per source link.
+
+    Derived, not minted, and this is load-bearing: it is what makes two people
+    pasting the same link at the same moment land on one lesson even when the
+    index lookup that should have caught it loses the race. One lesson means
+    one takedown -- a removal reaches everyone who pasted that link, which is
+    the whole argument for content-addressing in the first place
+    (OPEN-DECISIONS.md D7).
+
+    **The trade, stated rather than buried.** An uploaded clip's link is a
+    128-bit uuid4 and is not guessable. A link-ingested clip's is derivable by
+    anyone who knows the source URL. For the invite-only pilot that is a small
+    exposure on already-public source material, and it cuts the useful way too:
+    a dancer who finds their own TikTok reconstructed here can reach the
+    removal path without needing anyone to hand them a link. It is not the
+    right property for a public launch with no accounts, because today anyone
+    holding a lesson link can remove it (D5/D7). Recorded in
+    docs/research/link-ingestion.md as a D5 dependency, not smuggled in.
+    """
+    return hashlib.sha256(key.encode()).hexdigest()[:32]  # uuid4().hex's shape
+
+
+@app.post("/clips/link", response_model=DispatchResponse)
+def ingest_clip_link(request: LinkRequest,
+                     x_invite_code: str | None = Header(default=None)) -> DispatchResponse:
+    if not ingest.invite_code_ok(x_invite_code):
+        # Not 404-disguised: someone who was given a code and typed it wrong
+        # deserves to know which thing failed. File upload is still open, and
+        # the message says so rather than leaving them stuck.
+        raise HTTPException(403, detail={"error": {
+            "code": "invite_required",
+            "message": "Links are open to invited testers right now. "
+                       "You can still add a video file.",
+            "retryable": False,
+        }})
+
+    try:
+        info = ingest.probe(request.url)
+    except ingest.FetchRefused as e:
+        raise _refuse(e) from None
+
+    key = ingest.source_key(info)
+
+    # Layer 1: the same link, already a lesson. Settled before any download.
+    hit = _find_by_source(key)
+    if hit:
+        print(f"[dedupe] url hit: {key} -> {hit['clip_id']} -- nothing fetched")
+        return DispatchResponse(clip_id=hit["clip_id"], job_id=hit["job_id"],
+                                deduplicated=True)
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    try:
+        try:
+            ingest.download(request.url, tmp_path)
+        except ingest.FetchRefused as e:
+            raise _refuse(e) from None
+
+        fp = fingerprint.fingerprint(tmp_path)
+
+        # The metadata gate already refused anything yt-dlp said was over 60 s.
+        # This catches the case where it would not say: ffprobe now knows, and
+        # dispatching here would hand back a lesson for a silently trimmed
+        # dance. Same 0.5 s tolerance the upload screen uses.
+        measured = fp.get("duration_s")
+        if measured is not None and measured > ingest.MAX_CLIP_SECONDS + 0.5:
+            raise _refuse(ingest.FetchRefused(
+                "clip_too_long",
+                f"That video is {int(measured)} seconds. Up to 60 works -- "
+                "trim it to the part you want to learn and upload that.",
+                False))
+
+        # Layer 2: the same dance, reached by a different route -- someone
+        # uploaded this file yesterday, or pasted a re-upload of it under a
+        # different id. Costs the download but still no GPU.
+        existing = _find_existing(fp)
+        if existing:
+            print(f"[dedupe] content hit via link {key}: reusing "
+                  f"{existing['clip_id']} -- no GPU run dispatched")
+            # Teach the URL layer what the content layer just worked out, so
+            # the next paste of this link stops at layer 1 and never downloads.
+            # This is also what keeps the two layers converging on ONE clip_id
+            # rather than quietly maintaining two ideas of the same lesson.
+            _stamp_source_key(existing["clip_id"], key)
+            return DispatchResponse(clip_id=existing["clip_id"],
+                                    job_id=existing["job_id"], deduplicated=True)
+
+        clip_id = _clip_id_for_source(key)
+        if _volume_read_json(results_volume, f"/{clip_id}.removed.json") is not None:
+            # This link was turned into a lesson and that lesson was taken
+            # down. D7 decided a re-upload of removed content is reconstructed
+            # afresh rather than blocked, because keeping a blocklist means
+            # retaining a derivative of exactly what someone asked us to
+            # delete. A fresh random clip_id makes that true here too -- the
+            # tombstone keeps its own id and its own 410 forever.
+            clip_id = uuid.uuid4().hex
+        return _store_and_dispatch(tmp_path, clip_id, fp, source_key=key)
+    finally:
+        os.unlink(tmp_path)
+
+
+def _stamp_source_key(clip_id: str, key: str) -> None:
+    """Record that `key` resolves to an existing lesson. Best-effort."""
+    entries = retention.read_index(results_volume)
+    changed = False
+    for entry in entries:
+        if entry.get("clip_id") == clip_id and entry.get("source_key") != key:
+            entry["source_key"] = key
+            changed = True
+    if changed:
+        retention.write_index(results_volume, entries)
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +592,25 @@ def _touch(clip_id: str) -> None:
 # separate resolution step, and streams bytes directly since there is no S3
 # to presign against yet, see the storage-decision docstring above).
 # ---------------------------------------------------------------------------
+
+@app.get("/jobs/{job_id}/video")
+def get_job_video(job_id: str) -> Response:
+    """The clip itself, addressed by job_id instead of asset id.
+
+    W7's ProcessingScreen plays the learner's own file from a local blob URL
+    and falls back to this while the job runs (DESIGN.md §7c: the video is
+    useful immediately, there is no dead time). A pasted link has no local
+    blob -- the visitor never held the file -- so for the link path this
+    fallback is not a fallback, it is the only source, and without it the
+    "your clip plays the whole time it is working" promise is not kept for
+    half the front door.
+
+    A thin alias rather than a second implementation: it resolves job_id to
+    clip_id and hands off to `get_asset`, so the tombstone check and the 410
+    behaviour are the same code and cannot drift apart.
+    """
+    return get_asset(f"video:{_clip_id_for(job_id)}")
+
 
 @app.get("/assets/{asset_id:path}")
 def get_asset(asset_id: str) -> Response:

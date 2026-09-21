@@ -61,7 +61,8 @@ modal deploy modal_app.py          # api.py looks up run_clip via Function.from_
 ```
 
 Endpoints: `POST /clips` (multipart upload -> dispatches, returns `job_id`
-immediately), `GET /jobs/{job_id}` (poll -- the real job-status.schema.json
+immediately), `POST /clips/link` (paste a TikTok/YouTube URL -- see below),
+`GET /jobs/{job_id}` (poll -- the real job-status.schema.json
 document, unmodified), `GET /jobs/{job_id}/result` (once succeeded -- the
 assembled, schema-validated `MotionResult`), `POST /jobs/{job_id}/retry`
 (only for `retryable: true` failures), `GET /assets/{asset_id}` (resolves a
@@ -104,6 +105,52 @@ See `api.py`'s module docstring for the object-storage decision (Modal
 Volumes, not S3) and the known scope boundary in `motion_result.py`
 (per-joint visibility/suppression and true world-space root placement are
 Milestone A/W9 work, not built here).
+
+## Paste a link (`ingest.py`, `POST /clips/link`)
+
+The MVP's front door. Needs the `yt-dlp` binary on PATH (`uv tool install yt-dlp`),
+and is given **no credentials of any kind** -- no cookies, no `--netrc`, no
+browser cookie import. A platform that demands a login gets a refusal.
+
+```sh
+STEPWISE_INVITE_CODES=pilot-w12 .venv/bin/python -m uvicorn api:app --port 8811
+
+curl -X POST localhost:8811/clips/link \
+  -H 'Content-Type: application/json' -H 'X-Invite-Code: pilot-w12' \
+  -d '{"url":"https://www.tiktok.com/t/ZP83Enx4b/"}'
+```
+
+**Read `docs/research/link-ingestion.md` before changing any of this.** Both
+platforms' terms prohibit automated downloading. This is scoped to the
+invite-only W12 pilot and is not cleared for public launch; `docs/TASKS.md`
+carries the tripwire. **Closed by default** -- with `STEPWISE_INVITE_CODES`
+unset the endpoint refuses everything. File upload is not gated.
+
+Three things worth knowing:
+
+- **Normalisation is yt-dlp's `(extractor, id)` pair**, not a URL regex. A
+  share link, the full `@user/video/...` URL and a tracking-parameter variant
+  all resolve to one `source_key`, so pasting the same video twice in any two
+  forms lands on one lesson.
+- **`clip_id` is derived from that key**, not minted. That is what stops two
+  simultaneous pastes of one link becoming two lessons when the index lookup
+  loses the read-after-write race. The trade -- the lesson link is computable
+  from the source URL -- is in that document's §7a and is a D5 dependency.
+- **Refusals happen before the download where they can.** yt-dlp's metadata
+  carries `duration` and `live_status`, so an over-length video or a live
+  stream costs one ~1.5 s metadata request and no transfer.
+
+Failure codes are mapped in `ingest.classify_fetch_error`, which only names a
+reason it can actually observe: TikTok returns "your IP address is blocked" for
+a video id that never existed, and YouTube returns "This video is unavailable"
+for both a private video and one that never existed, so neither is relayed as a
+cause. Anything unclassifiable becomes `fetch_failed` and says the fetch failed,
+not why.
+
+```sh
+python3 -m pytest test_ingest.py -q           # 20 tests, no network
+STEPWISE_LIVE=1 python3 -m pytest test_ingest.py -q   # + 3 that hit TikTok
+```
 
 ## Dedupe, retention, and removal
 
