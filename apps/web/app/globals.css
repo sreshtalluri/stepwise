@@ -1,4 +1,7 @@
-/* Tokens are DESIGN.md §3 and §5 verbatim. Do not invent values here. */
+/* Design tokens — docs/DESIGN.md §3 (colour), §5 (type), §9 (motion).
+   This file is the only place the tokens are declared; every surface reads them.
+   Values copied verbatim from DESIGN.md — do not re-pick them by eye. */
+
 :root {
   --paper: #f2efe9;
   --paper-sunk: #e7e1d6;
@@ -9,26 +12,494 @@
   --ink-muted: #6b635c;
   --ink-faint: #9a9188;
 
+  /* Fallback dancer colours (DESIGN.md §3). The per-lesson accent is sampled
+     from the clip and arrives on MotionResult.accent_color.hex; surfaces that
+     have a clip override --accent inline. --dancer-1 is the fallback. */
+  --dancer-1: #e8952f;
+  --dancer-2: #1e7a6f;
+  --dancer-3: #c2417e;
+  --dancer-4: #3f51b5;
+  --accent: var(--dancer-1);
+
   --font-display: "Cabinet Grotesk", "Switzer", system-ui, sans-serif;
   --font-ui: "Switzer", system-ui, sans-serif;
 
-  --ease: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --t: 160ms var(--ease);
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
-html, body {
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui);
-  -webkit-font-smoothing: antialiased;
+  font-weight: 400;
+  line-height: 1.5;
+  font-feature-settings: "tnum" 1; /* tabular figures — DESIGN.md §5 */
 }
 
-/* DESIGN.md §9: MOTION_INTENSITY 3. The contact shadow keeps moving under
-   reduced-motion because it is information; only the transitions stop. */
-@media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; animation: none !important; }
+a {
+  color: inherit;
+  text-decoration: none;
 }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* --- shared chrome ------------------------------------------------------- */
+
+.wrap {
+  max-width: 1400px; /* DESIGN.md §6 */
+  margin: 0 auto;
+  padding: 0 clamp(20px, 4vw, 48px);
+}
+
+.btn {
+  display: inline-block;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 12px;
+  padding: 16px 26px;
+  font-weight: 600;
+  font-size: 16px;
+  min-height: 56px;
+  transition: transform var(--t);
+}
+
+.btn:active {
+  transform: scale(0.98) translateY(1px); /* DESIGN.md §8 */
+}
+
+.btn-ghost {
+  background: none;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.btn-lg {
+  padding: 20px 34px;
+  font-size: 17px;
+  min-height: 64px;
+}
+
+.meta {
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+}
+
+.muted {
+  color: var(--ink-muted);
+}
+
+.faint {
+  color: var(--ink-faint);
+}
+
+/* The dark recessed stage — the mirror (DESIGN.md §2, §10). */
+.stage {
+  position: relative;
+  overflow: hidden;
+  background: radial-gradient(
+    ellipse at 50% 42%,
+    var(--stage) 38%,
+    var(--stage-deep) 100%
+  );
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: inset 0 2px 16px rgba(0, 0, 0, 0.55);
+  touch-action: none;
+}
+
+.stage-label {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  font-size: 0.8125rem;
+  color: var(--ink-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
+}
+
+/* --- marketing site (DESIGN.md §7e: loud, and only here) ----------------- */
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+
+.logo {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 20px;
+  letter-spacing: -0.03em;
+}
+
+.site-nav-right {
+  display: flex;
+  align-items: center;
+  gap: clamp(14px, 3vw, 28px);
+  font-size: 0.9375rem;
+  color: var(--ink-muted);
+}
+
+.btn-sm {
+  padding: 10px 16px;
+  font-size: 0.875rem;
+  min-height: 0;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 32px;
+  align-items: center;
+  padding-top: 24px;
+}
+
+@media (min-width: 900px) {
+  .hero {
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 48px;
+    padding-top: 40px;
+  }
+}
+
+.display {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(3rem, 7.5vw, 5rem); /* 48px → 80px */
+  line-height: 0.94;
+  letter-spacing: -0.045em;
+}
+
+.display em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.lede {
+  font-size: 1.0625rem;
+  color: var(--ink-muted);
+  margin-top: 20px;
+  line-height: 1.55;
+  max-width: 38ch; /* body copy max 65 characters — DESIGN.md §5 */
+}
+
+.hero-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 26px;
+}
+
+/* view chips on a stage */
+.chip {
+  flex: 1;
+  background: rgba(242, 239, 233, 0.13);
+  border: 1px solid rgba(242, 239, 233, 0.24);
+  border-radius: 8px;
+  padding: 10px 0;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: #ede7dd;
+  transition: background var(--t);
+}
+
+.chip-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #231a0c;
+  font-weight: 600;
+}
+
+/* dark full-bleed proof band */
+.band {
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 20px;
+  padding: clamp(24px, 4vw, 40px);
+  margin-top: clamp(40px, 7vw, 80px);
+}
+
+.band-heading {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(1.75rem, 3.6vw, 2.75rem);
+  letter-spacing: -0.03em;
+  line-height: 1.08;
+}
+
+.band-body {
+  font-size: 1rem;
+  color: #bdb5aa;
+  margin-top: 12px;
+  max-width: 52ch;
+  line-height: 1.55;
+}
+
+.band-pair {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+@media (min-width: 720px) {
+  .band-pair {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.band-panel {
+  position: relative;
+  overflow: hidden;
+  height: 200px;
+  border-radius: 12px;
+  background: #2a2622;
+}
+
+.band-caveat {
+  font-size: 0.8125rem;
+  color: var(--ink-faint);
+  margin-top: 16px;
+  max-width: 62ch;
+}
+
+.section-heading {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(1.75rem, 3.6vw, 2.75rem);
+  letter-spacing: -0.03em;
+}
+
+.steps {
+  margin-top: clamp(40px, 7vw, 80px);
+}
+
+.steps ol {
+  list-style: none;
+  margin-top: 8px;
+}
+
+.step-row {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.step-num {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.25rem;
+  color: var(--accent);
+  width: 28px;
+  flex: none;
+}
+
+.step-title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.step-body {
+  font-size: 0.9375rem;
+  color: var(--ink-muted);
+  margin-top: 4px;
+  line-height: 1.5;
+  max-width: 58ch;
+}
+
+.close-band {
+  background: var(--paper-sunk);
+  border-radius: 20px;
+  padding: clamp(30px, 5vw, 56px);
+  text-align: center;
+  margin: clamp(40px, 7vw, 80px) 0 64px;
+}
+
+.close-heading {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(2rem, 4.5vw, 3.25rem);
+  letter-spacing: -0.035em;
+}
+
+/* --- app screens (DESIGN.md §7e: calm — no display type past the title) --- */
+
+.app-screen {
+  padding-top: 32px;
+  padding-bottom: 64px;
+  max-width: 1100px;
+}
+
+.app-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  letter-spacing: -0.02em;
+}
+
+.dropzone {
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  background: var(--paper-sunk);
+  padding: 40px 20px;
+  text-align: center;
+  margin-top: 24px;
+}
+
+.form-error {
+  margin-top: 14px;
+  color: var(--ink);
+  background: var(--paper-sunk);
+  border-left: 3px solid var(--accent);
+  padding: 12px 14px;
+  border-radius: 0 8px 8px 0;
+  max-width: 60ch;
+}
+
+.constraints {
+  margin-top: 32px;
+}
+
+.constraints-heading {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.constraints ul {
+  list-style: none;
+  margin-top: 8px;
+}
+
+.constraints li {
+  color: var(--ink-muted);
+  padding: 5px 0;
+  max-width: 60ch;
+}
+
+.rights {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.processing-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  margin-top: 24px;
+}
+
+@media (min-width: 900px) {
+  .processing-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+  }
+}
+
+.tools {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tool {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper-sunk);
+  padding: 0 8px;
+  min-height: 88px; /* DESIGN.md §8 — the phone is across the room */
+  font-size: 0.9375rem;
+  font-weight: 600;
+  transition: transform var(--t);
+}
+
+.tool:active {
+  transform: scale(0.98) translateY(1px);
+}
+
+.stages {
+  margin-top: 28px;
+  max-width: 60ch;
+}
+
+.progress {
+  height: 3px;
+  background: var(--paper-sunk);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 400ms var(--ease);
+}
+
+.stages ol {
+  list-style: none;
+  margin: 16px 0;
+  line-height: 1.9;
+}
+
+.stage-done {
+  color: var(--ink-muted);
+}
+
+.stage-now {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Phone: the nav is the logo and one action. The two section links collide
+   with the wordmark below ~600px and are reachable by scrolling anyway. */
+@media (max-width: 599px) {
+  .site-nav-link {
+    display: none;
+  }
+}
+
+
+/* ===================================================================
+   Lesson viewer (W5). Scoped to .lesson: the viewer and the marketing
+   site both want .stage / .stages / .btn / .chip and mean different
+   things by each. All viewer markup lives under <main class="lesson">.
+   =================================================================== */
 
 .lesson {
   max-width: 1400px;
@@ -40,21 +511,21 @@ html, body {
 }
 
 .lesson-head { padding: 0 2px; }
-.title {
+.lesson .title {
   font-family: var(--font-display);
   font-weight: 700;
   font-size: clamp(1.5rem, 3vw, 2.25rem);
   letter-spacing: -0.02em;
   line-height: 1.1;
 }
-.sub { font-size: 0.8125rem; color: var(--ink-muted); margin-top: 3px; }
+.lesson .sub { font-size: 0.8125rem; color: var(--ink-muted); margin-top: 3px; }
 
 /* ------------------------------------------------------------------- stages */
 
-.stages { display: flex; flex-direction: column; gap: 10px; }
+.lesson .stages { display: flex; flex-direction: column; gap: 10px; }
 
 /* D2: the two stages start equal and either can be promoted to full height. */
-.stage {
+.lesson .stage {
   position: relative;
   overflow: hidden;
   background: var(--stage);
@@ -62,15 +533,15 @@ html, body {
   border-radius: 14px;
   box-shadow: inset 0 2px 14px rgba(0, 0, 0, 0.55);
   height: 240px;
-  transition: height var(--ease);
+  transition: height var(--t);
 }
-.stage.promoted { height: 62vh; }
-.stage.demoted { height: 96px; }
-.stage canvas { display: block; touch-action: none; }
-.video { width: 100%; height: 100%; object-fit: contain; }
+.lesson .stage.promoted { height: 62vh; }
+.lesson .stage.demoted { height: 96px; }
+.lesson .stage canvas { display: block; touch-action: none; }
+.lesson .video { width: 100%; height: 100%; object-fit: contain; }
 
 /* Mockup finding §13.5: anything near the canvas edge clips. Keep a safe inset. */
-.view-label {
+.lesson .view-label {
   position: absolute;
   top: 10px;
   left: 12px;
@@ -79,7 +550,7 @@ html, body {
   color: var(--ink-faint);
   pointer-events: none;
 }
-.swap {
+.lesson .swap {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -91,11 +562,11 @@ html, body {
   padding: 7px 11px;
   font: 500 0.75rem var(--font-ui);
   cursor: pointer;
-  transition: background var(--ease);
+  transition: background var(--t);
 }
-.swap:active { transform: translateY(1px) scale(0.98); }
+.lesson .swap:active { transform: translateY(1px) scale(0.98); }
 
-.vignette {
+.lesson .vignette {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -104,7 +575,7 @@ html, body {
 }
 
 /* DESIGN.md §7b: on phone and tablet the second angle is an inset over the first. */
-.inset {
+.lesson .inset {
   position: absolute;
   right: 10px;
   bottom: 10px;
@@ -115,17 +586,17 @@ html, body {
   border: 1px solid rgba(242, 239, 233, 0.22);
   z-index: 3;
 }
-.inset .view-label { top: 6px; left: 8px; font-size: 0.65rem; }
+.lesson .inset .view-label { top: 6px; left: 8px; font-size: 0.65rem; }
 
 /* --------------------------------------------------------------- annotations */
 
-.legend { font-size: 0.8125rem; color: var(--ink-muted); }
-.note { font-size: 0.8125rem; color: var(--ink-muted); }
+.lesson .legend { font-size: 0.8125rem; color: var(--ink-muted); }
+.lesson .note { font-size: 0.8125rem; color: var(--ink-muted); }
 
 /* -------------------------------------------------------------------- chips */
 
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip {
+.lesson .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.lesson .chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -137,21 +608,21 @@ html, body {
   color: var(--ink);
   font: 500 0.9375rem var(--font-ui);
   cursor: pointer;
-  transition: background var(--ease), color var(--ease);
+  transition: background var(--t), color var(--t);
 }
 /* State is weight and paper/sunk contrast, never a second saturated colour. */
-.chip.on { background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 600; }
-.chip small { font-size: 0.72rem; font-weight: 400; color: var(--ink-faint); }
-.chip.on small { color: #c9c2b7; }
-.chip:active { transform: translateY(1px) scale(0.98); }
-.swatch { width: 12px; height: 12px; border-radius: 50%; }
+.lesson .chip.on { background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 600; }
+.lesson .chip small { font-size: 0.72rem; font-weight: 400; color: var(--ink-faint); }
+.lesson .chip.on small { color: #c9c2b7; }
+.lesson .chip:active { transform: translateY(1px) scale(0.98); }
+.lesson .swatch { width: 12px; height: 12px; border-radius: 50%; }
 
 /* ----------------------------------------------------------- overview bar */
 
-.overview { position: relative; padding: 8px 0 2px; }
-.scrub { width: 100%; accent-color: var(--ink); height: 28px; }
+.lesson .overview { position: relative; padding: 8px 0 2px; }
+.lesson .scrub { width: 100%; accent-color: var(--ink); height: 28px; }
 /* Loop de-emphasizes the outside; it never highlights the inside. */
-.loop-out {
+.lesson .loop-out {
   position: absolute;
   top: 8px;
   bottom: 2px;
@@ -163,12 +634,12 @@ html, body {
 
 /* ---------------------------------------------------------------- transport */
 
-.transport {
+.lesson .transport {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 9px;
 }
-.btn {
+.lesson .btn {
   min-height: 88px; /* DESIGN.md §8 — the phone is on the floor three metres away */
   border: 1px solid var(--line);
   border-radius: 13px;
@@ -183,29 +654,29 @@ html, body {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   cursor: pointer;
-  transition: background var(--ease), color var(--ease);
+  transition: background var(--t), color var(--t);
 }
-.btn small { font-weight: 400; font-size: 0.72rem; color: var(--ink-muted); }
-.btn.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
-.btn.active small { color: #c9c2b7; }
-.btn:active { transform: translateY(1px) scale(0.98); }
+.lesson .btn small { font-weight: 400; font-size: 0.72rem; color: var(--ink-muted); }
+.lesson .btn.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.lesson .btn.active small { color: #c9c2b7; }
+.lesson .btn:active { transform: translateY(1px) scale(0.98); }
 
 /* ------------------------------------------------- tablet / landscape phone */
 
 @media (min-width: 768px) {
-  .stages { flex-direction: row; }
-  .stages > .stage { flex: 1; height: 44vh; }
-  .stage.promoted { flex: 3; }
-  .stage.demoted { flex: 1; height: 44vh; }
-  .transport { grid-template-columns: repeat(5, 1fr); }
+  .lesson .stages { flex-direction: row; }
+  .lesson .stages > .stage { flex: 1; height: 44vh; }
+  .lesson .stage.promoted { flex: 3; }
+  .lesson .stage.demoted { flex: 1; height: 44vh; }
+  .lesson .transport { grid-template-columns: repeat(5, 1fr); }
 }
 
 /* -------------------------------------------------------------- desktop */
 
 @media (min-width: 1024px) {
   .lesson { padding: 22px 24px 28px; }
-  .stages > .stage { height: 56vh; }
-  .stage.demoted { height: 56vh; }
+  .lesson .stages > .stage { height: 56vh; }
+  .lesson .stage.demoted { height: 56vh; }
   /* The second angle earns an equal panel instead of an inset. */
   .lesson[data-compare="on"] .inset {
     /* relative, not static: the inset's own "estimated view" label is absolutely

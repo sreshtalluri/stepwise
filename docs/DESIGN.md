@@ -231,7 +231,7 @@ The strongest asset is a **finished lesson a stranger can use before uploading a
 
 - **No account needed to try.** Stated plainly under the primary action.
 - The primary action is "Add your own clip" — specific, not "Get started".
-- "Works best with" states the real constraints in plain sentences: one dancer, filmed from the front, up to 60 seconds, camera held still. Framed as *what works*, not as *what we reject*.
+- "Works best with" states the real constraints in plain sentences: filmed from the front on one camera held still, up to 60 seconds, no cuts between shots. One dancer or several — the learner picks whose body they learn from (§7a2). Framed as *what works*, not as *what we reject*. **Corrected 2026-09-18:** this line used to say "one dancer" as a hard constraint; PRD §5 "Multi-dancer, revised 2026-09-18" removed that cap.
 - The rights line sits here, once, in plain language: "Only upload video you have the right to use."
 - Below the fold: one real before/after (a move that is unclear in the video, clear in 3D) — the single most persuasive thing available, and it must be a real clip, not a mock.
 
@@ -325,7 +325,7 @@ Plain, active, sentence case. The interface's voice, not a person's.
 - "Upload a clip" not "Get started"
 - "Feet not visible in this clip" not "Warning: incomplete data"
 - "This angle is estimated" not "⚠️ ESTIMATED VIEW"
-- Empty upload screen states what works: "One dancer, up to 60 seconds, filmed from the front. Hold the camera still."
+- Empty upload screen states what works: "Filmed from the front, on one camera held still. Up to 60 seconds, with no cuts between shots. One dancer or several — you pick whose body you learn from." (Corrected 2026-09-18 — see §7d.)
 - Errors say what happened and what to do, and never apologize.
 - Banned: elevate, seamless, unleash, next-gen, effortless, powerful, revolutionize. No exclamation marks. No emoji as icons — SVG only (Phosphor, `weight="regular"`, one weight everywhere).
 
