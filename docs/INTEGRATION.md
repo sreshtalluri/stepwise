@@ -224,6 +224,23 @@ viewer's per-region masking (W10's 18 `region_*` meshes, W5's
 `mesh.visible` toggling) has nothing per-joint to drive it, and the real answer
 is sitting unread in the same file.
 
+**Measured on the real solo-01 run** (§5), by feeding the merged `api.py` the
+merged pipeline's actual npz:
+
+| | observed | uncertain | absent |
+|---|---|---|---|
+| What the shipped `MotionResult` says | 36,957 | 508 | 127 |
+| What W9 computed, in the same file | 27,178 | 9,388 | 1,026 |
+
+And the shape of it, which is the part that matters:
+
+- `MotionResult`: **296 of 296 frames carry exactly one distinct visibility
+  value across all 127 joints.** Every frame is all-observed or all-uncertain.
+- W9's `smoothed`: **203 of 296 frames carry more than one.**
+
+So the pipeline works out per-joint occlusion for 203 frames and throws it away
+in all 203.
+
 Not wired here deliberately. It is a two-line lookup, but it changes what every
 lesson renders — occluded limbs would start disappearing — and that is a
 product-visible behaviour change that should be made and validated by the people
@@ -232,7 +249,35 @@ hookup point is `api.py:241`: read `data["smoothed"].item()` alongside
 `data["per_frame"]` and take the per-joint arrays from it when the track is
 present.
 
-### 3.4 Smaller notes
+### 3.4 Two finished packages that nothing imports
+
+**Severity: architectural gap, not a defect. Not fixed — nobody owns the seam.**
+
+`packages/navigation` (W6, 17 passing tests, ~4,000 lines) and
+`packages/beat-detect` (W11, 2 passing tests) are both complete, both tested, and
+**referenced by no other package in the tree.** Grepping `apps/web` for
+`@stepwise/navigation` returns only `next/navigation`. Grepping the service for
+`beat_detect` returns nothing.
+
+The chain that would connect them does not exist at any link:
+
+- `beat_detect.propose_grid()` takes a video path and returns a beat grid. No
+  Modal function calls it, and `run_clip` never touches audio.
+- `MotionResult` has **no beats or counts field at all** — grep the schema for
+  `beat` or `count` and there are zero hits. So even if the grid were computed,
+  the frozen contract has nowhere to put it.
+- `<LessonNavigator>` is fully controlled and wants that structure from its host.
+  `LessonViewer.tsx` (W5) instead grew its own transport, chips and scrub bar
+  inline.
+
+So the count strip, parts and loops — PRD §5's authoring surface — exist twice
+in spirit and zero times in the running product. This is not something an
+integration merge can decide: it needs a contract change (a new `beats`/`counts`
+block in `MotionResult` v1.1, or a separate document), which is exactly the kind
+of decision `docs/OPEN-DECISIONS.md` exists for and which is not recorded there.
+Flagged, not invented.
+
+### 3.5 Smaller notes
 
 - **`evaluation/clips.yaml`** merged cleanly. `w8-worker` repurposed
   `violator-duet` (a duet is no longer a violation under the revised 6-dancer
@@ -287,7 +332,156 @@ must run first — the viewer tests read `public/fixtures/`. Routes built: `/`,
 
 ## 5. End-to-end on Modal
 
-<!-- RUN RESULTS -->
+`modal run modal_app.py::run_clip --clip-id solo-01` on the merged branch, which
+dispatches `export_clip_gltf` itself (W4). Real GPU session, real clip, real
+GLB. Job `job_solo-01_1789952505`.
+
+**It completed.** Final job-status document:
+
+```json
+{"schema_version": "1.0.0", "job_id": "job_solo-01_1789952505",
+ "state": "succeeded", "stage_message": "", "progress": 1.0,
+ "error": null, "retry_count": 0}
+```
+
+### The merged pipeline, in the order it actually ran
+
+```
+done: 291/296 frames reconstructed, 146.5s total (2.02 fps), peak VRAM 3.69 GB
+  bone lengths, track 1: 117 bones fixed, worst frame off by 2.36x,
+                         192/291 frames carry an uncertain joint
+  crops, track 1: hands 289/291 frames, feet 278/291 frames
+  smoothing track 1: 27178 observed, 9388 uncertain, 1026 absent joint-samples
+                     (17 physically impossible)
+SAVED /results/solo-01.npz
+track 1: 291/296 samples observed (first at 1, leading gap back-filled)
+track 1: shape from 291 frames, ||shape||=2.845, per-frame std mean=0.199;
+         rest-mesh displacement mean=0.2491 cm max=2.1354 cm
+SAVED /results/solo-01_track1.glb (single mesh, pre-region-split)
+SAVED /results/solo-01_track1.glb (region-split)
+```
+
+Bone constraint, then hand crops, then smoothing — §2.2's fix, confirmed on real
+hardware rather than by reading the diff. `27178 + 9388 + 1026 = 37592 = 296 × 127`,
+so every joint-sample is accounted for.
+
+### Cost and runtime
+
+| | |
+|---|---|
+| GPU | L40S (`GPU_TIER` default) |
+| Clip | `solo-01`, 19.7 s, 576×1024, sampled at 15 fps → 296 frames |
+| Reconstruction wall time | **146.5 s** (2.02 fps) |
+| Peak VRAM | **3.69 GB** |
+| **Cost, reconstruction** | **$0.1279** (`solo-01.performance.json`) |
+| Image build, this pass | ~13 min, one-off — `filterpy` (W9) and `pygltflib` (W10) landed in already-built layers and invalidated the cache below them, including the Detectron2 compile |
+
+2.02 fps against the 3.79 fps in `docs/GATE-REPORT.md`'s W1 measurement. Not
+investigated: the gate figure predates the bone, hand-crop and smoothing stages
+and this was a cold container on a freshly rebuilt image. Recorded as measured,
+not explained.
+
+### Verification of the exported GLB
+
+Measured directly on the downloaded `solo-01_track1.glb` (1.94 MB), not inferred
+from logs.
+
+| Check | Result |
+|-------|--------|
+| GLB produced | yes, 1,936,912 bytes, one animation, 218 channels |
+| **Non-finite animation values** | **0 / 222,296** |
+| **Non-finite mesh vertices** | **0 / 30,498 components** (10,166 verts) |
+| **Region meshes** | **18 / 18 present and named `region_*`**, every one with a non-zero triangle count |
+| **Shape bake applied** | yes — shape fitted from all 291 observed frames, `‖shape‖ = 2.845`, rest-mesh displacement 0.2491 cm mean / 2.1354 cm max |
+| Bone-length stability | see below — **not** the flat 0.0000% the brief expects |
+
+The finite-check guard (the one that exists because a past bug wrote NaN into
+frame 0 and made the whole model invisible) survived the merge and is still on
+the path: it is inside `export_clip_gltf` and runs before every write.
+
+Region triangle counts, for the record:
+`torso_lower 766, torso_upper 154, neck 85, head 2152, collar_l 125, collar_r
+124, upperarm_l 204, upperarm_r 204, forearm_l 370, forearm_r 370, hand_l 1764,
+hand_r 1764, thigh_l 228, thigh_r 228, shin_l 334, shin_r 334, foot_l 294,
+foot_r 294`. W10's `RegionMappingError` path did not fire — the tolerant matcher
+resolved all 18 canonical bones against the real `lod3.fbx` skeleton, which the
+W10 report had flagged as its single biggest unverified assumption. **That
+assumption is now verified on real hardware.**
+
+### The HTTP layer, against real merged output
+
+The last seam worth checking is whether `api.py` — W4's layer, written before
+half of the branches below it existed — can still turn this npz into a document.
+Fed the real `solo-01.npz` and the real export manifest, with only the two Modal
+volume reads stubbed:
+
+```
+MotionResult VALIDATES against the frozen v1 schema
+persons=1  samples=296  joints=127
+person.animation = {'clip_id': 'solo-01_track1', 'glb_asset_id': 'solo-01_track1.glb'}
+grounding.status = none
+shape_params.source = well_observed_frames
+crop_rects: 289/296 frames have a hand rect
+```
+
+One call exercises five packages at once and they agree: W8's per-person
+`animation` block is populated, `shape-params` reports
+`source = well_observed_frames` rather than `default_assumed` (so the bake is
+being credited honestly), `hands` supplies 289 crop rects, and `grounding` runs
+a real floor solve. That solve returns `none` —
+`reason: contacts_not_spread_over_clip`, contacts covering 6 s of a 20 s clip
+against a 0.6 threshold, with inlier RMS 0.01338 m and tilt 3.078°. That is the
+documented E6 behaviour, not a merge failure: the floor is found and then
+honestly refused for want of temporal coverage.
+
+### Bone lengths are not flat, and it is not the merge's fault
+
+Expected CV 0.0000%. Measured across all 119 real bones in the GLB:
+
+```
+CV: mean = 2.1426%   median = 0.0002%   max = 73.7855%
+bones with CV < 0.01%: 72 / 119
+```
+
+The median is essentially zero and the major limbs are *exactly* zero
+(`l_lowleg`, `r_lowleg`, `r_foot`, the upleg twists: 0.0000%). The constraint
+works. The mean is dragged up by two groups:
+
+1. **Three sub-3 mm procedural joints** — `c_neck_twist0_proc` (2.58 mm mean),
+   `l_talocrural` / `r_talocrural` (1.69 mm). At that scale a relative CV is
+   not a meaningful number.
+2. **Every finger bone below both wrists**, all at an *identical* 1.2855% —
+   identical because it is one uniform rescale, not per-bone noise. The cause
+   is visible in the GLB: `r_wrist` and `l_wrist` are the only two nodes in the
+   file carrying an animated **`scale`** channel, varying 0.8925 → 0.9643 over
+   the clip.
+
+`skel_state` is `(J, 8)` = 3 translation + 4 quaternion + **1 scale**.
+`constrain_clip` rewrites `skel_state[:, :3]` only — deliberately, and its
+docstring gives the reason: *"the node translation channels carry the full 24.4%
+CV, so this is the channel that reaches the viewer."* That was true when it was
+measured. Index 7 is a second channel that also reaches the viewer, and a
+time-varying scale on a wrist rescales its entire hand subtree.
+
+**Checked against a control.** `solo-01-bonefix_track4.glb` — the
+`bone-constraints` branch's own verification export, made before any of this
+merge — measures mean 2.1426%, median 0.0002%, max 73.7808%, 72/119 under
+0.01%. Identical. **This is pre-existing behaviour, not an integration
+regression**, and it is reported here because the brief's "CV 0.0000%" is a
+claim about the limbs, not about the skeleton. Left unfixed: constraining the
+scale channel is the bone-constraint module's decision, and that branch has an
+agent on it.
+
+---
+
+### Verdict
+
+The merged pipeline runs end to end on real hardware and produces a valid,
+renderable, finite GLB with all four features (shape bake, bone constraint, hand
+crops, region split) present and composing in the right order. One real ordering
+defect was found and fixed before this run; one signal was reconnected; one
+computed-and-discarded output and one pre-existing bone-scale gap are reported
+and left to their owners.
 
 ---
 
