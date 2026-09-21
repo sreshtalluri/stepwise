@@ -26,6 +26,18 @@
 # would drag in Pillow and scipy for what is four lines of numpy. The two
 # hashes are implemented directly in fingerprint.py against numpy, which is
 # already here for the npz.
+#
+# boto3 is the S3 client for Cloudflare R2 (storage.py). No Cloudflare-specific
+# SDK: R2 speaks S3, and the whole escape hatch if Cloudflare's CDN terms ever
+# become a real block is `rclone sync` to another S3-compatible provider
+# (docs/research/infrastructure.md §3). A vendor SDK would quietly spend that.
+#
+# psycopg is the Postgres driver for the job-state backend (jobstore.py). The
+# `pool` extra matters more than it looks: this service scales to zero and back,
+# and a fresh TLS handshake on every 2-second job poll is not free. `binary`
+# ships a self-contained wheel with libpq vendored, so nothing here needs a
+# system library -- which is the property that let it into a Modal image at all.
+#
 fastapi>=0.115
 uvicorn>=0.30
 python-multipart>=0.0.9
@@ -33,3 +45,5 @@ modal>=1.5
 numpy>=2.0
 jsonschema>=4.23
 pydantic>=2.9
+boto3>=1.35
+psycopg[binary,pool]>=3.2

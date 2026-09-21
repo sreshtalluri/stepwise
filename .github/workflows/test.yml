@@ -1,0 +1,160 @@
+# The 157-test matrix, on every push and pull request.
+#
+# A test gate and nothing else. **No deploy-on-merge** (infrastructure.md §7
+# sketches deploy-staging.yml and deploy-prod.yml; neither is built, because
+# neither should exist before a staging environment does -- a workflow that
+# deploys somewhere that does not exist is not automation, it is a broken
+# build nobody can fix).
+#
+# The repo is public, so Actions minutes are free and there is no reason to be
+# clever about what runs. Every suite runs on every push; nothing is pruned by
+# changed paths, because the one thing this exists to catch is exactly the
+# cross-package breakage that path filters hide (docs/INTEGRATION.md §9 is a
+# list of things that only broke once the pieces met).
+#
+# What is NOT run here, and why:
+#   * Anything needing a GPU. modal_app.py's CV functions need an L40S and a
+#     Modal token. `modal run modal_app.py::run_clip --clip-id solo-01` stays a
+#     deliberate, paid act -- see docs/DEPLOYMENT.md.
+#   * e2e_check.py. It costs a real GPU reconstruction against the live API.
+#   * test_fingerprint.py's measurement mode, which wants four real eval clips
+#     out of a Modal Volume. Its two unit tests run; `STEPWISE_FP_CLIPS` is
+#     what turns on the measurement, and it is not set here.
+
+name: tests
+
+on:
+  push:
+  pull_request:
+
+# A second push to the same branch makes the first run's answer worthless.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: python (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    strategy:
+      # One red suite must not hide the state of the others -- the whole point
+      # of a matrix here is that the report says which half of the repo broke.
+      fail-fast: false
+      matrix:
+        suite: [motion-api, motion-contract, beat-detect, cv-tools]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # test_fingerprint.py decodes frames by invoking the ffmpeg binary. It is
+      # optional at runtime (dedupe degrades to exact-sha256 and says so), but
+      # here it must be present or the tests silently measure the degraded path.
+      - name: ffmpeg
+        if: matrix.suite == 'motion-api'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: motion-api
+        if: matrix.suite == 'motion-api'
+        run: |
+          uv venv --python 3.12
+          uv pip install -r services/motion-api/requirements-api.txt pytest scipy filterpy pygltflib trimesh
+          cd services/motion-api
+          ../../.venv/bin/python -m pytest -q \
+            test_grounding.py test_retention.py test_fingerprint.py \
+            test_api_rotations.py test_schema.py tools/test_region_mask.py
+
+      - name: motion-contract (python)
+        if: matrix.suite == 'motion-contract'
+        run: |
+          uv venv --python 3.12
+          uv pip install pytest jsonschema
+          cd packages/motion-contract/python && ../../../.venv/bin/python -m pytest -q
+
+      - name: beat-detect
+        if: matrix.suite == 'beat-detect'
+        run: |
+          uv venv --python 3.12
+          uv pip install pytest librosa numpy soundfile
+          cd packages/beat-detect/python && ../../../.venv/bin/python -m pytest -q
+
+      - name: cv tools
+        if: matrix.suite == 'cv-tools'
+        run: |
+          uv venv --python 3.12
+          # No torch, no detectron2, no onnxruntime: these suites are the pure
+          # numpy/scipy halves of the pipeline (smoothing, bone constraints,
+          # hand crops, the RTMO detector's geometry). Installing the pinned CV
+          # stack would turn a 40-second job into a 15-minute one to run the
+          # same 41 tests.
+          uv pip install pytest numpy scipy filterpy opencv-python-headless
+          cd services/motion-api/vendor/fast-sam-3d-body
+          ../../../../.venv/bin/python -m pytest -q tools
+
+  # The database tests, against the same plain Postgres 16 the schema was
+  # developed on. Neon is not involved and deliberately never will be here:
+  # the migration uses no Neon-specific feature, and this job is what keeps
+  # that true (test_schema.py::test_no_neon_specific_syntax_in_any_migration).
+  database:
+    name: postgres schema + job-state backend
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: stepwise
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          uv venv --python 3.12
+          uv pip install -r services/motion-api/requirements-api.txt pytest
+          cd services/motion-api
+          ../../.venv/bin/python -m pytest -q test_schema.py
+        env:
+          DATABASE_URL: postgresql://postgres:stepwise@localhost:5432/postgres
+
+  node:
+    name: node (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [packages/motion-contract, packages/navigation, apps/web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+        working-directory: ${{ matrix.package }}
+      - run: npm test
+        working-directory: ${{ matrix.package }}
+
+  # apps/web has to build and typecheck, not just pass its unit tests: a Next
+  # 16 build failure is exactly the class of breakage INTEGRATION.md §2.1 spent
+  # a day on, and it does not show up in `node --test`.
+  web-build:
+    name: apps/web build + typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+        working-directory: apps/web
+      - run: npm run typecheck
+        working-directory: apps/web
+      - run: npm run build
+        working-directory: apps/web

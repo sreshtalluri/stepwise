@@ -1578,11 +1578,9 @@ api_image = (
     # dedupe silently degrades to exact-sha256 -- and /health says so -- but
     # $0.08 per avoidable reconstruction is worth an apt package.
     .apt_install("ffmpeg")
+    # One dependency list, not two: requirements-api.txt is what a laptop
+    # installs and what this image installs, so they cannot drift.
     .pip_install_from_requirements(os.path.join(MOTION_API_DIR, "requirements-api.txt"))
-    # boto3 for R2 (storage.py); psycopg for the job-state backend (jobstore.py).
-    # Both are pure-Python-plus-wheels and this image is not pinned to anything,
-    # unlike cv_image and gltf_image.
-    .pip_install("boto3", "psycopg[binary]", "psycopg_pool")
     # Mounted so that api.py's own `Path(__file__).parent.parent.parent /
     # "packages" / "motion-contract" / "python"` resolves inside the container
     # exactly as it does on a laptop. Reproducing the repo's shape is cheaper
