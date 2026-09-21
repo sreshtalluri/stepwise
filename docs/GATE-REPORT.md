@@ -586,8 +586,8 @@ Verified on hardware: the 30 fps clip exported as `30.0 fps (591 samples)`,
 code, then checked locally against the downloaded GLBs:
 
 - **interpolation** — 218/218 samplers `LINEAR` on `solo-01` and `solo-07`
-  track 1, 218/218 on the 30 fps export, and 213–214/213–214 on `solo-07`'s
-  three partially-observed tracks. Zero `STEP` remaining.
+  track 1, 218/218 on the 30 fps export, and 213–216/213–216 on `solo-07`'s
+  three partially-observed tracks. Zero `STEP` remaining, across 8 GLBs.
 - **non-finite values — zero**, in all of them. The NaN-frame-0 guard in
   `export_clip_gltf` is untouched and still raises before writing; the rewrite
   adds its own independent finite check afterwards, so a GLB that would render
@@ -602,14 +602,24 @@ code, then checked locally against the downloaded GLBs:
 
 **A real caveat found, and it is not caused by this work.** `solo-07`'s npz on
 the results Volume was **stale — reconstructed before `bone-constraints`
-landed**: measured directly on the npz's own world positions, its bone CV is
+landed**: measured directly on the npz's own world positions, its bone CV was
 19.54% (median 1.84%), versus 0.0003% for `solo-01` and 0.0003% for the 30 fps
 run made today. The export faithfully carried that through, which is correct
 behaviour, but anyone reading an old `solo-07` GLB as evidence of bone
-rigidity would have been misled. Re-run through the full current pipeline this
-pass to refresh it. Worth noting as a general hazard: **the results Volume
-mixes artifacts from different code generations and nothing in a `.npz` records
-which.**
+rigidity would have been misled.
+
+Re-run through the full current pipeline this pass (`run_clip` → chained
+`export_clip_gltf`, which also exercises the whole fixed chain end to end
+rather than just the export stage in isolation). After: bone CV **0.0004%,
+0.0003%, 0.0004%, 0.0005%** on its four tracks — the defect was entirely the
+stale artifact. The refreshed `solo-07` track 1 GLB is `LINEAR`, zero
+non-finite, bone CV 0.0007%, worst absolute spread 0.001046 mm.
+
+Worth recording as a general hazard: **the results Volume mixes artifacts from
+different code generations and nothing in a `.npz` records which.** A
+`pipeline_git_sha` in the npz would make this self-diagnosing; `model_report`
+already carries one in the contract, but it is hardcoded in `api.py` rather
+than captured at reconstruction time, so it does not currently help.
 
 ### 7. Known, measured, disclosed cost of `LINEAR`
 
