@@ -246,7 +246,25 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                     for _ in range(n_joints)
                 ]
                 root_traj.append({
-                    "position": [0.0, 0.0, 0.0],
+                    # Back-filled from this track's first solved placement, not
+                    # the origin.  The contract is explicit that a position on a
+                    # suppressed sample is not a claim, and `out_of_frame` +
+                    # `absent` joints say plainly that nobody was there yet --
+                    # but the origin STOPPED being a neutral placeholder the
+                    # moment world space became the camera's.  It is now a real
+                    # spot in the room, inside the camera, metres from the
+                    # dancer, and a consumer that reads position without first
+                    # reading provenance gets a specific wrong answer instead of
+                    # an obviously empty one.  apps/web's `travelExtent` is
+                    # exactly that consumer: it ranges over every sample, so
+                    # group-synced-01 track 5 -- 261 of its 496 samples are
+                    # leading gap -- would have reported ~6.6 m of travel that
+                    # is entirely this placeholder.  Holding the first real
+                    # position is the same back-fill export_clip_gltf already
+                    # does for skel_state, and it costs no honesty: the sample
+                    # is still `out_of_frame`, still `absent`, still not
+                    # `observed`.
+                    "position": [float(v) for v in held_position] if held_position is not None else [0.0, 0.0, 0.0],
                     "rotation": [0, 0, 0, 1],
                     "provenance": {"observed": False, "interpolated": False, "suppressed": "out_of_frame"},
                 })
