@@ -493,3 +493,425 @@ and left to their owners.
 - `docs/DESIGN.md`, `CLAUDE.md` and `docs/OPEN-DECISIONS.md` carry only the
   edits the merged branches already made to them; this integration pass added
   no new decisions to them of its own.
+
+---
+---
+
+# Second integration pass — branch `integration-2`
+
+Four more branches landed after the first pass merged fourteen. Same exercise,
+same question: **what is broken only once the pieces meet?** This pass found
+one defect of exactly that kind, and it is the worst sort — a clean merge, no
+conflict, no failing test, silently reverting four packages at once (§9.1).
+
+Base: `origin/integration`. Nothing from `main` merged. No branch modified,
+deleted or force-pushed. Everything below is measured on the merged branch,
+including a real Modal L40S session.
+
+---
+
+## 7. Merge order
+
+All four branches are independent of each other — each was cut from something
+already inside `integration` (`bone-constraints`, `w4-jobservice`,
+`w5-viewer`). Ancestry was verified with `git merge-base --is-ancestor` before
+starting; none of the four was already an ancestor of `integration`.
+
+| # | Branch | Cut from | Result |
+|---|--------|----------|--------|
+| 1 | `export-quality`    | `bone-constraints` | 3 conflicts (§8.1, §8.2) |
+| 2 | `world-placement`   | `bone-constraints` | 2 doc conflicts (§8.3); **`api.py` auto-merged** |
+| 3 | `camera-follow`     | `w5-viewer`        | clean (§8.4) |
+| 4 | `caching-retention` | `w4-jobservice`    | 5 conflicts, one of them the whole point of this pass (§9.1) |
+
+Order is deliberate. `caching-retention` moves `_build_motion_result` out of
+`api.py` into a new `motion_result.py`, so it had to go **last**: whatever the
+other three had done to that function needed to be in the tree before it was
+picked up and carried. As §9.1 explains, going last was necessary but nowhere
+near sufficient — git moved the file without any of their work in it.
+
+Every merge is a real merge commit (`--no-ff`).
+
+---
+
+## 8. Conflict resolutions
+
+### 8.1 `modal_app.py` — two post-export GLB passes, and the order matters
+
+`export-quality` adds `_rewrite_interpolation_linear` (pymomentum always emits
+`STEP`; there is no knob, so the sampler mode is patched after the fact).
+`w10-masking` had already added `split_glb_by_region`. Both rewrite the same
+GLB with pygltflib, and the merge had to decide which runs first.
+
+**Region split first, interpolation rewrite last.** The split leaves animation
+samplers untouched but *does* rebuild the binary chunk (it appends accessors
+for the 18 sub-meshes). So either order leaves `LINEAR` in the file — but only
+this order leaves it *verified*: `_rewrite_interpolation_linear` ends by
+re-reading the file and asserting three things (its own rewrite changed no
+binary bytes, every sampler is `LINEAR`, no non-finite float in the chunk), and
+those assertions are worth far more against the bytes actually shipped than
+against an intermediate. As a bonus the finite check now also covers the
+split's new vertex accessors.
+
+There is a real failure mode hiding in this choice: the rewrite's "my rewrite
+must not change the binary chunk" guard runs on a file pygltflib has just
+written, so if a load/save round-trip were not byte-stable on a split output,
+**every export would raise instead of shipping**. That is not obvious from
+reading either branch, so it is now covered by a test rather than by hope:
+`tools/test_region_mask.py::test_region_split_then_interpolation_rewrite_compose`
+builds a synthetic skinned GLB with STEP animation, runs both stages in the
+merged order, and asserts the composition. Confirmed independently by the real
+run: `218/218 samplers rewritten to LINEAR` (§10).
+
+`gltf_image` also needed the union of three branches' additions — W10's
+`add_local_dir`, `export-quality`'s `pygltflib`, and `caching-retention`'s two
+mounts — plus `grounding.py`, for the reason in §9.1.
+
+### 8.2 `OPEN-DECISIONS.md` — an id collision, not a text conflict
+
+`export-quality` appended two new rows numbered **E6** and **E7**. `E6` was
+already taken: `grounding` had used it for world placement, and
+`world-placement` was about to rewrite that same row. Two different decisions
+would have shipped under one id, and the losing one would simply have vanished
+on the next edit.
+
+Renumbered `export-quality`'s pair to **E7** (reconstruction frame rate) and
+**E8** (bone direction in the glTF translation channel), leaving **E6** to
+world placement. `GATE-REPORT.md`'s two citations were updated in the same
+commit, so the prose and the table still agree.
+
+Worth noting for the next parallel batch: nothing prevents this. Branches pick
+the next free id against *their own* base, and two branches cut from the same
+commit will always pick the same one.
+
+### 8.3 `api.py` auto-merged where two branches edited adjacent lines
+
+`export-quality` rewrites the per-joint rotation loop; `world-placement`
+rewrites the `root_trajectory` comment immediately below it. Git merged both
+without a conflict. Checked by hand rather than trusted — the result is
+correct, both survive, and the composition reads properly: the per-joint
+rotations are now parent-relative, and the root's rotation carries a new note
+explaining why it is deliberately *not* converted (the root has no parent, so
+its world rotation already is its local one).
+
+`GATE-REPORT.md` and `DESIGN.md` collided only as appends; all content kept, in
+date order. In `DESIGN.md` one line was not an append (§9.2).
+
+### 8.4 `camera-follow` — clean, but verified against the first pass's fixes
+
+This branch was cut from `w5-viewer` and therefore predates all three of the
+first pass's `apps/web` fixes, so a clean merge is exactly when to look. Both
+risks came back negative:
+
+* every `animation` read is still per-person (`doc.persons[i].animation`), so
+  W8's contract move is not undone — the §3.1 regression did not return;
+* `globals.css` is untouched by this branch, and no `var(--ease)` is used as a
+  duration+curve shorthand — the §2.1 zero-duration trap is not re-armed.
+
+---
+
+## 9. What was broken only in combination
+
+### 9.1 A "verbatim lift" that silently reverted four packages
+
+**Severity: would have shipped a visibly wrong skeleton. Found and fixed.**
+
+This is the finding this whole exercise exists to catch, and it is a cleaner
+specimen than the first pass's §2.2.
+
+`caching-retention` moves the `MotionResult` assembly out of `api.py` into a
+new `services/motion-api/motion_result.py`, so the GPU worker can build the
+document once at export time and the 61 MB npz can then be deleted. The
+module's own docstring says it was *"lifted verbatim out of api.py (W4)"*.
+
+That is true — of `api.py` **as it stood on `w4-jobservice`**, which is where
+the branch was cut. By the time the move landed, four other packages had
+already changed the exact function being moved:
+
+| Package | What `api.py` had gained | What the w4-era copy has instead |
+|---|---|---|
+| `export-quality` | `_local_rotations` — the world-vs-local rotation fix | raw `skel_state` quaternions, i.e. **the bug**, a measured median of **125.7°** wrong per joint below the root |
+| `grounding` | the real floor solve | hardcoded `{"status": "none", "floor_plane": None}` |
+| `grounding` | `camera_intrinsics_from_clip` | the `fx=fy=max(w,h)` placeholder, **12.8% low** on solo-01 |
+| `hands` | per-frame hand/foot crop rects | `[None] * n_samples` |
+| `world-placement` | the corrected `root_trajectory` rationale | the diagnosis that branch had just overturned |
+
+**Git produced no conflict for any of it.** The new file is an add; `api.py`'s
+copy of those functions is a clean delete. There is no textual overlap to
+conflict on, and both halves merge perfectly. Nor does any test catch it: the
+assembly has no unit test, and `test_api_rotations.py` — the one suite that
+would have noticed — imports from `api`, so it would have failed with
+`ImportError` on a missing symbol rather than an assertion about rotations.
+An `ImportError` reads like a trivial path problem and invites exactly the
+wrong fix.
+
+Had this merged as git offered it, the pipeline would have kept exporting a
+correct GLB while **serving a MotionResult describing a different skeleton** —
+the two artefacts of the same clip disagreeing, with nothing failing anywhere.
+
+Resolved by rebuilding `motion_result.py` from the **merged** builder rather
+than taking either side, then re-applying the two things the move actually
+intended:
+
+1. the pure signature (all inputs passed in) and `MotionResultUnavailable` in
+   place of fastapi's `HTTPException`, so the module imports in a container
+   with no web framework;
+2. `shape_params.vector` no longer leaving the server.
+
+`grounding.py` is now mounted into `gltf_image` alongside it — pure numpy, no
+torch, so it costs that image nothing. Verified on the real run: the
+`[grounding]` diagnostics print from the **export** stage, which is the merged
+assembly running on the GPU worker.
+
+`test_api_rotations.py`'s import follows the functions to their new home. Same
+six tests, same assertions, nothing relaxed.
+
+**The general lesson, since this will recur:** "moved verbatim" is a claim
+about a file at a point in time, and a long-lived branch cannot make it about
+the file today. A move is the one refactor git cannot help with — it destroys
+the textual adjacency conflicts are made of. Any branch that relocates a
+function that other branches are editing needs the move re-derived at merge
+time, not replayed.
+
+### 9.2 `DESIGN.md` would have silently restored a retired constraint
+
+**Severity: product copy regression. Caught in the conflict.**
+
+`caching-retention` rewrites the landing-page copy block to add the takedown
+and retention lines. Its version of the neighbouring "Works best with" line
+still says **"one dancer"** — correct when the branch was cut, wrong since PRD
+§5's 2026-09-18 multi-dancer revision, which `integration` already carries.
+
+Taking that side wholesale would have restored a constraint the product no
+longer has, in the one place a first-time visitor reads it, as a side effect of
+a change about retention. Kept `integration`'s corrected line, took
+`caching-retention`'s new rights and retention copy.
+
+Same shape as §9.1: a branch faithfully carrying its own base forward over work
+it never saw.
+
+### 9.3 A test that had never run
+
+**Severity: low, pre-existing on the branch, not a merge break. Fixed.**
+
+`test_fingerprint.py::test_separation` passes `decimals=0` to ffmpeg's
+`testsrc2` filter. `decimals` belongs to `testsrc`; `testsrc2` has no such
+option, so ffmpeg rejects the whole filtergraph and the clip generator raises
+`CalledProcessError`. The test could not have passed on any ffmpeg.
+
+Confirmed pre-existing (the file is byte-identical to `origin/caching-retention`)
+and reported rather than quietly absorbed. Fixed by dropping the invalid
+option — not by relaxing an assertion: the test now actually runs the
+separation it was written to measure, and passes. It is the suite that checks
+dedupe does not fuse two different dances, so leaving it dead was not an option.
+
+### 9.4 Open items, confirmed unchanged
+
+Both first-pass open items were re-checked on the merged branch. **Neither is
+affected by these four merges, and neither is fixed here.**
+
+* **W9's per-joint visibility is still computed and still discarded** (§3.3).
+  The assembly reads `data["per_frame"]` and never `data["smoothed"]`; grep for
+  `smoothed` in `motion_result.py` returns nothing. The real run confirms both
+  halves are live: the npz carries `smoothed` for track 1 with all four
+  per-joint arrays (`visibility`, `suppression`, `prov_observed`,
+  `prov_interpolated`) plus `skel_states`, and the served document still
+  reports one visibility value for the whole body per frame. The hookup point
+  simply moved with the function — it is now in `motion_result.py`, not
+  `api.py:241`. Still a product decision, still unowned.
+* **`packages/navigation` and `packages/beat-detect` are still imported by
+  nothing** (§3.4). Grepping the whole tree for `@stepwise/navigation` and
+  `beat_detect` outside their own directories returns zero hits. A separate
+  agent is reportedly writing the contract; nothing in these four branches
+  touches it.
+
+Also unchanged and re-measured, not re-argued: **bone-length CV is not flat**
+(§5). Measured on this pass's GLB — mean 2.1504%, median 0.0002%, max 74.0992%,
+72/119 bones under 0.01% — against the first pass's 2.1426 / 0.0002 / 73.7855 /
+72. Same distribution, same cause: `l_wrist` and `r_wrist` are the only two
+nodes carrying an animated `scale` channel, which rescales each hand subtree.
+Pre-existing, `bone-constraints`' call, untouched here.
+
+---
+
+## 10. Test matrix
+
+Every suite in the tree, on the merged branch. Python 3.12.
+
+| Suite | First pass | Now | Result |
+|-------|-----------|-----|--------|
+| `packages/motion-contract` — TypeScript (`test/ts/validate.test.ts`) | 14 | 14 | **14 pass** |
+| `packages/motion-contract/python` (`tests/test_validate.py`) | 14 | 14 | **14 pass** |
+| `packages/navigation` (`test/core.test.ts`) | 17 | 17 | **17 pass** |
+| `packages/beat-detect/python` (`tests/test_propose.py`) | 2 | 2 | **2 pass** |
+| `apps/web` — `test/copy.test.ts` | — | 10 | **10 pass** |
+| `apps/web` — `test/logic.test.ts` | — | 4 | **4 pass** |
+| `apps/web` — `lib/motion.test.ts` (grew on `camera-follow`) | 6 | **13** | **13 pass** |
+| `services/motion-api/test_api_rotations.py` (new, `export-quality`) | — | **6** | **6 pass** |
+| `services/motion-api/test_fingerprint.py` (new, `caching-retention`) | — | **2** | **2 pass** (§9.3) |
+| `services/motion-api/test_retention.py` (new, `caching-retention`) | — | **10** | **10 pass** |
+| `services/motion-api/test_grounding.py` | 15 | 15 | **15 pass** |
+| `services/motion-api/tools/test_region_mask.py` | 8 | **9** | **9 pass** (+1, §8.1) |
+| `tools/test_skeleton_constraints.py` | 12 | 12 | **12 pass** |
+| `tools/test_hand_crops.py` | 8 | 8 | **8 pass** |
+| `tools/test_smoothing.py` | 9 | 9 | **9 pass** |
+| `tools/test_process_clip.py` | 5 | 5 | **5 pass** |
+| `tools/test_rtmo_detector.py` | 7 | 7 | **7 pass** |
+| **Total** | **131** | **157** | **157 pass, 0 fail** |
+
+131 → 157 is +26: 18 from the three new suites, +7 on `lib/motion.test.ts`
+(`camera-follow`), +1 added here for the two-stage GLB rewrite (§8.1).
+
+**No test was loosened, skipped or deleted.** Two were changed, neither in a way
+that weakens it: `test_api_rotations.py`'s import follows the functions it tests
+to their new module (§9.1), and `test_fingerprint.py`'s ffmpeg invocation was
+corrected so the test runs at all (§9.3).
+
+**`apps/web`**: `npm run build` and `tsc --noEmit` both clean. `npm run assets`
+must run first. Routes built: `/`, `/upload`, `/job/[jobId]`, `/lessons`,
+`/lesson/[lesson]` ×6.
+
+**Reproducing the Python suites.** Unchanged from §4, plus `python-multipart`
+(`test_retention.py` posts multipart uploads through fastapi), `soundfile` for
+beat-detect, and the `ffmpeg`/`ffprobe` **binaries** on PATH for
+`test_fingerprint.py` — a subprocess dependency, not a Python one.
+
+---
+
+## 11. End-to-end on Modal
+
+`modal run modal_app.py::run_clip --clip-id solo-01` on the merged branch. Real
+L40S session, real clip, real GLB. App `ap-gKY9QRC5YLYqygoy0tzE2s`, final
+job-status `succeeded`, progress `1.0`.
+
+### Measured cost and runtime
+
+| | This pass | First pass |
+|---|---|---|
+| Reconstruction | **87.1 s (3.40 fps)**, 291/296 frames | 146.5 s (2.02 fps) |
+| Wall clock incl. export | **140.9 s** | — |
+| Peak VRAM | **3.69 GB** | 3.69 GB |
+| **Cost** | **$0.0763** | $0.1279 |
+| Image build | none — mounts only | ~13 min |
+
+3.40 fps against the first pass's 2.02 and `GATE-REPORT.md`'s 3.79. The first
+pass's own note applies: that run was a cold container on a freshly rebuilt
+image. This pass changed only mounted files, so nothing rebuilt. Recorded as
+measured, not explained.
+
+### The merged pipeline, in the order it actually ran
+
+```
+done: 291/296 frames reconstructed, 87.1s total (3.40 fps), peak VRAM 3.69 GB
+  bone lengths, track 1: 117 bones fixed, worst frame off by 2.36x,
+                         177/291 frames carry an uncertain joint
+  crops, track 1: hands 289/291 frames, feet 278/291 frames
+  smoothing track 1: 27367 observed, 9200 uncertain, 1025 absent (17 impossible)
+SAVED /results/solo-01.npz
+sample rate from npz timeline: 15.0 fps (296 samples)      <- derived, not hardcoded
+track 1: shape from 291 frames, ||shape||=2.846, rest-mesh mean=0.2492 max=2.1354 cm
+SAVED solo-01_track1.glb (single mesh, pre-region-split)
+track 1: region triangle counts: {18 regions, all non-zero}
+SAVED solo-01_track1.glb (region-split)
+SAVED solo-01_track1.glb (region-split, 218/218 samplers rewritten to LINEAR)
+[grounding] solo-01: none -- contacts_not_spread_over_clip
+[job-status] succeeded 1.0
+```
+
+The `§2.2` stage order survives (spatial → crops → temporal), and the two new
+post-export stages compose in the §8.1 order. The `[grounding]` line printing
+here — from the *export* stage, not the API — is the merged assembly running on
+the GPU worker with `grounding.py` mounted (§9.1).
+
+### Verification of the exported GLB
+
+Measured directly on the downloaded file, not read from the log.
+Reproduce: `python services/motion-api/verify_glb.py <file.glb> --expect-fps 15.0`.
+
+| Check | Result |
+|---|---|
+| GLB produced | yes, **1,937,632 bytes**, 1 animation, 218 channels |
+| **Interpolation** | **LINEAR on 218/218 samplers. Zero STEP.** |
+| **Keyframe rate** | **15.0 fps** (dt = 0.066667 s) — matches the npz's real derived rate |
+| **Non-finite animation values** | **0 / 222,296** |
+| **Non-finite mesh vertices** | **0 / 30,498 components** |
+| **Region meshes** | **18 / 18 present and named `region_*`, none empty** |
+| **Shape bake applied** | yes — fitted over all 291 observed frames, `‖shape‖ = 2.846`, rest-mesh displacement 0.2492 cm mean / 2.1354 cm max |
+| Bone-length CV | mean 2.1504%, median 0.0002%, max 74.0992%, 72/119 under 0.01% — unchanged from §5, pre-existing |
+
+### Verification of the MotionResult
+
+The document the GPU worker materialised and stored — i.e. the one a client
+actually receives, not a reconstruction of it.
+
+```
+MotionResult VALIDATES against the frozen v1 schema
+  persons=1  samples=296  joints=127
+  person.animation      = {'clip_id': 'solo-01_track1', 'glb_asset_id': 'solo-01_track1.glb'}
+  shape_params          = {'source': 'well_observed_frames'}   ('vector' absent)
+  crop_rects            = hands 289/296, feet 278/296
+  camera.intrinsics.fx  = 1174.88        (the placeholder would be 1024.0)
+  grounding.status      = none           (contacts_not_spread_over_clip)
+  non-finite numbers anywhere in the document: 0
+```
+
+Every line above is a package that §9.1 would have silently dropped, still
+present: real intrinsics and a real (honestly refused) floor solve from
+`grounding`, real crop rects from `hands`, the shape source from `shape-params`
+with its vector correctly withheld by `caching-retention`, and the per-person
+animation block from W8.
+
+**The per-joint rotations are the fixed, world-derived ones.** Not inferred —
+both hypotheses were recomputed from the npz and compared against what the
+document actually serves, over 40 frames × 127 joints:
+
+```
+served vs world-derived (fixed) : max per-component difference 0.000e+00
+served vs raw skel_state quats  : median 137.5 deg, max 180.0 deg
+```
+
+Exactly the fixed values, and nowhere near the buggy ones. This is the check
+that would have failed had §9.1 merged as git offered it.
+
+### npz slimming did not break the export
+
+`caching-retention` drops `pred_vertices` and `expr_params` before saving.
+Confirmed on the merged code, three ways:
+
+1. **On the real run.** `solo-01.npz` is **4,416,302 bytes**, down from the
+   61.30 MB the first pass measured — a 92.8% reduction. `pred_vertices` and
+   `expr_params` are absent; `skel_state`, `shape_params`, the crop rects and
+   W9's `smoothed` block (all four per-joint arrays plus `skel_states`) are all
+   still there.
+2. **Byte-identical documents.** Rebuilding the `MotionResult` from that
+   slimmed npz via `api.py`'s fallback path produces **7,153,078 characters,
+   byte-identical** to the 7,153,078 the GPU worker materialised. The two paths
+   agree exactly.
+3. **The invariant, not just this clip.**
+   `services/motion-api/check_npz_slimming.py` builds a fat npz and its
+   stripped twin and asserts the documents are identical and `skel_state` is
+   untouched. Worth having: the merged assembly reads *more* of the npz than
+   `caching-retention`'s copy did (the floor solve reads `raw_detections`), so
+   "the slimming is safe" needed re-checking against the merged reader, not the
+   branch's.
+
+### Verdict
+
+All four branches compose. The exported GLB is finite, LINEAR-interpolated at
+the clip's real 15.0 fps, carries all 18 non-empty region meshes and the baked
+shape; the served MotionResult validates against the frozen contract and
+carries the corrected rotations. One silent four-package reversion was caught
+and undone, one copy regression caught, one never-executed test made to run.
+Both known open items are confirmed unchanged and still unowned.
+
+---
+
+## 12. Ground rules honoured
+
+- Work only on `integration-2`, cut from `origin/integration`. Pushed.
+- `main` never merged. No force-push. No branch modified, renamed or deleted —
+  `export-quality`, `caching-retention`, `camera-follow` and `world-placement`
+  are untouched at the commits they were read from.
+- `docs/DESIGN.md` and `docs/OPEN-DECISIONS.md` carry only the edits the merged
+  branches made to them, plus the E6/E7/E8 renumbering §8.2 forced. This pass
+  opened no decisions of its own and closed none.

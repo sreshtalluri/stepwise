@@ -187,7 +187,7 @@ def test_every_region_bone_maps_to_a_distinct_or_intentionally_shared_joint():
 
 # --------------------------------------------------------- GLB split, end to end
 
-def _build_synthetic_skinned_glb(path: str) -> None:
+def _build_synthetic_skinned_glb(path: str, with_animation: bool = False) -> None:
     """A tiny but real skinned GLB: 5-joint chain (pelvis-spine2-neck-head,
     plus one arm bone off spine2) and a mesh whose vertices are weighted
     toward different joints along that chain, so the split has real work to
@@ -258,9 +258,87 @@ def _build_synthetic_skinned_glb(path: str) -> None:
 
     gltf.scenes.append(g.Scene(nodes=[0, mesh_node_index]))  # root joint (Hips) + mesh node, both top-level
     gltf.scene = 0
+
+    if with_animation:
+        # Stand-in for what pymomentum writes: one translation + one rotation
+        # track per joint, STEP interpolation, which is the thing
+        # `_rewrite_interpolation_linear` exists to fix.
+        n_key = 4
+        times = [i / 15.0 for i in range(n_key)]
+        t_acc = add(times, 5126, "SCALAR")
+        channels, samplers = [], []
+        for j in joint_node_indices:
+            tr = add([[0.1 * j, 0.2 * k, 0.0] for k in range(n_key)], 5126, "VEC3")
+            ro = add([[0.0, 0.0, 0.0, 1.0] for _ in range(n_key)], 5126, "VEC4")
+            for out_acc, path_name in ((tr, "translation"), (ro, "rotation")):
+                samplers.append(g.AnimationSampler(input=t_acc, output=out_acc, interpolation="STEP"))
+                channels.append(g.AnimationChannel(
+                    sampler=len(samplers) - 1,
+                    target=g.AnimationChannelTarget(node=j, path=path_name)))
+        gltf.animations.append(g.Animation(name="clip", channels=channels, samplers=samplers))
+
     gltf.buffers.append(g.Buffer(byteLength=len(blob)))
     gltf.set_binary_blob(bytes(blob))
     gltf.save_binary(path)
+
+
+def test_region_split_then_interpolation_rewrite_compose():
+    """The second integration pass puts `_rewrite_interpolation_linear` AFTER
+    `split_glb_by_region`, so both pygltflib passes run over the same GLB in
+    that order. Two things have to hold and neither is obvious:
+
+      * the split must not disturb animation samplers (it rebuilds the binary
+        chunk to add per-region accessors), and
+      * the rewrite's own guard -- "my rewrite changed the binary chunk,
+        refuse to ship" -- must not misfire on a file the split just wrote.
+        If pygltflib's load/save round-trip were not byte-stable on a split
+        output, every real export would raise instead of shipping.
+
+    Cheap to run, and it fails loudly if the two stages are ever reordered or
+    if either one starts touching the other's data.
+    """
+    import os
+    import sys
+    import tempfile
+
+    import pygltflib as g
+
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from modal_app import _rewrite_interpolation_linear
+
+    with tempfile.TemporaryDirectory() as d:
+        in_path = os.path.join(d, "in.glb")
+        out_path = os.path.join(d, "out.glb")
+        _build_synthetic_skinned_glb(in_path, with_animation=True)
+
+        # Sanity: the stand-in really does start out STEP, like pymomentum's.
+        start = g.GLTF2().load(in_path)
+        assert {s.interpolation for a in start.animations for s in a.samplers} == {"STEP"}
+
+        region_bone_joint = {
+            "pelvis": 0, "spine2": 1, "neck": 2, "head": 3, "left_shoulder": 4,
+            "left_collar": 100, "right_collar": 101, "right_shoulder": 102,
+            "left_elbow": 103, "right_elbow": 104, "left_wrist": 105, "right_wrist": 106,
+            "left_hip": 107, "right_hip": 108, "left_knee": 109, "right_knee": 110,
+            "left_ankle": 111, "right_ankle": 112,
+        }
+        counts = split_glb_by_region(in_path, out_path, region_bone_joint)
+        assert sum(counts.values()) == 8
+
+        # The split leaves the animation alone...
+        mid = g.GLTF2().load(out_path)
+        assert {s.interpolation for a in mid.animations for s in a.samplers} == {"STEP"}
+
+        # ...and the rewrite then succeeds on the split file, guard and all.
+        info = _rewrite_interpolation_linear(out_path)
+        assert info["interpolation"] == "LINEAR"
+        assert info["n_rewritten"] == info["n_samplers"] > 0
+
+        final = g.GLTF2().load(out_path)
+        assert {s.interpolation for a in final.animations for s in a.samplers} == {"LINEAR"}
+        # The geometry the split produced is still there afterwards.
+        assert {n.name for n in final.nodes if n.name and n.name.startswith("region_")} >= {
+            "region_head", "region_neck", "region_upperarm_l"}
 
 
 def test_split_glb_by_region_produces_named_region_meshes():
