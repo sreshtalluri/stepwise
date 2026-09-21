@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Stage3D, { type Focus } from "./Stage3D";
 import {
   defaultPersonIndex,
-  dancerColor,
   viewLabel,
   projectBoxToFrame,
   cropTransform,
@@ -20,6 +19,14 @@ import {
   type Vec3,
   type ViewId,
 } from "../lib/motion";
+import { lesson as lessonCopy } from "../lib/copy";
+import { load, openingStructure, save } from "../lib/structure";
+// Relative, same as lib/motion.ts reaches into motion-contract — there is no
+// workspace root and no node_modules link between these packages.
+import { LessonNavigator } from "../../../packages/navigation/src/LessonNavigator";
+import { loopTimesS, timelineEndS } from "../../../packages/navigation/src/core";
+import type { LessonStructure, LoopSpan, PlaybackMode } from "../../../packages/navigation/src/core";
+import "../../../packages/navigation/src/navigation.css";
 
 /**
  * The video is the clock. `requestVideoFrameCallback` hands back the exact
@@ -31,7 +38,18 @@ import {
  * quantised to whatever the media element last reported) but never wrong by more
  * than a frame or two.
  */
-function useVideoClock(video: HTMLVideoElement | null) {
+function useVideoClock(
+  video: HTMLVideoElement | null,
+  /**
+   * `[start, end)` in timeline seconds, or null. The count-based loop is applied
+   * HERE, inside the one clock this page has, rather than on a `timeupdate`
+   * listener (which fires ~4x a second, so a loop could overshoot by a quarter
+   * of a second — audible on an 8-count) and rather than by running W6's
+   * `advance()` (which is for a host that owns a synthetic clock; this one does
+   * not, and a second clock is the bug this comment exists to prevent).
+   */
+  loopRef: React.RefObject<[number, number] | null>,
+) {
   const timeRef = useRef(0);
   const [displayTime, setDisplayTime] = useState(0);
 
@@ -43,6 +61,14 @@ function useVideoClock(video: HTMLVideoElement | null) {
     let lastPublished = -1;
 
     const publish = (t: number) => {
+      const loop = loopRef.current;
+      if (loop && (t >= loop[1] || t < loop[0] - 0.25)) {
+        // Wrap on the same value the compositor just showed. `currentTime` is
+        // set, not stepped, so no arithmetic accumulates and the loop cannot
+        // drift over forty minutes of repeats.
+        video.currentTime = loop[0];
+        t = loop[0];
+      }
       timeRef.current = t;
       // The scrubber is React state; the 3D is a ref. Only the cheap one re-renders,
       // and only ~10x a second.
@@ -82,7 +108,7 @@ function useVideoClock(video: HTMLVideoElement | null) {
       video.removeEventListener("seeked", onSeek);
       video.removeEventListener("loadedmetadata", onSeek);
     };
-  }, [video]);
+  }, [video, loopRef]);
 
   return { timeRef, displayTime };
 }
@@ -200,11 +226,82 @@ export interface LessonViewerProps {
   videoUrl: string;
   /** One GLB URL per entry in `doc.persons`. */
   glbUrls: string[];
+  /** Scope for the learner's authored counts and parts. See lib/structure.ts. */
+  lessonId: string;
 }
 
-export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonViewerProps) {
+export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }: LessonViewerProps) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
-  const { timeRef, displayTime } = useVideoClock(video);
+  // The end of the clip is the last SAMPLE SLOT, never source_video.duration_s
+  // — the contract says so and W6's whole grid is sized off it.
+  const endS = useMemo(() => timelineEndS(doc.sample_times_s), [doc]);
+
+  // ---- authored structure ------------------------------------------------
+  // Opens on the machine proposal when there is one, and is overwritten by the
+  // learner's own the moment there is one of those. Manual always wins.
+  const opening = useMemo(() => openingStructure(doc, endS), [doc, endS]);
+  const [structure, setStructure] = useState<LessonStructure>(opening.structure);
+  const [authored, setAuthored] = useState(false);
+  // Hydration: the server has no localStorage, so the first client render must
+  // match the server's (the proposal) and the saved copy lands one tick later.
+  // `restored` also guards the save effect below — without it the proposal
+  // would be written over a real authored structure before it was ever read.
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    const saved = load(lessonId, endS);
+    if (saved) {
+      setStructure(saved.structure);
+      setAuthored(saved.authored);
+    }
+    setRestored(true);
+  }, [lessonId, endS]);
+  useEffect(() => {
+    if (restored) save(lessonId, { structure, authored });
+  }, [restored, lessonId, structure, authored]);
+
+  const editStructure = useCallback((next: LessonStructure) => {
+    setStructure(next);
+    setAuthored(true);
+  }, []);
+
+  /**
+   * Whether the counts on screen are still a guess, and how loudly to say so.
+   *
+   * DESIGN.md §7h, aimed at the counts instead of at the 3D: a proposed count 1
+   * presented as a fact is exactly the failure this project guards against, and
+   * the count grid is worse than the mesh for it because a learner who trusts
+   * the wrong count 1 practises the whole dance off the beat. The note is
+   * always visible, not inside the `Counts and parts` disclosure, because the
+   * disclosure is closed by default — a learner who never opens it would never
+   * be told.
+   *
+   * It disappears the moment the learner edits anything. Once the grid is
+   * theirs, still calling it a guess is the same lie the other way round.
+   */
+  const counts = useMemo(() => {
+    if (authored) return { from: "hand" as const, note: null };
+    const perMinute = Math.round(60 / structure.grid.secondsPerCount);
+    const proposed = doc.proposed_counts;
+    if (!proposed) return { from: "hand" as const, note: lessonCopy.counts.placeholder(perMinute) };
+    // 0.5 sits just above the 0.4 the beat module caps itself at whenever the
+    // tempo lands outside the plausible dance band — so every implausible-tempo
+    // proposal reads as weak, which is the case that is usually a half/double
+    // lock rather than a genuinely fast dance.
+    const note = proposed.confidence < 0.5
+      ? lessonCopy.counts.weak(perMinute)
+      : lessonCopy.counts.proposed(perMinute);
+    return { from: "music" as const, note };
+  }, [authored, doc, structure.grid.secondsPerCount]);
+
+  const [mode, setMode] = useState<PlaybackMode>("all");
+  const [loopSpan, setLoopSpan] = useState<LoopSpan>({ startCount: 1, endCount: 8 });
+  /**
+   * The loop the clock enforces, as a ref so changing it never restarts the
+   * rVFC loop. `null` in "play all" — the mode IS the switch, so there is no
+   * second piece of state that could disagree with the button's label (§8).
+   */
+  const loopTimes = useRef<[number, number] | null>(null);
+  loopTimes.current = mode === "loop" ? loopTimesS(structure.grid, loopSpan) : null;
 
   const [selected, setSelected] = useState(() => defaultPersonIndex(doc));
   const [view, setView] = useState<ViewId>("camera");
@@ -212,8 +309,6 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonVi
   const [mirrored, setMirrored] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [playing, setPlaying] = useState(false);
-  const [loop, setLoop] = useState<{ a: number; b: number } | null>(null);
-  const [loopAnchor, setLoopAnchor] = useState<number | null>(null);
   const [absent, setAbsent] = useState<string[]>([]);
   // D2: the two stages start equal and either can be promoted. Remembered per person
   // in v2 — this session-only version is the honest placeholder.
@@ -247,6 +342,7 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonVi
   }, []);
 
   const duration = doc.source_video.duration_s;
+  const { timeRef, displayTime } = useVideoClock(video, loopTimes);
   const crop = useVideoCrop(video, doc, focusRef, follow, mirrored);
   const travels = travelsMeaningfully(doc, selected);
 
@@ -262,64 +358,60 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonVi
     [video, duration],
   );
 
-  // A-B loop. Edges are plain times here; snapping them to count boundaries belongs
-  // to the count strip, which is W6's package (DESIGN.md §7).
-  useEffect(() => {
-    if (!video || !loop) return;
-    const onTime = () => {
-      if (video.currentTime >= loop.b) video.currentTime = loop.a;
-    };
-    video.addEventListener("timeupdate", onTime);
-    return () => video.removeEventListener("timeupdate", onTime);
-  }, [video, loop]);
+  /**
+   * The navigator is fully controlled and does not own the clock, so "play" has
+   * to mean the same thing whichever side asked for it: drive the video element
+   * and let `onPlay`/`onPause` report back. Nothing here mirrors playback state
+   * into a second variable that could disagree with the picture.
+   */
+  const setPlayingFromNav = useCallback(
+    (next: boolean) => {
+      if (!video) return;
+      if (next) void video.play();
+      else video.pause();
+    },
+    [video],
+  );
 
-  const togglePlay = useCallback(() => {
-    if (!video) return;
-    if (video.paused) void video.play();
-    else video.pause();
-  }, [video]);
+  // Entering loop mode with the playhead outside the loop would otherwise wrap
+  // on the next frame and look like a jump nobody asked for. Land on the first
+  // count of the loop instead, which is where a learner means to be.
+  const chooseMode = useCallback(
+    (next: PlaybackMode) => {
+      setMode(next);
+      if (next === "loop") {
+        const [a, b] = loopTimesS(structure.grid, loopSpan);
+        if (timeRef.current < a || timeRef.current >= b) seek(a);
+      }
+    },
+    [structure.grid, loopSpan, seek, timeRef],
+  );
 
-  const cycleLoop = useCallback(() => {
-    if (loop) {
-      setLoop(null);
-      setLoopAnchor(null);
-    } else if (loopAnchor === null) {
-      setLoopAnchor(timeRef.current);
-    } else {
-      const a = Math.min(loopAnchor, timeRef.current);
-      const b = Math.max(loopAnchor, timeRef.current);
-      if (b - a > 0.2) setLoop({ a, b });
-      setLoopAnchor(null);
-    }
-  }, [loop, loopAnchor, timeRef]);
-
-  // DESIGN.md §8 keyboard map. Ignored while a control has focus so the canvas never
-  // traps keys away from the rest of the page (OPEN-DECISIONS C6).
+  /**
+   * DESIGN.md §8 keyboard map, minus the four keys the navigator owns.
+   *
+   * `space`, `L` and `←/→` moved to `<LessonNavigator>` — it is the thing that
+   * knows what a count is, and an arrow key that steps a quarter-second was
+   * always a stand-in for stepping a count (the old comment here said so). Two
+   * listeners on `window` for the same key would both fire, so this is a
+   * deletion, not a duplication. `M`, `S` and `F` stay: mirror, speed and
+   * follow are the viewer's, not the navigation surface's.
+   */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
       const k = e.key.toLowerCase();
-      if (k === " ") { e.preventDefault(); togglePlay(); }
-      else if (k === "m") setMirrored((v) => !v);
-      else if (k === "l") cycleLoop();
+      if (k === "m") setMirrored((v) => !v);
       else if (k === "s") setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s as 1) + 1) % SPEEDS.length]);
       // `F` is an addition to the §8 map, which predates this control.
       else if (k === "f") setFollow((v) => !v);
-      // One count is a W6 concept; until the count strip exists, an arrow steps a
-      // quarter-second so the shortcut is not silently dead.
-      else if (k === "arrowleft") seek(timeRef.current - 0.25);
-      else if (k === "arrowright") seek(timeRef.current + 0.25);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, cycleLoop, seek, timeRef]);
+  }, []);
 
   const grounded = doc.grounding.status === "grounded";
-  const chipColor = useMemo(
-    () => doc.persons.map((_, i) => dancerColor(doc, i, selected)),
-    [doc, selected],
-  );
 
   const stageClass = (which: "3d" | "video") =>
     `stage ${promoted === "none" ? "" : promoted === which ? "promoted" : "demoted"}`;
@@ -395,22 +487,6 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonVi
           bug or — worse — let the crop imply the dancer filled a frame they did not. */}
       {follow && crop.clipped && <p className="note">Dancer at the edge of the shot — the crop stops there.</p>}
 
-      {doc.persons.length > 1 && (
-        <div className="chips dancers" role="group" aria-label="Dancers">
-          {doc.persons.map((person, i) => (
-            <button
-              key={person.person_id}
-              className={`chip ${i === selected ? "on" : ""}`}
-              onClick={() => setSelected(i)}
-              aria-pressed={i === selected}
-            >
-              <span className="swatch" style={{ background: chipColor[i] }} />
-              Dancer {i + 1}
-            </button>
-          ))}
-        </div>
-      )}
-
       <div className="rails">
         <div className="chips views" role="group" aria-label="Views">
           {VIEW_PRESETS.map((preset) => (
@@ -427,33 +503,40 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonVi
         </div>
       </div>
 
-      {/* Tier 1, the overview bar. The count strip that sits under it is W6's package
-          (DESIGN.md §7); this bar is the whole-dance scrubber it describes, and the
-          region outside an active loop is dimmed rather than the inside highlighted. */}
-      <div className="overview">
-        {loop && (
-          <>
-            <span className="loop-out" style={{ left: 0, width: `${(loop.a / duration) * 100}%` }} />
-            <span className="loop-out" style={{ left: `${(loop.b / duration) * 100}%`, right: 0 }} />
-          </>
-        )}
-        <input
-          className="scrub"
-          type="range"
-          min={0}
-          max={duration}
-          step={0.01}
-          value={displayTime}
-          onChange={(e) => seek(Number(e.target.value))}
-          aria-label="Scrub the whole dance"
-        />
-      </div>
+      {/*
+        The two navigation tiers, the dancer chips, the transport modes and the
+        count/part editor are all W6's `<LessonNavigator>` (DESIGN.md §7, §8).
+        It replaces the placeholder overview bar, the dancer chip row and the
+        A–B loop that lived here — the placeholders' own comments said this was
+        coming ("snapping loop edges to count boundaries belongs to the count
+        strip, which is W6's package").
 
-      <div className="transport">
-        <button className={`btn ${playing ? "active" : ""}`} onClick={togglePlay}>
-          {playing ? "Pause" : "Play all"}
-          <small>space</small>
-        </button>
+        It is fully controlled and renderer-free: it takes the time and emits a
+        seek, and this component keeps the only clock on the page. The viewer's
+        own controls — speed, mirror, follow, compare — are handed down through
+        `children` and render inside its transport row, which is the seam W6
+        left for exactly this.
+      */}
+      {counts.note && <p className="note">{counts.note}</p>}
+      <LessonNavigator
+        result={doc}
+        structure={structure}
+        onStructureChange={editStructure}
+        countsFrom={counts.from}
+        timeS={displayTime}
+        onSeek={seek}
+        playing={playing}
+        onPlayingChange={setPlayingFromNav}
+        mode={mode}
+        onModeChange={chooseMode}
+        loop={loopSpan}
+        onLoopChange={setLoopSpan}
+        selectedPersonId={doc.persons[selected]?.person_id ?? doc.persons[0].person_id}
+        onSelectPerson={(id) => {
+          const i = doc.persons.findIndex((p) => p.person_id === id);
+          if (i >= 0) setSelected(i);
+        }}
+      >
         <button
           className="btn"
           onClick={() => setSpeed(SPEEDS[(SPEEDS.indexOf(speed as 1) + 1) % SPEEDS.length])}
@@ -475,10 +558,6 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonVi
           {follow ? "Follow on" : "Follow off"}
           <small>{travels ? `travels ${travelExtent(doc, selected).toFixed(1)} m` : "F"}</small>
         </button>
-        <button className={`btn ${loop ? "active" : ""}`} onClick={cycleLoop}>
-          {loop ? "Loop on" : loopAnchor !== null ? "Set loop end" : "Loop off"}
-          <small>L</small>
-        </button>
         <button
           className={`btn ${compareView ? "active" : ""}`}
           onClick={() => setCompareView(compareView ? null : view === "side" ? "front" : "side")}
@@ -486,7 +565,7 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonVi
           {compareView ? "Compare on" : "Compare off"}
           <small>two angles</small>
         </button>
-      </div>
+      </LessonNavigator>
 
       {compareView && (
         <div className="chips views second" role="group" aria-label="Second angle">

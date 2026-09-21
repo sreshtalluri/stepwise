@@ -15,7 +15,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { MotionResult } from "../../motion-contract/src/ts/generated/motion-result.js";
+import type { MotionResult } from "../../motion-contract/src/ts/generated/motion-result";
 import {
   accentForPerson,
   advance,
@@ -40,9 +40,9 @@ import {
   splitPartAt,
   timeOfCount,
   timelineEndS,
-} from "./core.js";
-import type { LessonStructure, LoopSpan, PlaybackMode } from "./core.js";
-import { copy } from "./copy.js";
+} from "./core";
+import type { LessonStructure, LoopSpan, PlaybackMode } from "./core";
+import { copy } from "./copy";
 
 export interface LessonNavigatorProps {
   result: MotionResult;
@@ -58,6 +58,14 @@ export interface LessonNavigatorProps {
   onLoopChange: (loop: LoopSpan) => void;
   selectedPersonId: string;
   onSelectPerson: (personId: string) => void;
+  /**
+   * Where the grid on screen came from. A machine-proposed grid
+   * (`MotionResult.proposed_counts`) and a hand-set one are the same shape, so
+   * this component cannot tell them apart and the host must say. Defaults to
+   * `"hand"` — the honest answer for every caller that predates beat detection,
+   * and the one that only ever understates.
+   */
+  countsFrom?: "hand" | "music";
   /** The host's own transport controls — speed and mirror belong to the viewer. */
   children?: ReactNode;
 }
@@ -385,7 +393,8 @@ function StructureEditor(p: LessonNavigatorProps & { endS: number }) {
 
       <div className="sw-editor-body">
         <p className="sw-editor-note">
-          {copy.counts.summary(grid.countTotal, perMinute, `${grid.countOneS.toFixed(2)}s`)}
+          {copy.counts.summary(grid.countTotal, perMinute, `${grid.countOneS.toFixed(2)}s`)}{" "}
+          {p.countsFrom === "music" ? copy.counts.byMusic : copy.counts.byHand}
         </p>
 
         <div className="sw-editor-row">
