@@ -116,6 +116,25 @@ export function projectToFrame(doc: MotionResult, p: readonly [number, number, n
   return { x: cx + (fx * cam[0]) / depth, y: cy - (fy * cam[1]) / depth };
 }
 
+/**
+ * `projectToFrame` in [0,1] frame coordinates, origin top-left — the same space
+ * `CropRect` is expressed in, so a projected rectangle and a contract crop rectangle
+ * are directly comparable.
+ *
+ * Normalized against `intrinsics.reference_*_px`, not `source_video.*_px`: the
+ * contract says fx/fy/cx/cy were computed at the reference resolution and must be
+ * scaled if they differ. Dividing by the reference dimensions is that scaling.
+ */
+export function projectToFrameNorm(
+  doc: MotionResult,
+  p: readonly [number, number, number],
+): { x: number; y: number } | null {
+  const uv = projectToFrame(doc, p);
+  if (!uv) return null;
+  const { reference_width_px, reference_height_px } = doc.camera.intrinsics;
+  return { x: uv.x / reference_width_px, y: uv.y / reference_height_px };
+}
+
 export interface DancerScore {
   personIndex: number;
   /** Fraction of joint-samples that are `observed`. */
@@ -136,7 +155,10 @@ export interface DancerScore {
  * ponytail: if this picks wrong on real clips, the weight is the one knob to turn.
  */
 export function scoreDancers(doc: MotionResult): DancerScore[] {
-  const halfDiagonal = Math.hypot(doc.source_video.width_px, doc.source_video.height_px) / 2;
+  // In [0,1] frame space via projectToFrameNorm, so the intrinsics' reference
+  // resolution is applied — mixing pixel coordinates from the intrinsics with
+  // source_video's dimensions is only correct while the two happen to be equal.
+  const halfDiagonal = Math.hypot(1, 1) / 2;
   return doc.persons.map((person, personIndex) => {
     let observed = 0;
     let total = 0;
@@ -149,9 +171,9 @@ export function scoreDancers(doc: MotionResult): DancerScore[] {
     let distSum = 0;
     let distCount = 0;
     for (const rt of person.root_trajectory) {
-      const uv = projectToFrame(doc, rt.position as [number, number, number]);
+      const uv = projectToFrameNorm(doc, rt.position as [number, number, number]);
       if (!uv) continue;
-      distSum += Math.hypot(uv.x - doc.source_video.width_px / 2, uv.y - doc.source_video.height_px / 2) / halfDiagonal;
+      distSum += Math.hypot(uv.x - 0.5, uv.y - 0.5) / halfDiagonal;
       distCount++;
     }
     const coverage = total === 0 ? 0 : observed / total;
@@ -162,6 +184,254 @@ export function scoreDancers(doc: MotionResult): DancerScore[] {
 
 export function defaultPersonIndex(doc: MotionResult): number {
   return scoreDancers(doc).reduce((best, d) => (d.score > best.score ? d : best)).personIndex;
+}
+
+/* --------------------------------------------------------------- follow rig */
+
+/**
+ * The follow camera is a SEPARATE AXIS from the view presets. A preset chooses the
+ * direction you look FROM (azimuth/elevation, plus whatever the learner orbits to);
+ * follow chooses what the camera looks AT and how far away it sits. They compose:
+ * turning follow on never changes your angle, and orbiting never turns follow off.
+ *
+ * WHY THIS IS NOT A HARD LOCK. If the camera keeps the dancer pinned dead centre at a
+ * fixed size, a dancer crossing three metres and a dancer standing still render
+ * IDENTICALLY — the travel is erased, which is the same class of dishonesty as faking
+ * a floor (DESIGN.md §7h, §10). So the rig is deliberately imperfect in two ways:
+ *
+ *   deadzone — the dancer may move freely inside a ball of this radius around the
+ *              current aim point and the camera does not react AT ALL. Footwork in
+ *              place, body sway and the ~0.2 m wander in today's pinned trajectories
+ *              never move the camera. This is also what makes the whole feature a
+ *              trivial no-op while OPEN-DECISIONS E6 (world placement) is unresolved:
+ *              there is no separate "pinned" code path to get wrong.
+ *   lag      — once the dancer does leave the deadzone the camera trails them by
+ *              exactly `deadzone` and approaches with a time constant, so sustained
+ *              travel visibly pushes the dancer off-centre and re-centres when they
+ *              stop. Travel still reads.
+ */
+export interface FollowTuning {
+  /**
+   * Deadzone radius as a fraction of the height currently framed — NOT an absolute
+   * distance. The `hands` and `feet` presets frame a box a fifth the size of the
+   * body, and a deadzone tuned for a whole dancer would swallow every movement a
+   * close-up exists to show. One fraction keeps every preset behaving the same way.
+   */
+  deadzoneFraction: number;
+  /** Floor on the above, metres, so a degenerate box cannot produce a zero deadzone. */
+  minDeadzone: number;
+  /** Seconds to close ~63% of the remaining distance. Position. */
+  tauPosition: number;
+  /** Same, for the framing distance. Much slower — see below. */
+  tauDistance: number;
+  /** Switching between dancers further apart than this is a cut, not a glide. Metres. */
+  cutDistance: number;
+}
+
+/**
+ * Tuned on the travelling fixture at both widths (see the report).
+ *
+ * `deadzoneFraction` 0.19 — about 0.35 m on a 1.85 m dancer, a little wider than a
+ * dancer's own lateral sway and wider than the ~0.2 m wander the shipped fixtures
+ * contain, so today the camera does not move at all.
+ *
+ * `tauPosition` 0.45 s: fast enough that a dancer who walks two metres is not left
+ * clipped against the panel edge, slow enough that the displacement is plainly
+ * visible for about a second first. Under 0.2 s the travel stops reading; over ~0.8 s
+ * the dancer reaches the panel edge before the camera commits.
+ *
+ * `tauDistance` 2.0 s, four times slower, and this asymmetry is the point: the body's
+ * bounding box changes shape every time an arm goes up, and matching that at position
+ * speed makes the camera breathe in and out continuously — far more distracting than
+ * the drift it was meant to fix. At 2 s the rig ignores pose and only answers genuine
+ * changes of depth.
+ */
+export const FOLLOW: FollowTuning = {
+  deadzoneFraction: 0.19,
+  minDeadzone: 0.05,
+  tauPosition: 0.45,
+  tauDistance: 2.0,
+  cutDistance: 2.5,
+};
+
+/** A typical framed body height, metres — only used to state the deadzone in metres. */
+export const BODY_HEIGHT_M = 1.85;
+
+export function deadzoneFor(framedHeight: number, tuning: FollowTuning = FOLLOW): number {
+  return Math.max(tuning.deadzoneFraction * framedHeight, tuning.minDeadzone);
+}
+
+/** Frame-rate-independent exponential approach. `tau` = seconds to close ~63%. */
+export function damp(current: number, target: number, tau: number, dt: number): number {
+  if (tau <= 0) return target;
+  return target + (current - target) * Math.exp(-dt / tau);
+}
+
+export type Vec3 = [number, number, number];
+
+/**
+ * One follow step: deadzone, then damped approach. Returns the new camera aim point.
+ *
+ * `dt` is clamped — a backgrounded tab hands back a delta of seconds, and an
+ * un-clamped exponential then teleports the camera on the first frame after you
+ * return to it.
+ */
+export function followStep(
+  current: Vec3,
+  subject: Vec3,
+  deadzone: number,
+  dt: number,
+  tuning: FollowTuning = FOLLOW,
+): Vec3 {
+  const d: Vec3 = [current[0] - subject[0], current[1] - subject[1], current[2] - subject[2]];
+  const len = Math.hypot(d[0], d[1], d[2]);
+  if (len <= deadzone) return current;
+  // Aim at the EDGE of the deadzone, not at the dancer: at steady state the camera
+  // trails by exactly `deadzone`, which is the lag that keeps travel legible.
+  const k = deadzone / len;
+  const aim: Vec3 = [subject[0] + d[0] * k, subject[1] + d[1] * k, subject[2] + d[2] * k];
+  const step = Math.min(dt, 0.1);
+  return [
+    damp(current[0], aim[0], tuning.tauPosition, step),
+    damp(current[1], aim[1], tuning.tauPosition, step),
+    damp(current[2], aim[2], tuning.tauPosition, step),
+  ];
+}
+
+/**
+ * How far across the floor this dancer ranges over the whole clip, in metres: the
+ * diagonal of the bounding rectangle of `root_trajectory` on the ground plane.
+ *
+ * Whole-clip and therefore stable — a per-frame number would flicker in a label that
+ * DESIGN.md §8 wants readable from three metres away. Y is ignored on purpose: a
+ * dancer who jumps has not travelled.
+ *
+ * NOTE (OPEN-DECISIONS E6): today this is ~0.2 m on every real clip because
+ * `root_trajectory` is pinned to the origin. That is a property of the pipeline, not
+ * of the dancer, which is why `travelsMeaningfully` gates the readout rather than the
+ * viewer printing "0.0 m" and implying it measured stillness.
+ */
+export function travelExtent(doc: MotionResult, personIndex: number): number {
+  const rt = doc.persons[personIndex].root_trajectory;
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const s of rt) {
+    minX = Math.min(minX, s.position[0]);
+    maxX = Math.max(maxX, s.position[0]);
+    minZ = Math.min(minZ, s.position[2]);
+    maxZ = Math.max(maxZ, s.position[2]);
+  }
+  return Math.hypot(maxX - minX, maxZ - minZ);
+}
+
+/**
+ * Whether the document carries enough travel to be worth telling the learner about.
+ * The threshold is the follow deadzone: below it the camera never moves anyway, so
+ * claiming a distance would describe something the learner cannot see.
+ */
+export function travelsMeaningfully(doc: MotionResult, personIndex: number): boolean {
+  return travelExtent(doc, personIndex) > deadzoneFor(BODY_HEIGHT_M);
+}
+
+/* ------------------------------------------------------- video crop-follow */
+
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Project an axis-aligned world box into the source frame and return its [0,1]
+ * bounding rectangle — the body-follow crop for the video pane.
+ *
+ * WHY THIS AND NOT `crop_rects`. The frozen v1 contract only carries `crop_rects.hands`
+ * and `crop_rects.feet`; there is no body rectangle, and unioning hands with feet is
+ * both wrong (it misses a raised head, and both are null on the `failure-lesson`
+ * fixture for most of the clip) and a second source of truth that can drift from the
+ * 3D pane. Projecting the SAME world bounds the 3D camera frames, through the clip's
+ * own camera, keeps the two panes in sync BY CONSTRUCTION — the video crop and the
+ * 3D framing are computed from one number. If the camera solve is wrong the crop is
+ * wrong in exactly the same way the 3D pane is, which is the failure mode you want.
+ *
+ * Returns null if any corner is at or behind the camera plane, where the projection
+ * is meaningless. Callers must hold their last good rectangle rather than jump.
+ *
+ * KNOWN CONSERVATISM: the screen-space bounding box of a projected world box is
+ * larger than the dancer's actual silhouette — the near face projects bigger than the
+ * far face, so a ~0.5 m deep body over-covers by roughly 15% at 3 m. The crop is
+ * therefore slightly wider than it strictly needs to be, and the "at the edge of the
+ * shot" warning fires slightly early. Both errors point the safe way for §7h: show
+ * marginally more real frame than needed, and warn marginally sooner. Tightening this
+ * means projecting the joints themselves, which is only worth it if the slack is ever
+ * measured to matter.
+ */
+export function projectBoxToFrame(doc: MotionResult, min: Vec3, max: Vec3): Rect | null {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let c = 0; c < 8; c++) {
+    const uv = projectToFrameNorm(doc, [
+      c & 1 ? max[0] : min[0],
+      c & 2 ? max[1] : min[1],
+      c & 4 ? max[2] : min[2],
+    ]);
+    if (!uv) return null;
+    x0 = Math.min(x0, uv.x); y0 = Math.min(y0, uv.y);
+    x1 = Math.max(x1, uv.x); y1 = Math.max(y1, uv.y);
+  }
+  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+}
+
+/** Never magnify the source more than this. See `cropTransform`. */
+export const MAX_CROP_ZOOM = 2.5;
+/** Fraction of the pane's height the dancer is framed to fill. */
+export const CROP_TARGET_HEIGHT = 0.72;
+
+export interface CropWindow {
+  /** Uniform magnification of the video element, >= 1. */
+  zoom: number;
+  /** Pan, as a fraction of the un-scaled element box, applied before the scale. */
+  tx: number;
+  ty: number;
+  /** True when the dancer's projected box is not wholly inside the source frame. */
+  clipped: boolean;
+}
+
+export const NO_CROP: CropWindow = { zoom: 1, tx: 0, ty: 0, clipped: false };
+
+/**
+ * Turn a projected body rectangle into a crop window for the video element.
+ *
+ * THE HONESTY CONSTRAINT (DESIGN.md §7h). Two rules, both hard:
+ *
+ *  1. `zoom` is never below 1. Zooming OUT would have to invent pixels outside the
+ *     frame the phone actually shot.
+ *  2. The visible window is clamped to stay INSIDE the source frame. When the dancer
+ *     walks toward the edge the window stops at the edge and the dancer slides off
+ *     centre — it never keeps panning and pads with black, and it never zooms further
+ *     to hide the fact that the dancer is leaving. A dancer at the edge of frame LOOKS
+ *     like a dancer at the edge of frame. `clipped` reports that so the caller can
+ *     say so in words too.
+ *
+ * `MAX_CROP_ZOOM` is a second, softer limit: past ~2.5x a 1080-wide phone clip is
+ * visibly upscaled, and a blurry crop implies detail the source never had.
+ */
+export function cropTransform(body: Rect | null): CropWindow {
+  if (!body || body.height <= 0) return NO_CROP;
+  const zoom = Math.min(Math.max(CROP_TARGET_HEIGHT / body.height, 1), MAX_CROP_ZOOM);
+  const half = 0.5 / zoom; // half-extent of the visible window, in frame fractions
+  const cx = body.x + body.width / 2;
+  const cy = body.y + body.height / 2;
+  // Rule 2: the window centre cannot go closer to an edge than its own half-extent.
+  const px = half >= 0.5 ? 0.5 : Math.min(Math.max(cx, half), 1 - half);
+  const py = half >= 0.5 ? 0.5 : Math.min(Math.max(cy, half), 1 - half);
+  return {
+    zoom,
+    // `transform: translate(tx, ty) scale(zoom)` maps frame point p to
+    // zoom * (p - 0.5) + t; solving for the dancer landing at the centre gives this.
+    tx: -zoom * (px - 0.5),
+    ty: -zoom * (py - 0.5),
+    clipped: body.x < 0 || body.y < 0 || body.x + body.width > 1 || body.y + body.height > 1,
+  };
 }
 
 /* -------------------------------------------------------------- view presets */
