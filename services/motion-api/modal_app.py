@@ -427,7 +427,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     # whose MotionResult/assets aren't actually fetchable yet.
     write_status("processing", "Building the 3D body file", 0.97)
     try:
-        export_result = export_clip_gltf.remote(clip_id)
+        export_result = export_clip_gltf.remote(clip_id, job_id)
     except Exception as e:  # noqa: BLE001 -- a real crash in the export stage, not a pipeline_error
         write_status(
             "failed", "", None,
@@ -601,6 +601,23 @@ gltf_image = (
     .pip_install("torch==2.8.0")
     .pip_install("pymomentum-gpu==0.1.114.post0")
     .pip_install("numpy", "trimesh")
+    # The MotionResult assembly, so the exporter can materialise the contract
+    # document once here instead of api.py rebuilding it from the npz on every
+    # single request. motion_result.py reads mhr_joint_hierarchy.json from its
+    # own directory, so both land in /app together. Mounted, not baked: editing
+    # the assembly must not rebuild the pymomentum layer above it.
+    .add_local_file(os.path.join(os.path.dirname(__file__), "motion_result.py"),
+                    "/app/motion_result.py")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "mhr_joint_hierarchy.json"),
+                    "/app/mhr_joint_hierarchy.json")
+)
+
+# CPU-only image for the retention sweeper: it moves no arrays, it only lists
+# and deletes Volume paths, so it has no business loading torch.
+sweeper_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "retention.py"),
+                    "/app/retention.py")
 )
 
 
@@ -777,7 +794,7 @@ def dump_joint_hierarchy():
 
 
 @app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results}, timeout=600)
-def export_clip_gltf(clip_id: str):
+def export_clip_gltf(clip_id: str, job_id: str | None = None):
     """Stage 6c: the real fix (W8) -- export the ACTUAL reconstructed motion
     from a run_clip() result, not a neutral pose. One GLB per confidently-
     tracked dancer (each PersonResult carries its own animation ref per the
@@ -886,8 +903,131 @@ def export_clip_gltf(clip_id: str):
     }
     with open(f"{RESULTS_DIR}/{clip_id}.export-manifest.json", "w") as f:
         json.dump(manifest, f)
+
+    # Materialise the MotionResult here, once, instead of api.py rebuilding it
+    # from the npz on every GET. That was the last thing keeping the npz alive:
+    # api.py's _build_motion_result read it on every single request, so "the
+    # npz is never read after export" was not actually true. Now it is, and
+    # sweep_expired can reap the npz (it only does so once this file exists --
+    # never delete the source before the replacement is on disk).
+    #
+    # Gzipped because it is JSON: 7.15 MB -> 1.49 MB measured on solo-01, and
+    # api.py serves it straight back out without re-reading 296 x 127 joints
+    # through a Python quaternion multiply on every request.
+    import gzip
+    import sys
+    sys.path.insert(0, "/app")
+    import motion_result
+
+    perf_path = f"{RESULTS_DIR}/{clip_id}.performance.json"
+    perf = json.load(open(perf_path)) if os.path.exists(perf_path) else None
+    try:
+        doc = motion_result.build_motion_result(
+            job_id or f"job_{clip_id}", clip_id,
+            open(npz_path, "rb").read(), manifest, perf,
+        )
+        with open(f"{RESULTS_DIR}/{clip_id}.motion-result.json.gz", "wb") as f:
+            f.write(gzip.compress(json.dumps(doc, separators=(",", ":")).encode(), 6))
+        materialised = True
+    except Exception as e:  # noqa: BLE001
+        # Not fatal: the npz is still there and api.py falls back to building
+        # from it, exactly as it did before. Loud, though -- a lesson stuck on
+        # the fallback path is one the sweeper will never reclaim space for.
+        print(f"WARNING: could not materialise MotionResult for {clip_id}: {e}")
+        materialised = False
+
     results.commit()
-    return {"clip_id": clip_id, "glb_paths": out_paths, "n_dancers": len(confident_track_ids)}
+    return {"clip_id": clip_id, "glb_paths": out_paths, "n_dancers": len(confident_track_ids),
+            "motion_result_materialised": materialised}
+
+
+# The Volumes are declared here even though this function never reads a
+# mounted path: Volume.listdir/remove_file are @live_method, so the objects
+# have to be HYDRATED, and listing them in `volumes=` is what guarantees Modal
+# resolves them for this container. All access below goes through the client
+# API, not the mount.
+@app.function(image=sweeper_image, schedule=modal.Period(days=1), timeout=1800,
+              volumes={RESULTS_DIR: results, UPLOADS_DIR: uploads})
+def sweep_expired(dry_run: bool = False):
+    """Retention, on a clock. Two jobs, both of which only ever delete.
+
+    **1. Reap superseded npz files.** A clip whose `.motion-result.json.gz`
+    exists has nothing left that reads its npz, so the npz goes. Deliberately
+    here and not inside export_clip_gltf: deleting the source in the same
+    breath as writing its replacement means a bad write takes both. Leaving it
+    for the next sweep costs at most 24 hours of a 3.40 MB file and keeps the
+    npz available as api.py's fallback until something has actually read the
+    replacement.
+
+    **2. Expire lessons nobody opens.** `retention.TTL_DAYS` since last access,
+    where "access" is a lesson being opened (api.py touches `.last-access.json`
+    when it serves a result). A lesson with no touch file has never been opened
+    since this shipped; its export-manifest mtime stands in as the clock start,
+    so old lessons are not all deleted on the first run.
+
+    `dry_run` defaults to False because the SCHEDULE calls this with no
+    arguments, and a scheduled sweeper that quietly does nothing is exactly the
+    failure this whole change exists to fix -- a retention promise with no
+    retention behind it. To inspect before trusting it:
+
+        modal run modal_app.py::sweep_expired --dry-run
+    """
+    import sys
+    import time
+    sys.path.insert(0, "/app")
+    import retention
+
+    listing = {e.path.lstrip("/"): e for e in results.listdir("/")}
+    now = time.time()
+
+    def suffixed(suffix):
+        return {n[: -len(suffix)] for n in listing if n.endswith(suffix)}
+
+    removed = suffixed(".removed.json")          # already taken down; nothing left to do
+    materialised = suffixed(".motion-result.json.gz")
+    have_npz = suffixed(".npz")
+    live = (materialised | have_npz) - removed
+
+    def last_opened(clip_id):
+        touch = retention.read_json(results, retention.touch_path(clip_id))
+        if touch and "at" in touch:
+            return touch["at"]
+        # Never opened since touch tracking shipped. Fall back to when the
+        # lesson was built, so pre-existing lessons age from their real date
+        # rather than all surviving (or all dying) on the first sweep.
+        entry = (listing.get(f"{clip_id}.export-manifest.json")
+                 or listing.get(f"{clip_id}.npz"))
+        return entry.mtime if entry else now
+
+    expired = {c: round((now - last_opened(c)) / 86400, 1)
+               for c in sorted(live) if retention.is_expired(last_opened(c), now)}
+    # An npz is superseded once its replacement exists; skip the ones whose
+    # whole lesson is about to go anyway.
+    reap_npz = sorted((have_npz & materialised) - removed - set(expired))
+
+    print(f"sweep: {len(reap_npz)} superseded npz, {len(expired)} lessons past "
+          f"{retention.TTL_DAYS}d since last open, {len(live) - len(expired)} kept "
+          f"(dry_run={dry_run})")
+    for clip_id, age in expired.items():
+        print(f"  expired {clip_id}  ({age}d since last open)")
+
+    if dry_run:
+        return {"dry_run": True, "would_reap_npz": reap_npz,
+                "would_expire": sorted(expired), "kept": len(live) - len(expired)}
+
+    for clip_id in reap_npz:
+        try:
+            results.remove_file(f"/{clip_id}.npz")
+        except FileNotFoundError:
+            pass
+    for clip_id in expired:
+        # The same deletion path a takedown uses, on purpose: if these two ever
+        # disagree about what a lesson is made of, the weaker one is a leak.
+        retention.delete_clip(uploads, results, clip_id, f"job_{clip_id}", "expired")
+    # No commit(): every delete above went through the client API and is
+    # already durable. See retention.delete_clip.
+    return {"dry_run": False, "reaped_npz": reap_npz,
+            "expired": sorted(expired), "kept": len(live) - len(expired)}
 
 
 @app.local_entrypoint()

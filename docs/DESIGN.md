@@ -232,7 +232,12 @@ The strongest asset is a **finished lesson a stranger can use before uploading a
 - **No account needed to try.** Stated plainly under the primary action.
 - The primary action is "Add your own clip" — specific, not "Get started".
 - "Works best with" states the real constraints in plain sentences: one dancer, filmed from the front, up to 60 seconds, camera held still. Framed as *what works*, not as *what we reject*.
-- The rights line sits here, once, in plain language: "Only upload video you have the right to use."
+- The rights line sits here, once, in plain language: "Only upload video you have the right to use." Followed by the sentence D8's research found missing, which names the person most likely to need it: **"Anyone in a clip can ask us to take it down, and we will."**
+- The retention line sits here too, once (D6):
+
+  > **We keep the clip while the lesson exists. Lessons nobody opens for six months are deleted, and a removal request deletes one straight away.**
+
+  **This line replaces "we keep the clip while the lesson exists", which was on this mockup before any deletion code existed and was therefore false in both directions** — nothing was kept *because* a lesson existed, and nothing stopped being kept when one did not. See §7h below: the honesty rule is not only about the 3D. If the retention period changes, this sentence changes in the same commit, or the product is lying about the learner's own data.
 - Below the fold: one real before/after (a move that is unclear in the video, clear in 3D) — the single most persuasive thing available, and it must be a real clip, not a mock.
 
 **Copy violation caught in review:** the first draft of this screen said *"Every angle, even ones the camera never shot."* That is precisely the overclaim §1 of the PRD bans — a monocular model produces a *plausible* pose for what it could not see, not the truth. Corrected to **"Every angle, from the one video you have."** This is a standing trap: the exciting way to describe the product is the dishonest way, and it will keep resurfacing in marketing copy. Any copy implying recovery of unseen motion is a bug.
@@ -281,6 +286,23 @@ Refined after a correction in review — the earlier version of this section was
 **Case 1 is the whole product and must not be undersold.** An earlier draft of this document wrongly lumped "the dancer turns away" in with occlusion, which would have thrown away the most useful and most honest thing the system does.
 
 **The nuance inside case 1:** facing away is *lower* confidence, not zero. Depth ambiguity worsens — from behind it is harder to tell whether an arm reaches forward or back, since both project to similar silhouettes (the same family as the left/right flip problem). And a dancer's hands in front of their chest are occluded by their own torso, so overall orientation and limb position are tracked well while fine hand detail is estimated. Back-facing frames should therefore skew toward `uncertain`, not `absent`, and the render must show that.
+
+### The same rule, pointed at their data
+
+Everything above is about claims on the **motion**. The identical rule applies to claims about **what we keep, for how long, and who can make it stop** — and that is where this document had already broken it.
+
+"We keep the clip while the lesson exists" sat on the landing mockup while the service contained no deletion, expiry or retention code of any kind. Nobody wrote it as a lie; it was written as an *intention* and read as a *guarantee*, which is exactly how the overclaim about unseen motion gets written too. A false promise about someone's video is worse than a false promise about a shoulder angle, because the person it misleads may not be the person who uploaded it.
+
+The rule, stated so it is checkable in review:
+
+- **Never state a retention period, a deletion behaviour, or a removal promise that the code does not implement.** If the deletion path does not exist, the line does not ship. `docs/research/rights-and-privacy.md` §7c puts it the same way: a false retention promise is worse than no retention promise.
+- **A retention number in copy and the constant in the code change in the same commit.** They are one fact written twice.
+- **Describe the mechanism, not a guarantee.** "Anyone in a clip can ask us to take it down, and we will" names what happens. "Your data is secure" and "we protect your privacy" name nothing and are banned here for the same reason "seamless" is banned in §11.
+- Copy may not say **"we check"**, **"we verify"**, or **"we have permission"**. We do none of those things.
+
+The §7h test is unchanged, only re-aimed: *would someone who understood exactly how this works feel misled?*
+
+**Where the removal link lives.** On the lesson page, at the bottom, a quiet plain-text link — not a button, not in the control bar. It reads **"Ask us to remove this lesson"**. It has to be findable by someone who arrived from a shared link and recognised themselves in the video, and invisible to someone practising. The 88px touch target of §8 does not apply: this is not a control, and making it thumb-sized on a phone propped on the floor would put it in the way of the thing the page is for. Its confirmation states what actually happened, in the voice of §11 — **"Removed. The video, the 3D and the link are gone."** — and never "we're sorry to see you go".
 
 ### The copy trap
 
@@ -344,6 +366,8 @@ Collected so they are checkable in review:
 9. Swipe-to-create-loop on touch.
 10. Numbered `01 / 02 / 03` markers, decorative blobs, gradient washes, generic 3-column card rows.
 11. Drawing a limb the model did not see as a confident pose in a lighter tint.
+12. Any statement about retention, deletion or removal that the code does not implement — including a retention period in copy that no constant in the code matches (§7h).
+13. "Secure", "protected", "private by design", "we verify", "we check" — guarantees with no mechanism behind them.
 
 
 ---
