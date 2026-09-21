@@ -168,7 +168,10 @@ async function writeGlb(doc, person, file) {
   const rig = buildRig(doc);
   const scene = new THREE.Scene();
   scene.add(rig.group);
-  const clip = buildClip(doc, person, rig, doc.animation.clip_id);
+  // Per-PERSON, not per-document: W8 moved `animation` out of the top level and
+  // into PersonResult so a multi-dancer result can say which clip belongs to
+  // which dancer. W5 was cut before that and read `doc.animation`.
+  const clip = buildClip(doc, person, rig, person.animation.clip_id);
   const exporter = new GLTFExporter();
   const buffer = await exporter.parseAsync(scene, { binary: true, animations: [clip] });
   writeFileSync(file, Buffer.from(buffer));
@@ -211,6 +214,10 @@ function buildTwoDancers(good) {
   const b = structuredClone(a);
   b.person_id = "person_2";
   b.track_id = 2;
+  // Its own GLB, because this script writes one per person_id. Same clip_id is
+  // fine and is what the real exporter produces — the contract only requires
+  // each person carry its own resolvable reference, not a unique clip name.
+  b.animation = { ...a.animation, glb_asset_id: `${a.animation.glb_asset_id}_b` };
   b.samples = Array.from({ length: n }, (_, i) => structuredClone(a.samples[(i + shift) % n]));
   b.root_trajectory = Array.from({ length: n }, (_, i) => structuredClone(a.root_trajectory[(i + shift) % n]));
   b.crop_rects = {

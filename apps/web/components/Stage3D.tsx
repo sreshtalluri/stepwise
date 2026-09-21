@@ -102,7 +102,10 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
   const { scene, mixer, clip, regionMeshes, stubs, bonesByName } = useMemo(() => {
     const scene = cloneSkeleton(gltf.scene) as THREE.Group;
     const mixer = new THREE.AnimationMixer(scene);
-    const clip = gltf.animations.find((c) => c.name === doc.animation.clip_id) ?? gltf.animations[0];
+    // Per-PERSON animation ref (W8 contract change): `animation` moved from the
+    // top level into PersonResult, so each dancer names its own clip.
+    const clipId = doc.persons[personIndex]?.animation?.clip_id;
+    const clip = gltf.animations.find((c) => c.name === clipId) ?? gltf.animations[0];
 
     const regionMeshes = new Map<string, THREE.SkinnedMesh>();
     const bonesByName = new Map<string, THREE.Bone>();
@@ -381,9 +384,10 @@ export interface Stage3DProps {
   onResetView?: () => void;
   /**
    * One GLB URL per entry in `doc.persons`, already resolved by the caller — asset
-   * ids in the contract are deliberately not URLs. Note this is keyed by PERSON:
-   * `animation.glb_asset_id` is a single id for the whole document even though
-   * `persons` is unbounded. See the report — that is a contract gap.
+   * ids in the contract are deliberately not URLs. Keyed by PERSON, which the
+   * contract now supports directly: the gap W5 reported here (one top-level
+   * `animation.glb_asset_id` for an unbounded `persons`) was closed by W8, which
+   * moved `animation` into PersonResult.
    */
   glbUrls: string[];
 }

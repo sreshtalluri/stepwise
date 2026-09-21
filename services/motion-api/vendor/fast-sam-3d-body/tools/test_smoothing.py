@@ -28,6 +28,7 @@ from smoothing import (
     decompose,
     detector_joint_signals,
     recompose,
+    smooth_clip_result,
     smooth_track,
 )
 
@@ -232,6 +233,58 @@ def test_bone_lengths_are_left_to_the_bone_constraints_module():
     lengths_in = np.linalg.norm(off[:, 1:], axis=-1)
     lengths_out = np.linalg.norm(off_out[:, 1:], axis=-1)
     assert np.abs(lengths_in - lengths_out).max() < 1e-4
+
+
+def test_bone_constraint_correction_reaches_the_suppression_stage():
+    """INTEGRATION (docs/INTEGRATION.md): the `correction_m` seam.
+
+    smoothing.py documents an optional `correction_m` input -- how far the
+    upstream bone-length constraint had to move each joint -- and turns a
+    large correction into `low_confidence`. skeleton_constraints.constrain_clip
+    is the thing that does the moving. Neither branch could wire the two
+    together (each was cut from w4-jobservice, before the other existed), so
+    the seam was documented on both sides and connected on neither: the signal
+    was silently dropped at integration.
+
+    This checks the whole hop: constrain_clip records the displacement on the
+    person dict -> smooth_clip_result reads it -> a joint the constraint had to
+    yank stops being reported as plainly `observed`.
+    """
+    from skeleton_constraints import constrain_clip
+
+    names, parents, offsets = _skeleton()
+    F, J = 20, len(names)
+    rng = np.random.default_rng(11)
+    skel, _, _ = _build(rng.normal(scale=0.05, size=(F, J, 3)), offsets, parents)
+    # constrain_clip's own convention (see its jc_to_ss): pred_joint_coords is
+    # metres, skel_state translation is the same thing in cm with y/z negated.
+    world = skel[..., :3] * np.array([1.0, -1.0, -1.0]) / 100.0
+
+    per_frame = []
+    for i in range(F):
+        coords = world[i].copy()
+        if i == 10:
+            coords[-1] += 0.5  # one frame where the end joint is badly wrong
+        per_frame.append({7: {
+            "pred_joint_coords": coords.astype(np.float32),
+            "skel_state": skel[i].astype(np.float32),
+        }})
+
+    constrain_clip(per_frame, [7], parents=parents, coincident=())
+    assert "bone_length_correction_m" in per_frame[10][7], \
+        "constrain_clip must record how far it moved each joint"
+
+    dets = [{"track_ids": np.array([], dtype=int),
+             "keypoints": np.zeros((0, 17, 3))} for _ in range(F)]
+    out = smooth_clip_result(
+        {"per_frame": per_frame, "raw_detections": dets,
+         "sample_times_s": np.arange(F) * DT, "confident_track_ids": [7],
+         "frame_width": 0, "frame_height": 0},
+        hierarchy={"joints": [{"name": n, "parent_index": int(p)}
+                              for n, p in zip(names, parents)]},
+    )
+    assert out[7]["visibility"][10, -1] != OBSERVED, \
+        "a joint the bone constraint had to yank must not come back plain `observed`"
 
 
 if __name__ == "__main__":
