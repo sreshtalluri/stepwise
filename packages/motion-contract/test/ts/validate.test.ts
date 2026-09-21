@@ -103,6 +103,38 @@ test("rejects a joint_hierarchy whose index doesn't match its array position", (
   assert.ok(result.errors.some((e) => e.includes("must equal 3")));
 });
 
+test("proposed_counts is optional — a document without one is still valid", () => {
+  const doc = clone(loadFixture("good-lesson.json"));
+  delete doc.proposed_counts;
+  const result = validateMotionResult(doc);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.valid, true);
+});
+
+test("rejects a proposed grid sized against something other than sample_times_s", () => {
+  const doc = clone(loadFixture("good-lesson.json"));
+  // The realistic way to get this wrong: size the grid against
+  // source_video.duration_s (14.0) instead of sample_times_s[N-1] (13.933...).
+  // It is off by exactly one count and nothing else in the document notices.
+  doc.proposed_counts.count_total += 1;
+  const result = validateMotionResult(doc);
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => e.includes("authoritative timeline")));
+});
+
+test("a weak proposal still travels with its alternates and its reason", () => {
+  const doc = loadFixture("failure-lesson.json");
+  // The honesty rule has teeth only if the doubt survives the trip: a consumer
+  // that gets the grid must also get the confidence, the half-time reading and
+  // the plain-language reason, or it cannot be quieter about a weak guess.
+  assert.ok(doc.proposed_counts.confidence < 0.5);
+  assert.ok(doc.proposed_counts.warnings.length > 0);
+  assert.deepEqual(
+    doc.proposed_counts.alternates.map((a: any) => a.label).sort(),
+    ["double-time", "half-time"],
+  );
+});
+
 test("job-status: a minimal queued job is valid", () => {
   const result = validateJobStatus({
     schema_version: "1.0.0",

@@ -23,6 +23,32 @@ fixtures/               two hand-authored example MotionResult documents (see fi
 scripts/                codegen + fixture-generation + a validate CLI
 ```
 
+## When to bump `schema_version`
+
+`schema_version` answers one question — *can a consumer written against version X
+parse this document?* — and nothing else. It is not a build number.
+
+**Bump** when an existing valid document would become invalid, or an existing
+correct consumer would become wrong: a field removed or renamed, a field's
+meaning changed, a new **required** field, an enum value removed, a type
+narrowed.
+
+**Do not bump** for a purely additive-optional change (a new optional field) or a
+relaxation (required → optional, enum widened). Every document that validated
+before still validates; every consumer written before still reads correctly,
+because it does not look at the new field. Bumping here is not the cautious
+choice — the schema tells consumers to *refuse* an unrecognized version rather
+than guess, so a gratuitous bump makes every deployed consumer reject documents
+it could read perfectly well.
+
+**Consumers detect an optional field by checking for the field**, never by
+comparing versions.
+
+Two changes have landed under this rule and both correctly stayed at `1.0.0`:
+`shape_params.vector` relaxed from required to optional (`caching-retention`),
+and `proposed_counts` added as optional (`lesson-structure`). The rule is written
+down here because the second one had to guess what the first one had decided.
+
 ## Regenerating types
 
 The generated files under `src/ts/generated/` and

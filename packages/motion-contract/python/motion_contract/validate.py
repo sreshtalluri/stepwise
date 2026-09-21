@@ -77,6 +77,22 @@ def _check_invariants(doc: dict[str, Any]) -> list[str]:
     if grounding["status"] == "grounded" and grounding["floor_plane"] is None:
         errors.append('grounding.status is "grounded" but floor_plane is null')
 
+    # A proposed grid that disagrees with the timeline it is laid over is worse
+    # than no proposal: the count strip would run out of counts, or show counts
+    # past the end of the dance, with nothing anywhere saying why. Same formula
+    # as `normalizeStructure` in packages/navigation/src/core.ts, against
+    # sample_times_s rather than source_video.duration_s.
+    pc = doc.get("proposed_counts")
+    if pc:
+        end_s = doc["sample_times_s"][n - 1]
+        expected = max(1, int((end_s - pc["count_one_s"]) // pc["seconds_per_count"]) + 1)
+        if pc["count_total"] != expected:
+            errors.append(
+                f"proposed_counts.count_total is {pc['count_total']} but the grid over "
+                f"sample_times_s gives {expected} — a proposal must be sized against "
+                f"the authoritative timeline"
+            )
+
     return errors
 
 
