@@ -145,6 +145,7 @@ def process_clip(
 
     from sam_3d_body import load_sam_3d_body, SAM3DBodyEstimator
     from tools.build_detector import HumanDetector
+    from tools.skeleton_constraints import constrain_clip  # branch: bone-constraints
 
     _emit(on_progress, "loading", "Loading the motion model", 0.0)
     device = torch.device("cuda")
@@ -295,8 +296,21 @@ def process_clip(
     )
     _emit(on_progress, "reconstructing", "Finishing up", 0.95)
 
+    # ---- bone-length constraint (branch `bone-constraints`) ----------------
+    # Spatial, per-frame: gives every bone this dancer's own median length back
+    # while keeping every bone's observed direction, and attaches a per-joint
+    # confidence for the suppression stage. Must run before any temporal
+    # smoothing. See tools/skeleton_constraints.py for the measured defect.
+    bone_report = constrain_clip(per_frame, sorted(confident_track_ids))
+    for tid, r in bone_report.items():
+        print(f"  bone lengths, track {tid}: {r['n_bones']} bones fixed, worst frame off by "
+              f"{r['worst_correction_factor']:.2f}x, {r['n_frames_with_uncertain_joint']}/"
+              f"{r['n_frames']} frames carry an uncertain joint")
+    # -----------------------------------------------------------------------
+
     return {
         "refused": False,
+        "bone_length_report": bone_report,
         "sample_times_s": np.array(sample_times_s, dtype=np.float64),
         "per_frame": per_frame,  # list of {track_id: person_dict}, one per sample time
         "smoothed": smoothed,  # W9: {track_id: smoothed skel_states + visibility/provenance}
