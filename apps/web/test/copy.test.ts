@@ -144,9 +144,68 @@ test("the rights line exists and is plain — DESIGN.md §7d, OPEN-DECISIONS D8"
   assert.equal(copy.upload.rights, "Only upload video you have the right to use.");
 });
 
+test("the link rights line is not the upload one — docs/research/link-ingestion.md", () => {
+  // A pasted link is a weaker claim than a held file: almost nobody pasting a
+  // TikTok has any right to it. Reusing the upload sentence would assert the
+  // same thing about a case where it is not true, so the two must differ and
+  // the link one must not tell anyone they "have the right" to a link.
+  const link = copy.upload.link.rights;
+  assert.notEqual(link, copy.upload.rights);
+  assert.ok(
+    !/right to (use|post|share)/i.test(link),
+    `the link rights line borrows the upload claim: ${link}`,
+  );
+  // It must name the person D8 found missing from the upload screen, and
+  // commit to the mechanism that actually exists (POST /lessons/{id}/removal).
+  assert.match(link, /anyone in the clip/i);
+  assert.match(link, /take it down/i);
+  // And it must say plainly that we do the fetching, rather than leaving the
+  // visitor to assume the link is just a reference.
+  assert.match(link, /\bfetch\b/i);
+});
+
+test("no surface claims we checked or verified anything — DESIGN.md §7h, §12.13", () => {
+  // §7h: "Copy may not say 'we check', 'we verify', or 'we have permission'.
+  // We do none of those things." The link path is where this is most tempting,
+  // because fetching feels like inspecting.
+  const forbidden = [
+    /\bwe (check|verify|confirm|review|vet)\b/i,
+    /\bwe have permission\b/i,
+    /\b(verified|approved|licen[cs]ed) (clip|video|link)s?\b/i,
+    /\b(secure|protected|private by design)\b/i,
+  ];
+  for (const [path, line] of lines) {
+    for (const pattern of forbidden) {
+      assert.ok(!pattern.test(line), `${path} claims a check we do not do: ${line}`);
+    }
+  }
+});
+
+test("the link gate says what still works — DESIGN.md §11", () => {
+  // An invite wall that only says "no" strands someone who came to learn a
+  // dance. File upload is open to everyone and the line has to say so.
+  const gated = copy.upload.link.gated;
+  assert.match(gated, /invited/i);
+  assert.match(gated, /file/i);
+  // "Coming soon" names a date we have not got (§7h: no promise the code does
+  // not keep).
+  assert.ok(!/coming soon|shortly|any day/i.test(gated), gated);
+});
+
 test("errors do not apologise or blame — DESIGN.md §11", () => {
-  for (const [path, line] of Object.entries(copy.upload.errors)) {
+  const all = { ...copy.upload.errors, ...copy.upload.linkErrors };
+  for (const [path, line] of Object.entries(all)) {
     assert.ok(!/sorry|apolog|oops/i.test(line), `${path} apologises: ${line}`);
     assert.match(line, /try again|Trim|Pick/i, `${path} says what to do next`);
   }
+});
+
+test("link failure text is not duplicated client-side — §7h honesty boundary", () => {
+  // The service decides why a fetch failed and writes the sentence, because it
+  // is the only thing that saw the failure (services/motion-api/ingest.py, and
+  // its own lint in test_ingest.py). A second table of guesses here would
+  // drift, and drift on this screen means telling someone their video is
+  // private when we never learned that. So the client keeps exactly one
+  // string: the one for "we never reached the service at all".
+  assert.deepEqual(Object.keys(copy.upload.linkErrors), ["unreachable"]);
 });

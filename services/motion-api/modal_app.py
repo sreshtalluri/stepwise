@@ -1121,6 +1121,19 @@ def export_clip_gltf(clip_id: str, job_id: str | None = None):
     from region_mask import RegionMappingError, split_glb_by_region
 
     npz_path = f"{RESULTS_DIR}/{clip_id}.npz"
+    # The same read-after-write window run_clip already guards `uploads`
+    # against, on the other side of the same handoff: run_clip writes the npz
+    # and commits, then calls this function, whose container may have a mount
+    # snapshot older than that commit. Hit live on 2026-09-21 -- a real
+    # reconstruction of solo-07 finished, wrote the npz (verified present on
+    # the Volume afterwards), and this line raised
+    # "[Errno 2] No such file or directory: /results/<clip>.npz", surfacing as
+    # a retryable `export_error` on a job that had already done all the GPU
+    # work. A Volume is storage, not a queue: there is no delivery guarantee
+    # beyond eventual consistency, so the reload has to be explicit.
+    if not os.path.exists(npz_path):
+        print(f"{npz_path} not visible yet -- reloading the results Volume")
+        results.reload()
     print(f"loading {npz_path}")
     data = np.load(npz_path, allow_pickle=True)
     if bool(data["refused"]):
