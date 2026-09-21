@@ -69,6 +69,16 @@ The marketing site (loud front door, live spinnable demo in the hero), the in-ap
 | W11 | 🤖 Beat detection | librosa/madmom, not BeatNet (unmaintained, no licence). Auto-proposal only; manual always wins. |
 | W12 | 🧍🤖 The learning pilot | You run it; an agent can build the rubric and the recording harness. |
 
+### The link-ingestion tripwire ⛓ blocks opening sign-up
+
+`docs/research/rights-and-privacy.md` §6.6 asks for this to be written down rather than left in someone's memory, so here it is.
+
+**`POST /clips/link` fetches video from TikTok and YouTube with an automated tool, from our server, on a visitor's behalf. Both platforms' terms prohibit that.** It ships behind an invite-code allowlist (`STEPWISE_INVITE_CODES`, closed by default) and is scoped to this pilot. File upload is not gated and is unaffected.
+
+**The day link ingestion is opened to anyone the builder has not personally met, all six items in `docs/research/link-ingestion.md` §6 must already be decided** — not listed, decided. Shortest form: does server-side fetching continue at all; per-code and per-host rate limits (there are none today); §6.4's takedown agent; whether §6.5's terms cover asking us to *fetch* as distinct from asking us to *host*; a human path for a platform's complaint; and D5, on which the derived `clip_id` in §7a depends.
+
+Turning it off is one environment variable. That is deliberate — it is the cheapest thing that makes "pilot only" a property of the deploy rather than of an intention.
+
 ---
 
 ## Rules for every agent

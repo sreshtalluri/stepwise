@@ -67,7 +67,7 @@ Two more install landmines: Detectron2 fails if the image lacks `nvcc` or builds
 
 | Stage | Choice | Pin | License | Notes |
 |---|---|---|---|---|
-| Ingest | Upload primary; ffprobe/FFmpeg normalize ≤1080p, 15 fps sample, ≤60 s; shot-boundary check rejects cuts | — | — | Paste-a-link (yt-dlp) deferred |
+| Ingest | Upload primary; ffprobe/FFmpeg normalize ≤1080p, 15 fps sample, ≤60 s; shot-boundary check rejects cuts | — | — | **Paste-a-link (yt-dlp) shipped for the invite-only pilot, 2026-09-21** — see the §5 scope note and `docs/research/link-ingestion.md` |
 | Detect + track + 2D kp | **RTMO-m / body7 @ 640×640** via `rtmlib`, **ONNXRuntime CUDA** (rtmlib has no TensorRT branch) + **upstream ByteTrack** | rtmlib/mmpose **Apache-2.0**; ByteTrack **MIT** | Replaces YOLO11m-pose. RTMO-l is 74.8 AP on COCO val2017 and the paper reports +1.1% AP over YOLO-Pose at ~9× the speed on the same backbone (caveat: RTMO trains on the body7 multi-dataset, so not strictly apples-to-apples). YOLO11m-pose is 64.9 mAP50-95 / 4.9 ms T4. **Use upstream ByteTrack, not Ultralytics' — theirs is AGPL too.** Start at RTMO-m; one dancer does not reduce its full-image cost and 1080p is resized regardless. Go to -l only if wrists/ankles fail. Import Torch *before* creating the ORT session and verify CUDA actually activated |
 | Adapter | Own `run_human_detection()` wrapper returning `{"boxes": (N,4), "keypoints": (N,17,3)}`, registered in `tools/build_detector.py` | — | own | **Bigger than 30 lines — rtmlib does not hand you what you need.** `RTMO(image)` returns keypoints `(N,17,2)` and scores `(N,17)`: its postprocessor computes boxes and detection scores and then **throws them away**, and on zero detections it **fabricates a single all-zero pose**. So: subclass the postprocessor to keep the post-NMS boxes, concatenate keypoint confidence into `(N,17,3)`, and return genuinely empty arrays when nothing is found. Keep `to_openpose=False` (wrists stay at indices 9/10). Lower RTMO's default 0.7 threshold so ByteTrack still sees low-score candidates, and do not let ByteTrack rescale coordinates a second time. The *downstream* half is still small: The hand path keys off the COCO-17 *format*, not YOLO: `_get_hand_box_from_yolo_pose` (line ~3430 of `sam_3d_body/models/meta_arch/sam3d_body.py`) is pure numpy, reads wrist indices 9/10, and touches nothing from ultralytics. The only coupling is upstream in `sam_3d_body_estimator.py` (~line 271), where the keypoint path activates when the detector returns a dict with `boxes` and `keypoints`. RTMO emits exactly that format |
 | Per-frame 3D | **Your fork of** `Fast-SAM-3D-Body` → SAM 3D Body → MHR, external-keypoint hand path | commit **`808b53c`** (2026-06-18) — **no releases, pin the SHA** | MIT (code) | Research code: 22 commits, one author, inconsistent metadata (10.25× vs 10.9× speedup). MIT, so forking is explicitly allowed. **The 3.50 FPS figure could not be re-verified in the repo or README** — the published claims are ~65 ms/frame on a 5090 and a 10.25× speedup. Measure it yourself in G7 rather than trusting either number |
@@ -122,7 +122,15 @@ The costs this accepts, honestly: GPU time scales roughly linearly with dancer c
 2. Floor fitting and contact correction → a floorless, honestly-estimated body. (Floor fitting cannot guarantee travel or weight transfer anyway, and vertical root pinning can erase jumps.)
 3. Custom sketchy-outline shader → hidden or dashed uncertain limbs.
 
-**Out for v1:** groups and cross-dancer consensus, formation view, moving cameras, cut-heavy edits, VRM avatars, 3D hand articulation, record-yourself/scoring, paste-a-link, public API. Designs for these are preserved in §9.
+**Paste-a-link, revised 2026-09-21.** An earlier draft of this section listed paste-a-link as out for v1 and §8 parked it in milestone D's buffer. It is now **in**, behind an invite gate, and this note is here rather than leaving the document silently contradicting the code.
+
+Why the change: the builder's description of the MVP is "someone comes to the website, pastes a TikTok or YouTube link, and gets a lesson" — pasting a link *is* the front door, not a convenience on top of one. The deferral was made when the cost looked like building a fetcher; `evaluation/fetch.py` already had yt-dlp working, so the real cost turned out to be the rights question, not the plumbing.
+
+What shipped, precisely: `POST /clips/link`, gated on an invite-code allowlist and **closed by default**. File upload is ungated and remains the primary path for everyone. Both doors converge on one `clip_id`, so a takedown still removes a lesson once for everyone who reached it either way.
+
+**This is scoped to the invite-only W12 pilot and is NOT cleared for public launch.** Both platforms' terms prohibit automated downloading; `docs/research/link-ingestion.md` is the analysis (the one in `rights-and-privacy.md` covers uploads and does not transfer), and its §6 lists the six things that must be decided before link ingestion is opened to anyone the builder has not met.
+
+**Out for v1:** groups and cross-dancer consensus, formation view, moving cameras, cut-heavy edits, VRM avatars, 3D hand articulation, record-yourself/scoring, public API. Designs for these are preserved in §9.
 
 ---
 
@@ -148,7 +156,7 @@ Honest framing, per Codex: six people is an **exploratory pilot**, not evidence 
 
 **C (~15h).** The learning pilot. Fix what it surfaces.
 
-**D (~15h).** Buffer — it will be consumed. If not: automatic beats, floor fitting, or paste-a-link.
+**D (~15h).** Buffer — it will be consumed. If not: automatic beats or floor fitting. (Paste-a-link came out of this buffer early — see the §5 scope note.)
 
 Running alongside: trividha onboarding (~20h). **bolbox's model work moves to the next cycle**; its recording starts now and keeps.
 

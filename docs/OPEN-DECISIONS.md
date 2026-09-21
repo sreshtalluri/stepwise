@@ -43,11 +43,12 @@ Status key: **OPEN** · **LEANING** (a recommendation exists) · **DEFER** (safe
 
 | # | Decision | Status | Note |
 |---|---|---|---|
-| D5 | Accounts: none, magic link, or OAuth? | OPEN | Invite-only cohort needs *some* identity. Magic link is least friction. Affects A3 and A6. **New dependency from D6/D7 below:** with no accounts, anyone holding a lesson link can remove that lesson, and deduplicated uploads share one link. See "What D5 would change" under D7. |
+| D5 | Accounts: none, magic link, or OAuth? | OPEN | Invite-only cohort needs *some* identity. Magic link is least friction. Affects A3 and A6. **New dependency from D6/D7 below:** with no accounts, anyone holding a lesson link can remove that lesson, and deduplicated uploads share one link. See "What D5 would change" under D7. **Second dependency, from D11:** a link-ingested lesson's `clip_id` is derived from the source URL rather than minted as a `uuid4`, which is what stops two simultaneous pastes of one link becoming two lessons. It also means the lesson link is computable by anyone who knows the source URL — so with no accounts, anyone who knows a TikTok URL can delete the lesson built from it. Fine at six people; a griefing vector at scale. See `docs/research/link-ingestion.md` §7a. |
 | D6 | How long is a lesson kept? | **LEANING — recommendation below, implemented on `caching-retention`** | 180 days since the lesson was last opened. The promise on the landing mockup was untrue when written and is now true, with one copy change. |
 | D7 | Can a lesson be deleted, and does the share link die with it? | **LEANING — recommendation below, implemented on `caching-retention`** | Yes and yes. The removal path is built; the link answers 410 Gone. |
 | D8 | Who can upload video of whom? | LEANING | **Recommendation: `docs/research/rights-and-privacy.md`.** Keep W7's passive one-liner, add one sentence naming the people *in* the clip, build **no blocking checkbox** — the consent that matters is the dancer's and the uploader cannot give it. Highest-value item is a working removal path, not upload-screen friction; gate at *publication*, not upload. Interacts with D5 (no accounts = no subscriber to terminate under §512(i), and no owner to restore a wrongly-removed lesson) and D6/D7 (there is no retention or deletion code in the service at all today). |
-| D9 | What happens when the learner wants a dance longer than 60s? | OPEN | The cap is real. Do we say "trim it" and give them a trimmer, or just refuse? |
+| D9 | What happens when the learner wants a dance longer than 60s? | **STILL OPEN — but new evidence, see the note below** | The cap is real. Do we say "trim it" and give them a trimmer, or just refuse? The link path **refuses**; the upload path **silently trims**, which nobody decided. |
+| D11 | **Link ingestion: keep it, and on what terms?** | **PARTLY SETTLED — shipped for the pilot only** | `POST /clips/link` ships behind an invite-code allowlist, closed by default (branch `link-ingestion`). PRD §5 carries the scope note; `docs/research/link-ingestion.md` is the analysis. **Both platforms' terms prohibit automated downloading** — a question `docs/research/rights-and-privacy.md` never asked, because it analysed *uploads*, where the platform's terms are not engaged at all. Decided: defensible for the invite-only W12 pilot. **Not** decided, and listed in that document's §6: whether server-side fetching continues past the pilot at all (datacenter IPs are blocked first, and `evaluation/fetch.py` already records this), per-code and per-host rate limits (there are none today), §6.4's takedown agent, whether §6.5's terms cover asking us to *fetch* as distinct from asking us to *host*, and a human path for a platform's complaint as distinct from a dancer's. Depends on **D5**. |
 | D10 | Public name | OPEN | `NAMES.md` has candidates. Needed before public launch, not before the gate. |
 
 ## E. Technical decisions still open
@@ -127,6 +128,18 @@ Every clause is a promise the code keeps. Do not ship the first sentence alone: 
 With no accounts, **anyone holding a lesson link can remove it**. A link is a 128-bit `uuid4`, so it is not enumerable — you have to have been given it — but an uploader's lesson can be removed by anyone they shared it with, and deduplicated uploads share one link.
 
 Magic-link accounts would make the natural rules cheap: the uploader deletes their own outright; anyone else's request still takes it down immediately but becomes **restorable** by the uploader. That is §6.1's own suggestion and it needs D5 decided, so it is recorded here as a dependency rather than guessed at. Until then, restoring a removed lesson is a per-case email, which is the honest state.
+
+---
+
+## D9 — the 60-second cap: evidence, not a decision
+
+**Still open.** What follows is what the code does today, found while building `link-ingestion`, because the two paths currently disagree and nobody chose that.
+
+**The link path refuses, in both places it can.** From yt-dlp's metadata *before downloading anything* (measured: a 213-second YouTube video refused in 2.6 s with no video transferred), and again from ffprobe after the download for the case where the platform reported no duration. The message says what to do next — "That video is 213 seconds. Up to 60 works — trim it to the part you want to learn and upload that." — rather than what we will not do.
+
+**The upload path silently trims, and that is the finding.** `tools/process_clip.extract_frames` passes `-t 60` to ffmpeg, so a 90-second upload becomes a lesson for the first 60 seconds of the dance with nothing said about it anywhere. The browser-side duration check in `apps/web/app/upload/page.tsx` catches most of these before they are sent, so the trim only fires when the browser could not read the file's duration — but when it fires, the learner gets a lesson for a *different dance* than the one they uploaded, and no surface tells them. `DESIGN.md` §7h's rule is about claims on motion and on data; this is the same failure in the plumbing.
+
+That is the strongest argument available for resolving D9 toward **"refuse, and offer a trimmer"** rather than leaving it open, but it is a product decision and the choice is the builder's. It is recorded here rather than made. Whichever way it goes, the copy in `apps/web/lib/copy.ts`, `ingest.MAX_CLIP_SECONDS` and `process_clip`'s `max_seconds` are one fact written three times and change together.
 
 ---
 
