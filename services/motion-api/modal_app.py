@@ -644,9 +644,23 @@ gltf_image = (
     # Plain glTF JSON/buffer manipulation in both cases -- no pymomentum or
     # trimesh API needed for either.
     .pip_install("numpy", "trimesh", "pygltflib")
+    # boto3, in its OWN layer on purpose: appending it here leaves every layer
+    # above -- including the pymomentum pin that took seven environment bugs to
+    # get green (docs/GATE-REPORT.md G3) -- cached and untouched. It is pure
+    # Python over urllib3 and shares no transitive dependency with torch,
+    # numpy or pymomentum, which is why adding it to a pinned image is
+    # acceptable at all. infrastructure.md §5 names the escape hatch if a
+    # pinned image ever does go red for a reason like this: a tiny CPU sidecar
+    # function invoked with .spawn(). Not needed; recorded in DEPLOYMENT.md.
+    .pip_install("boto3")
     # Mounted at container start, same pattern as cv_image's VENDOR_DIR --
     # editing region_mask.py doesn't force a rebuild of the layers above.
     .add_local_dir(GLTF_TOOLS_DIR, remote_path="/app/motion-api-tools")
+    # R2 publication happens here, at the end of export, because this is the
+    # first moment every delivered byte of a lesson exists (infrastructure.md
+    # migration step 5). Mounted alongside the assembly for the same reason.
+    .add_local_file(os.path.join(os.path.dirname(__file__), "storage.py"),
+                    "/app/storage.py")
     # The MotionResult assembly, so the exporter can materialise the contract
     # document once here instead of api.py rebuilding it from the npz on every
     # single request. motion_result.py reads mhr_joint_hierarchy.json from its
@@ -754,12 +768,49 @@ def propose_counts(clip_id: str) -> dict | None:
 
 
 # CPU-only image for the retention sweeper: it moves no arrays, it only lists
-# and deletes Volume paths, so it has no business loading torch.
+# and deletes Volume paths, so it has no business loading torch. boto3 joins it
+# because a lesson's bytes now live in two places, and a sweeper that forgets
+# one of them is a privacy leak rather than a storage leak
+# (docs/research/rights-and-privacy.md §1).
 sweeper_image = (
     modal.Image.debian_slim(python_version="3.12")
+    .pip_install("boto3")
     .add_local_file(os.path.join(os.path.dirname(__file__), "retention.py"),
                     "/app/retention.py")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "storage.py"),
+                    "/app/storage.py")
 )
+
+def optional_secret(name: str) -> list:
+    """`[Secret]` if it exists in this Environment, `[]` if it does not.
+
+    `modal.Secret.from_name` is lazy -- it returns a handle and only fails when
+    the deploy resolves it -- so the try/except around HF_SECRET above catches
+    nothing, and a missing Secret takes down the whole `modal deploy` including
+    every function that never referenced it. `.hydrate()` forces the lookup
+    here, where it can be answered with "not configured yet" instead of a
+    traceback. This is the difference between "the API cannot be deployed until
+    Neon exists" and "the API is deployed and says in /health that Neon does
+    not exist yet".
+    """
+    try:
+        s = modal.Secret.from_name(name)
+        s.hydrate()
+        return [s]
+    except Exception:  # noqa: BLE001 -- any lookup failure means "not configured yet"
+        print(f"[modal_app] Secret {name!r} not found; continuing without it.")
+        return []
+
+
+# R2 credentials. Absent -> every caller keeps its Volume path and says so
+# (storage.enabled()), rather than the app failing to load.
+R2_SECRET = optional_secret("stepwise-r2")
+
+# The database. Does not exist yet (Neon is being provisioned in parallel);
+# until it does, `STEPWISE_JOB_BACKEND` stays unset and jobstore.py serves job
+# state from the results Volume exactly as before. Creating the Secret and
+# setting the variable is the whole cutover -- see docs/DEPLOYMENT.md.
+DB_SECRET = optional_secret("stepwise-db")
 
 
 # glTF sampler interpolation, fixed up after pymomentum writes the file.
@@ -1178,7 +1229,8 @@ def inspect_mhr_region_mapping():
     return {"joint_names": joint_names, "resolved": {k: joint_names[v] for k, v in mapping.items()}}
 
 
-@app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results}, timeout=600)
+@app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results},
+              secrets=R2_SECRET, timeout=600)
 def export_clip_gltf(clip_id: str, job_id: str | None = None):
     """Stage 6c: the real fix (W8) -- export the ACTUAL reconstructed motion
     from a run_clip() result, not a neutral pose. One GLB per confidently-
@@ -1475,8 +1527,58 @@ def export_clip_gltf(clip_id: str, job_id: str | None = None):
         materialised = False
 
     results.commit()
+
+    # Publish the delivered bytes to R2 (infrastructure.md decision 3, migration
+    # step 5). Here, not in api.py, because this is the first instant at which
+    # every one of them exists -- and doing it once at job completion instead of
+    # on each request is the difference between an immutable edge-cacheable
+    # object and a Python byte proxy.
+    #
+    # The source video is NOT published here: api.py already holds those bytes
+    # at upload time and publishes them there, which saves reading a 5 MB object
+    # back out of a Volume it never needed to be read from.
+    #
+    # Best-effort on purpose. An R2 outage must not fail a job that produced a
+    # perfectly good reconstruction: api.py falls back to the Volume proxy for
+    # any object R2 does not have (no range requests on that path, but a working
+    # lesson beats a failed one). Loud, though -- a lesson stuck on the fallback
+    # is one whose video cannot be scrubbed.
+    published = _publish_to_r2(clip_id, list(out_paths.values()), materialised)
+
     return {"clip_id": clip_id, "glb_paths": out_paths, "n_dancers": len(confident_track_ids),
-            "motion_result_materialised": materialised}
+            "motion_result_materialised": materialised, "r2_published": published}
+
+
+def _publish_to_r2(clip_id: str, glb_paths: list[str], materialised: bool) -> list[str]:
+    """Upload this lesson's GLBs and MotionResult to R2. Returns the keys written."""
+    import sys
+    sys.path.insert(0, "/app")
+    import storage
+
+    if not storage.enabled():
+        print(f"[r2] not configured (missing {', '.join(storage.missing_env())}) -- "
+              f"{clip_id} will be served from the Volume, without range requests")
+        return []
+
+    written = []
+    try:
+        for path in glb_paths:
+            written.append(storage.put_file(
+                storage.glb_key(os.path.basename(path)), path, "model/gltf-binary"))
+        if materialised:
+            written.append(storage.put_file(
+                storage.motion_result_key(clip_id),
+                f"{RESULTS_DIR}/{clip_id}.motion-result.json.gz",
+                "application/json",
+                # Stored gzipped; declaring the encoding is what lets a browser
+                # (and api.py's passthrough) decompress it transparently instead
+                # of handing the caller a bag of bytes.
+                content_encoding="gzip",
+            ))
+        print(f"[r2] published {len(written)} objects for {clip_id}")
+    except Exception as e:  # noqa: BLE001 -- never fail a good job on a storage blip
+        print(f"WARNING: R2 publish incomplete for {clip_id} ({len(written)} written): {e}")
+    return written
 
 
 # The Volumes are declared here even though this function never reads a
@@ -1485,7 +1587,7 @@ def export_clip_gltf(clip_id: str, job_id: str | None = None):
 # resolves them for this container. All access below goes through the client
 # API, not the mount.
 @app.function(image=sweeper_image, schedule=modal.Period(days=1), timeout=1800,
-              volumes={RESULTS_DIR: results, UPLOADS_DIR: uploads})
+              volumes={RESULTS_DIR: results, UPLOADS_DIR: uploads}, secrets=R2_SECRET)
 def sweep_expired(dry_run: bool = False):
     """Retention, on a clock. Two jobs, both of which only ever delete.
 
@@ -1566,6 +1668,140 @@ def sweep_expired(dry_run: bool = False):
     # already durable. See retention.delete_clip.
     return {"dry_run": False, "reaped_npz": reap_npz,
             "expired": sorted(expired), "kept": len(live) - len(expired)}
+
+
+# ---------------------------------------------------------------------------
+# The HTTP service (infrastructure.md decision 1, migration step 1).
+#
+# api.py deliberately has no torch/CUDA/pymomentum dependency, so it could run
+# anywhere. It runs *here* because it is already a Modal client: it constructs
+# `modal.Volume.from_name(...)` at import and dispatches through
+# `modal.Function.from_name(APP_NAME, "run_clip").spawn()`. Hosting it anywhere
+# else means a second platform, a second deploy pipeline, and a Modal API token
+# sitting in someone else's secret store. Hosting it here means one account and
+# one `modal deploy`.
+#
+# The coupling is exactly one decorator deep, which is the only reason choosing
+# the tightly-coupled option is defensible: `uvicorn api:app` still runs this
+# unchanged on Railway, Fly or a box, and that escape hatch is what makes this
+# reversible in a day rather than a quarter.
+#
+# `ignore=` keeps the 1.9 GB vendored Fast-SAM-3D-Body tree out of a CPU image
+# that will never import it -- api.py's whole point is that it does not.
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+MOTION_API_DIR = os.path.dirname(os.path.abspath(__file__))
+
+api_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    # The ffmpeg/ffprobe BINARIES, for the upload fingerprint that skips a GPU
+    # reconstruction when the same dance has already been processed. Invoked as
+    # a subprocess, never linked, so no licence reaches this repo. Without them
+    # dedupe silently degrades to exact-sha256 -- and /health says so -- but
+    # $0.08 per avoidable reconstruction is worth an apt package.
+    .apt_install("ffmpeg")
+    # One dependency list, not two: requirements-api.txt is what a laptop
+    # installs and what this image installs, so they cannot drift.
+    .pip_install_from_requirements(os.path.join(MOTION_API_DIR, "requirements-api.txt"))
+    # Mounted so that api.py's own `Path(__file__).parent.parent.parent /
+    # "packages" / "motion-contract" / "python"` resolves inside the container
+    # exactly as it does on a laptop. Reproducing the repo's shape is cheaper
+    # and less surprising than patching the path at import.
+    # migrations/ is 11 KB and deliberately NOT excluded: `modal shell` into
+    # this container is the one place that is guaranteed to be able to reach a
+    # private Neon endpoint, so `python3 migrate.py` has to work from here.
+    .add_local_dir(MOTION_API_DIR, remote_path="/app/services/motion-api",
+                   ignore=["vendor/**", "**/__pycache__/**", "*.pyc"])
+    # The one file the `vendor/**` exclusion above must NOT take with it, put
+    # back at the exact path the repo has it at.
+    #
+    # THIRD INTEGRATION PASS, broken only in combination. `deployment` wrote
+    # that exclusion when api.py had no vendored dependency at all -- its whole
+    # point is that it never imports torch or the CV tree, and 1.9 GB of
+    # Fast-SAM-3D-Body has no business in a CPU image. `grounding-wiring`, cut
+    # from a base with no api_image in it, then gave `motion_result` a
+    # module-level `import world_placement_probe`, and that module does a
+    # module-level `import skeleton_constraints` off `vendor/`. api.py imports
+    # motion_result at module level, so the composed result is that
+    # `modal deploy` SUCCEEDS and then every single request to the ASGI app
+    # dies in `web()` with ModuleNotFoundError. Git had no conflict to raise
+    # (two different files), and no test caught it (every suite runs from a
+    # checkout where vendor/ is simply there on disk).
+    #
+    # 17 KB of pure numpy, no torch. Mounted at its repo path rather than flat
+    # so that world_placement_probe's own `sys.path.insert(_HERE / "vendor/...")`
+    # finds it with no import-path change in any module -- gltf_image mounts
+    # the same file flat at /app because that image has a flat /app.
+    .add_local_file(os.path.join(MOTION_API_DIR, "vendor", "fast-sam-3d-body",
+                                 "tools", "skeleton_constraints.py"),
+                    "/app/services/motion-api/vendor/fast-sam-3d-body/tools/skeleton_constraints.py")
+    .add_local_dir(os.path.join(REPO_ROOT, "packages", "motion-contract", "python"),
+                   remote_path="/app/packages/motion-contract/python",
+                   ignore=["**/__pycache__/**", "*.pyc", ".venv/**"])
+    .add_local_dir(os.path.join(REPO_ROOT, "packages", "motion-contract", "schema"),
+                   remote_path="/app/packages/motion-contract/schema")
+)
+
+
+@app.function(
+    image=api_image,
+    secrets=R2_SECRET + DB_SECRET,
+    # Scale to zero. A cold start is a few seconds on the upload endpoint,
+    # where it is invisible, and on the first two-second job poll, where it is
+    # also invisible. min_containers=1 pins ~$45/month of always-on container
+    # and should not be paid speculatively -- only if a real user complains
+    # (infrastructure.md §2, "honest costs of this choice").
+    min_containers=0,
+    # One upload can be 200 MB and one job poll is a single Volume read, so the
+    # ceiling here is memory, not CPU. 100 is Modal's documented practical
+    # maximum per container and leaves the workspace's 200 req/s limit as the
+    # real bound.
+    timeout=600,
+)
+@modal.concurrent(max_inputs=100)
+@modal.asgi_app()
+def web():
+    import sys
+    sys.path.insert(0, "/app/services/motion-api")
+    from api import app as fastapi_app
+    return fastapi_app
+
+
+@app.function(image=sweeper_image, secrets=R2_SECRET, timeout=300)
+def verify_r2_access():
+    """Does the `stepwise-r2` Modal Secret actually work against the bucket?
+
+    The Secret was created 2026-03 and nothing had used it since, so "the keys
+    are probably right" was an assumption worth one container-second to delete.
+    This does the same round trip as verify_r2.py -- write, range-read, check
+    the bytes, delete -- from inside Modal, with the Secret as the only source
+    of credentials. It never prints a credential, only which names are present.
+
+        modal run modal_app.py::verify_r2_access
+    """
+    import sys
+    import urllib.request
+    sys.path.insert(0, "/app")
+    import storage
+
+    if not storage.enabled():
+        return {"ok": False, "missing": storage.missing_env()}
+
+    key = "diagnostic/modal-range-probe.bin"
+    data = bytes(range(256)) * 64
+    storage.put_bytes(key, data, "application/octet-stream")
+    try:
+        req = urllib.request.Request(storage.url_for(key), headers={"Range": "bytes=100-199"})
+        with urllib.request.urlopen(req) as r:
+            body, status = r.read(), r.status
+            content_range = r.headers.get("Content-Range")
+    finally:
+        storage.delete(key)
+    out = {"ok": status == 206 and body == data[100:200], "status": status,
+           "content_range": content_range, "bucket_env_set": True}
+    print(f"[verify_r2_access] {out}")
+    return out
 
 
 @app.local_entrypoint()

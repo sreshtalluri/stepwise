@@ -6,22 +6,29 @@ and to disk for the upload's temp file, so it can run anywhere (a laptop, a
 small always-on box) independent of the GPU image. The real pipeline lives in
 modal_app.py + tools/process_clip.py; this file wires it to HTTP.
 
-Object storage decision (see docs/PRD.md, docs/OPEN-DECISIONS.md E1 note on
-GPU host): **Modal Volumes, not S3.** modal_app.py already uses three Volumes
-(weights/eval-clips/results) as the only storage layer for everything the
-pipeline reads and writes -- run_clip reads its input clip from a Volume path
-and writes its job-status/npz/GLB output to one. Standing up S3/MinIO here
-would mean two storage systems for one job (uploads in S3, everything
-downstream in Modal Volumes) with a copy step between them for no benefit --
-Volumes are already reachable from any process holding a Modal token (this
-file proves it: no Modal container needed to read/write one), version data
-with `.commit()`, and require zero new infrastructure or credentials beyond
-what modal_app.py already needs. Cost: Volume reads go through Modal's client
-library, not raw HTTP GET, so `/assets/{asset_id}` proxies bytes through this
-service rather than redirecting to a public URL -- acceptable at this scale,
-and swappable for real S3 + presigned URLs later without changing the
-contract (asset_id stays opaque either way, see AnimationRef's schema
-comment: never a signed/expiring URL AS the id itself).
+Object storage: **delivered bytes on Cloudflare R2, pipeline internals on Modal
+Volumes.** This paragraph used to say "Volumes, not S3", and the sentence that
+overturned it is its own: *"Volume reads go through Modal's client library, not
+raw HTTP GET, so `/assets/{asset_id}` proxies bytes through this service."*
+That proxy cannot answer a `Range:` request, so a `<video>` asking for a seek
+gets a 200 with the entire body and the learner scrubbing their own clip --
+DESIGN.md §7c's core interaction -- waits for the whole download. It is a
+product defect, not a cost problem (docs/research/infrastructure.md decision 3;
+R2's zero egress is a bonus, not the argument).
+
+So: source video, GLBs and the materialised `MotionResult` live in R2 and
+`GET /assets/{asset_id}` answers **302** to an R2 URL that honours ranges. The
+`.npz` and the model weights stay on Volumes -- pipeline-internal, never
+touched by a browser, and already working. The contract is untouched: an
+`asset_id` is still opaque and immutable, never a signed or expiring URL *as*
+the id (AnimationRef's schema comment), and this endpoint is still the separate
+resolution step that comment describes. Where R2 has no copy -- a lesson built
+before the move, or R2 not configured at all -- the old byte proxy still
+answers, so nothing that used to work stops working. See storage.py.
+
+Job state: see jobstore.py. `{job_id}.job-status.json` on a Volume is still
+the default; `STEPWISE_JOB_BACKEND=postgres` moves the source of truth to a
+`jobs` row without changing a byte of what this service serves.
 
 Dispatch: modal.Function.lookup (this app must be `modal deploy`ed first,
 see README) + .spawn() -- async, returns immediately. run_clip itself now
@@ -63,13 +70,15 @@ from typing import Optional
 
 import modal
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 
 import fingerprint
 import ingest
+import jobstore
 import motion_result
 import retention
+import storage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "packages" / "motion-contract" / "python"))
 from motion_contract import validate_job_status, validate_motion_result  # noqa: E402
@@ -116,6 +125,23 @@ def _volume_read_bytes(volume: modal.Volume, path: str) -> Optional[bytes]:
     return buf.getvalue()
 
 
+def _r2_read(key: str) -> Optional[bytes]:
+    """Read a small object out of R2, or None for "not there / not configured".
+
+    Only used for the gzipped MotionResult, which this service must parse and
+    contract-validate before serving -- so it is the one delivered artifact
+    that cannot simply be a 302. Everything a browser fetches directly goes
+    through `GET /assets/{id}` and never lands in this process's memory.
+    """
+    if not storage.enabled():
+        return None
+    try:
+        obj = storage.client().get_object(Bucket=storage.bucket(), Key=key)
+        return obj["Body"].read()
+    except Exception:  # noqa: BLE001 -- missing or unreachable: the Volume still has it
+        return None
+
+
 # ---------------------------------------------------------------------------
 # POST /clips -- upload, store, dispatch. Returns immediately (spec item 2:
 # .spawn(), never .remote()).
@@ -146,6 +172,19 @@ class DispatchResponse(BaseModel):
     # was started. The client needs no special handling -- the job it is handed
     # is already "succeeded", so the normal poll goes straight to the lesson.
     deduplicated: bool = False
+
+
+def _publish_video(clip_id: str, path: str) -> None:
+    """Best-effort: an R2 hiccup must not fail an upload whose bytes are safely
+    on the Volume. The cost of skipping it is that this one lesson's video is
+    served through the old byte proxy, without range requests -- degraded, and
+    logged, rather than lost."""
+    if not storage.enabled():
+        return
+    try:
+        storage.put_file(storage.video_key(clip_id), path, "video/mp4")
+    except Exception as e:  # noqa: BLE001
+        print(f"[r2] could not publish video for {clip_id}: {e}")
 
 
 def _usable(entry: dict) -> bool:
@@ -199,10 +238,27 @@ def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict,
     job_id = f"job_{clip_id}"  # resumable: DESIGN.md §7c's copyable link is just this job_id
     with uploads_volume.batch_upload(force=True) as batch:
         batch.put_file(tmp_path, f"/{clip_id}.mp4")
+    # The video goes to R2 here rather than at export time, because these
+    # bytes are already on this machine: publishing later would mean reading a
+    # 5 MB object back out of a Volume for no reason. The Volume copy stays --
+    # run_clip reads its input from there, and moving that is migration step 6
+    # (presigned browser uploads), not this one.
+    #
+    # THIRD INTEGRATION PASS: `deployment` put this call, and the
+    # `jobstore.record_dispatch` below, inside `upload_clip` -- which is where
+    # they lived when that branch was cut. `link-ingestion` had since moved
+    # that whole body here, so that the uploaded-file door and the pasted-link
+    # door mint a job exactly once, in one place. Git offered the two as
+    # non-overlapping edits to a function one side had deleted; taking that
+    # offer would have dropped R2 publishing and the jobstore record from BOTH
+    # doors with no conflict and no failing test. Re-derived here instead, and
+    # the link door gains both for free -- a linked lesson's video is now
+    # range-servable like an uploaded one.
+    _publish_video(clip_id, tmp_path)
 
     # job_id -> clip_id is needed later (retry, result-building) without
-    # parsing it back out of the job_id string -- write it once, here.
-    retention.write_json(results_volume, f"/{job_id}.job-meta.json", {"clip_id": clip_id})
+    # parsing it back out of the job_id string -- written once, here.
+    jobstore.record_dispatch(results_volume, job_id, clip_id)
     entry = dict(fp, clip_id=clip_id, job_id=job_id, created_at=time.time())
     if source_key:
         entry["source_key"] = source_key
@@ -225,6 +281,14 @@ def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict,
     # the honest fix (a lease in a store with compare-and-set) is not worth
     # standing up a second storage system for. Revisit if duplicate spawns show
     # up in practice.
+    #
+    # Deliberately a Volume read and NOT `jobstore.read_status`, even under
+    # STEPWISE_JOB_BACKEND=postgres. This asks one question -- "has run_clip
+    # started and written its own status document" -- and only the worker
+    # writes that document (jobstore.py: the worker still writes the Volume
+    # JSON through migration step 3). `record_dispatch` above inserts a
+    # `queued` row for THIS request, so reading the row back here would find
+    # our own insert and adopt a job nobody ever spawned.
     if _volume_read_json(results_volume, f"/{job_id}.job-status.json") is not None:
         print(f"[dispatch] {job_id} is already running -- adopting it, not spawning again")
         return DispatchResponse(clip_id=clip_id, job_id=job_id, deduplicated=True)
@@ -444,7 +508,7 @@ def _refuse_if_removed(clip_id: str) -> None:
 
 @app.get("/jobs/{job_id}")
 def get_job_status(job_id: str) -> dict:
-    doc = _volume_read_json(results_volume, f"/{job_id}.job-status.json")
+    doc = jobstore.read_status(results_volume, job_id, _clip_id_for)
     if doc is None:
         # Removal deletes the job-status document, so a MISSING one is the only
         # case that can be a removed lesson -- which is why the tombstone is
@@ -491,7 +555,7 @@ def get_job_status(job_id: str) -> dict:
 
 @app.post("/jobs/{job_id}/retry")
 def retry_job(job_id: str) -> dict:
-    doc = _volume_read_json(results_volume, f"/{job_id}.job-status.json")
+    doc = jobstore.read_status(results_volume, job_id, _clip_id_for)
     if doc is None:
         raise HTTPException(404, "Unknown job_id.")
     if doc["state"] != "failed":
@@ -508,6 +572,7 @@ def retry_job(job_id: str) -> dict:
     _refuse_if_removed(meta["clip_id"])
 
     retry_count = doc["retry_count"] + 1
+    jobstore.record_retry(results_volume, job_id, meta["clip_id"], retry_count)
     _run_clip_fn().spawn(clip_id=meta["clip_id"], job_id=job_id, retry_count=retry_count)
     return {"job_id": job_id, "retry_count": retry_count}
 
@@ -537,7 +602,8 @@ def get_job_result(job_id: str) -> dict:
     # poll, so the extra read is free where it matters.
     _refuse_if_removed(clip_id)
 
-    stored = _volume_read_bytes(results_volume, f"/{clip_id}.motion-result.json.gz")
+    stored = _r2_read(storage.motion_result_key(clip_id)) \
+        or _volume_read_bytes(results_volume, f"/{clip_id}.motion-result.json.gz")
     if stored is not None:
         doc = json.loads(gzip.decompress(stored))
         # The stored document was written by whichever job first reconstructed
@@ -588,9 +654,20 @@ def _touch(clip_id: str) -> None:
 # ---------------------------------------------------------------------------
 # GET /assets/{asset_id} -- the "resolve separately at render time" endpoint
 # both source_video.asset_id and AnimationRef.glb_asset_id require (schema
-# comment: never a signed/expiring URL AS the id -- this endpoint is the
-# separate resolution step, and streams bytes directly since there is no S3
-# to presign against yet, see the storage-decision docstring above).
+# comment: never a signed/expiring URL AS the id -- this endpoint IS the
+# separate resolution step that comment describes).
+#
+# 302 to R2 when R2 has the object, because that is the only way the browser
+# gets to do a real `Range:` request: the fallback below reads the whole thing
+# into memory and returns one Response, so a seek in a 60-second clip pays for
+# every byte of it (storage.py's docstring has the measurement and the
+# reasoning). The fallback is not dead code -- lessons reconstructed before the
+# move have no R2 copy, and a deployment with no R2 credentials must still
+# serve. It is worse, not broken, and it says so in /health.
+#
+# The tombstone is checked BEFORE any URL is produced. A removal that left the
+# GLB individually fetchable would not be a removal, and handing out a URL and
+# then deleting the object would leave a live signed link to nothing.
 # ---------------------------------------------------------------------------
 
 @app.get("/jobs/{job_id}/video")
@@ -614,23 +691,33 @@ def get_job_video(job_id: str) -> Response:
 
 @app.get("/assets/{asset_id:path}")
 def get_asset(asset_id: str) -> Response:
+    clip_id = storage.clip_id_for_asset(asset_id)
+    if clip_id is None:
+        raise HTTPException(404, "Unrecognized asset id.")
+    _refuse_if_removed(clip_id)
+
+    if storage.enabled():
+        key = storage.key_for_asset(asset_id)
+        try:
+            if storage.exists(key):
+                # 302, not 301: the URL on the other end is a presigned one
+                # until a custom domain exists, and a permanently-cached
+                # redirect to something that expires in six hours is a bug
+                # waiting for a slow week.
+                return RedirectResponse(storage.url_for(key), status_code=302)
+        except Exception as e:  # noqa: BLE001 -- R2 unreachable: fall through, do not 500
+            print(f"[r2] lookup failed for {asset_id}, falling back to the Volume: {e}")
+
     if asset_id.startswith("video:"):
-        clip_id = asset_id[len("video:"):]
-        _refuse_if_removed(clip_id)
         video = _volume_read_bytes(uploads_volume, f"/{clip_id}.mp4") or _volume_read_bytes(eval_volume, f"/{clip_id}.mp4")
         if video is None:
             raise HTTPException(404, "No video for this asset id.")
         return Response(content=video, media_type="video/mp4")
-    if asset_id.endswith(".glb"):
-        # `{clip_id}_track{n}.glb`, per modal_app.export_clip_gltf. Checked
-        # against the tombstone too: the GLB is the dancer's motion, and a
-        # removal that left it individually fetchable would not be a removal.
-        _refuse_if_removed(asset_id.rsplit("_track", 1)[0])
-        glb = _volume_read_bytes(results_volume, f"/{asset_id}")
-        if glb is None:
-            raise HTTPException(404, "No GLB for this asset id.")
-        return Response(content=glb, media_type="model/gltf-binary")
-    raise HTTPException(404, "Unrecognized asset id.")
+    # `{clip_id}_track{n}.glb`, per modal_app.export_clip_gltf.
+    glb = _volume_read_bytes(results_volume, f"/{asset_id}")
+    if glb is None:
+        raise HTTPException(404, "No GLB for this asset id.")
+    return Response(content=glb, media_type="model/gltf-binary")
 
 
 # ---------------------------------------------------------------------------
@@ -706,6 +793,7 @@ def remove_lesson(clip_id: str, request: RemovalRequest | None = None) -> Remova
 
     reason = (request.reason if request else "requested")[:200]
     outcome = retention.delete_clip(uploads_volume, results_volume, clip_id, job_id, reason)
+    jobstore.forget(job_id)
     _TOUCHED.pop(clip_id, None)
     print(f"[removal] {clip_id}: deleted {len(outcome['deleted'])} artifacts ({reason})")
     return RemovalResponse(clip_id=clip_id, removed=outcome["deleted"],
@@ -714,4 +802,27 @@ def remove_lesson(clip_id: str, request: RemovalRequest | None = None) -> Remova
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True}
+    """What is actually wired up, for the person reading this at 2am.
+
+    infrastructure.md §7 names the failure mode this exists to stop: *"a
+    build-time environment variable that is absent produces a silently broken
+    deploy, not an error."* That argued for a hard assertion at import. A hard
+    assertion is wrong here, because "no R2" and "no database" are both
+    supported, deliberate configurations during the migration -- failing to
+    boot on them would mean the service cannot be deployed until every
+    credential exists, which is exactly the blocking this whole branch avoids.
+    So it fails loudly in the one place that can be read instead: this
+    endpoint says which degraded mode it is in and which variable would end it.
+
+    Never a secret value -- only which names are set. `assets` is the question
+    that matters most, because `volume-proxy` is the mode where video seeking
+    does not work.
+    """
+    return {
+        "ok": True,
+        "assets": "r2" if storage.enabled() else "volume-proxy",
+        "assets_missing_env": storage.missing_env(),
+        "assets_url_mode": "custom-domain" if os.environ.get("R2_PUBLIC_BASE_URL") else "presigned",
+        "jobs": jobstore.health(),
+        "dedupe": "perceptual" if fingerprint.ffmpeg_available() else "sha256-only",
+    }
