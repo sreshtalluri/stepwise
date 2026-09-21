@@ -643,6 +643,18 @@ gltf_image = (
                     "/app/mhr_joint_hierarchy.json")
     .add_local_file(os.path.join(os.path.dirname(__file__), "grounding.py"),
                     "/app/grounding.py")
+    # world-placement (third integration pass, OPEN-DECISIONS E6): motion_result
+    # now imports world_placement_probe for the real per-frame camera-space
+    # placement, and world_placement_probe in turn imports skeleton_constraints
+    # (for the rigid-body step) and grounding (already mounted above) -- both
+    # resolve via the same flat /app on sys.path this image already relies on
+    # for motion_result's plain `from grounding import ...` to work, so no
+    # import-path changes are needed in either module, only these two mounts.
+    .add_local_file(os.path.join(os.path.dirname(__file__), "world_placement_probe.py"),
+                    "/app/world_placement_probe.py")
+    .add_local_file(os.path.join(os.path.dirname(__file__),
+                                  "vendor/fast-sam-3d-body/tools/skeleton_constraints.py"),
+                    "/app/skeleton_constraints.py")
 )
 
 # CPU-only image for the retention sweeper: it moves no arrays, it only lists

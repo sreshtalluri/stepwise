@@ -231,7 +231,7 @@ def place_track(npz_data, track_id, *, rigid=True, smooth=True):
                & (ankle_uv[..., 1] >= 0) & (ankle_uv[..., 1] < height))
     weights, speed = image_contact_weights(ankle_uv, visible, trans[:, 2], times, focal)
 
-    return dict(times=times, joints=joints, trans=trans, reproj_px=errs, feet=feet,
+    return dict(idx=idx, times=times, joints=joints, trans=trans, reproj_px=errs, feet=feet,
                 contact_w=weights, foot_speed=speed, visible=visible, focal=focal,
                 width=width, height=height, cam_t=cam_t)
 

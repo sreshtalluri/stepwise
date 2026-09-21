@@ -139,6 +139,21 @@ MIN_CONTACT_TIME_COVERAGE = MIN_CLIP_EVIDENCE_FRACTION
 # honest answer is "none", not a tilted stage.
 MAX_TILT_DEG = 25.0
 
+# Tilt cap for the CAMERA-SPACE solve (solve_grounding_camera_space) -- NOT a
+# relaxed MAX_TILT_DEG.  MAX_TILT_DEG's justification ("more than 25 degrees
+# off horizontal means the camera-steady assumption broke") is specific to the
+# OLD character-local frame, where body_world carries identity rotation every
+# frame and the floor SHOULD sit near +Y if the phone was held upright.
+# Solving directly in the camera's own space removes that assumption: real
+# floors measured on solo-01/solo-07/group-synced-01 sit 13-18 degrees off +Y
+# because the phone was lying near the ground pointing up, which is a fact
+# about how these clips were filmed, not a broken assumption -- see
+# docs/research/world-placement.md.  That measured range would clear either
+# threshold; this one is wider on purpose because there is no steadiness
+# assumption left to violate here, short of the camera pointing mostly
+# sideways or down at the dancer instead of at the floor.
+CAMERA_SPACE_MAX_TILT_DEG = 35.0
+
 # Contact-heuristic knobs (defaults for detect_foot_contacts; they belong to
 # the heuristic, not to the honesty decision, so a replacement detector is free
 # to ignore them).
@@ -630,6 +645,136 @@ def solve_grounding_for_clip(npz_data, joint_names: Sequence[str], **kwargs) -> 
         frame_height=int(npz_data["frame_height"]) if "frame_height" in npz_data else 0,
     )
     return solve_grounding(tracks, npz_data["sample_times_s"], **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Camera-space grounding (docs/research/world-placement.md, OPEN-DECISIONS E6).
+#
+# foot_tracks_from_clip above works in the character-local frame, which has no
+# depth in it -- global translation is flattened to a per-clip constant, so a
+# floor fit there is a real plane but built from feet that never actually
+# travelled. world_placement_probe.place_track solves the per-frame camera-
+# space translation that frame is missing (rigid skeleton + per-frame 3-DoF
+# PnP against the detector's own keypoints + a 5-frame median filter). The
+# functions below take that solve's output and feed it through the SAME
+# honesty decision (solve_grounding), just with real per-frame depth in the
+# evidence instead of a flattened one.
+# ---------------------------------------------------------------------------
+
+# camera space (world_placement_probe: X-right, Y-DOWN, Z-forward) -> contract
+# world space (X-right, Y-up, Z-forward): negate Y and Z, a handedness-
+# preserving 180-degree rotation about X. The same flip
+# skeleton_constraints.constrain_clip's `jc_to_ss` already applies to get from
+# pred_joint_coords to skel_state's world-space translation (verified there
+# against a real exported GLB), applied once here at the point camera-space
+# output is consumed.
+_CAMERA_TO_WORLD_FLIP = np.array([1.0, -1.0, -1.0])
+
+# Reused, not re-derived: world_placement_probe.probe() already declines a
+# track from its own printed floor summary when it clears place_track's
+# 25-frame minimum (enough evidence to place the body at all) but still has
+# too few geometrically-on-the-floor contact candidates to trust -- this is
+# exactly solo-07 track 3's case (48 frames, but short/distant with almost no
+# usable contacts). Same threshold probe() uses for both numbers: 12 contacts
+# (MIN_CONTACT_INLIERS -- the same redundancy bar fit_floor_plane itself
+# requires) at weight > 0.05.
+_POOL_MIN_CONTACTS = MIN_CONTACT_INLIERS
+_POOL_MIN_CONTACT_WEIGHT = 0.05
+
+
+def _passes_pool_evidence_gate(placement: Optional[dict]) -> bool:
+    """Clearing world_placement_probe.place_track's own 25-frame gate (it got
+    placed at all) is not the same question as whether its feet should be
+    pooled into the SHARED floor fit -- a short/distant track can clear the
+    first and fail the second. `placement` is None (never placed) or one
+    `world_placement_probe.place_track` return dict."""
+    if placement is None:
+        return False
+    good = np.isfinite(placement["feet"]).all(axis=2) & (placement["contact_w"] > _POOL_MIN_CONTACT_WEIGHT)
+    return int(good.sum()) >= _POOL_MIN_CONTACTS
+
+
+def foot_tracks_from_camera_space(placements: Sequence[Optional[dict]], n_samples: int) -> list[FootTrack]:
+    """`FootTrack`s built from world_placement_probe's camera-space solve,
+    converted once into contract world space, instead of foot_tracks_from_clip's
+    character-local (no-travel) frame.
+
+    `placements[i]` is `world_placement_probe.place_track(data, track_id)`'s
+    return value for the i-th confidently-tracked dancer -- or None, either
+    because that track never cleared place_track's own 25-frame minimum, or
+    because a caller has already declined it via `_passes_pool_evidence_gate`
+    (a None placement contributes no evidence here; it does not affect the
+    "were feet visible" denominator either).
+    """
+    tracks = []
+    for placement in placements:
+        points = np.zeros((n_samples, 2, 3), dtype=np.float64)
+        valid = np.zeros((n_samples, 2), dtype=bool)
+        reconstructed = np.zeros(n_samples, dtype=bool)
+        if placement is not None:
+            idx = np.asarray(placement["idx"])
+            feet_world = np.asarray(placement["feet"], dtype=np.float64) * _CAMERA_TO_WORLD_FLIP
+            ok = np.isfinite(feet_world).all(axis=2)
+            vis = np.asarray(placement["visible"], dtype=bool)
+            points[idx] = np.where(ok[:, :, None], feet_world, 0.0)
+            valid[idx] = ok & vis
+            reconstructed[idx] = True
+        tracks.append(FootTrack(points=points, valid=valid, reconstructed=reconstructed))
+    return tracks
+
+
+def _camera_space_contact_detector(weights_by_track: Sequence[np.ndarray]) -> ContactDetector:
+    """Adapts world_placement_probe.image_contact_weights's per-track output
+    (already computed by place_track, from real image-space foot speed and
+    real depth) into the ContactDetector seam, instead of re-running
+    detect_foot_contacts's world-space height/speed heuristic on the composed
+    points. This is the exact evidence world-placement.md's floor-inlier
+    numbers (52% -> 90% on solo-01) were measured against.
+
+    solve_grounding calls the detector once per track, in the same order as
+    the `tracks` list it was given -- relied on here via iteration order, so
+    the two lists this is paired with (from foot_tracks_from_camera_space)
+    must be built from the same `placements` list. A mismatched call count
+    raises StopIteration rather than silently pairing the wrong track.
+    """
+    it = iter(weights_by_track)
+
+    def _detector(points: np.ndarray, valid: np.ndarray, times_s: np.ndarray) -> np.ndarray:
+        return next(it)
+
+    return _detector
+
+
+def _pooled_weight_array(placement: Optional[dict], n_samples: int) -> np.ndarray:
+    w = np.zeros((n_samples, 2), dtype=np.float64)
+    if placement is not None:
+        w[np.asarray(placement["idx"])] = placement["contact_w"]
+    return w
+
+
+def solve_grounding_camera_space(
+    placements: Sequence[Optional[dict]],
+    times_s,
+    n_samples: int,
+    *,
+    max_tilt_deg: float = CAMERA_SPACE_MAX_TILT_DEG,
+    **kwargs,
+) -> GroundingResult:
+    """One call from a list of world_placement_probe.place_track results to
+    the contract fragment, real per-frame depth instead of the flattened
+    character-local frame foot_tracks_from_clip/solve_grounding_for_clip use.
+
+    `placements[i]` is `world_placement_probe.place_track(data, track_id)` for
+    the i-th confidently-tracked dancer, or None if that track had fewer than
+    25 frames. Every other gate (MIN_CLIP_EVIDENCE_FRACTION, MIN_CONTACT_INLIERS,
+    MAX_INLIER_RMS_M, ...) is unchanged, via solve_grounding's own defaults;
+    only the tilt cap and the evidence source differ.
+    """
+    pooled = [p if _passes_pool_evidence_gate(p) else None for p in placements]
+    tracks = foot_tracks_from_camera_space(pooled, n_samples)
+    weights = [_pooled_weight_array(p, n_samples) for p in pooled]
+    detector = _camera_space_contact_detector(weights)
+    return solve_grounding(tracks, times_s, contact_detector=detector, max_tilt_deg=max_tilt_deg, **kwargs)
 
 
 if __name__ == "__main__":  # measurement tool: python grounding.py <clip.npz>
