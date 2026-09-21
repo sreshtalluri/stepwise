@@ -774,7 +774,21 @@ def solve_grounding_camera_space(
     tracks = foot_tracks_from_camera_space(pooled, n_samples)
     weights = [_pooled_weight_array(p, n_samples) for p in pooled]
     detector = _camera_space_contact_detector(weights)
-    return solve_grounding(tracks, times_s, contact_detector=detector, max_tilt_deg=max_tilt_deg, **kwargs)
+    result = solve_grounding(tracks, times_s, contact_detector=detector,
+                             max_tilt_deg=max_tilt_deg, **kwargs)
+    # Which tracks got as far as the pooled fit, recorded so that a "none" is
+    # explainable from the log alone.  Without this a clip where every track
+    # was declined here reports `feet_not_visible_enough`, which is solve_
+    # grounding answering the question it was asked -- the pooled tracks
+    # really do have no visible feet, because there are no pooled tracks --
+    # and would send someone looking at ankle keypoints instead of at the
+    # placement evidence that actually ran out.
+    result.diagnostics.update(
+        n_placements=len(placements),
+        n_placed=sum(p is not None for p in placements),
+        n_pooled=sum(p is not None for p in pooled),
+    )
+    return result
 
 
 if __name__ == "__main__":  # measurement tool: python grounding.py <clip.npz>

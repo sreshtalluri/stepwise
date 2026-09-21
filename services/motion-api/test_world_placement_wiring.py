@@ -183,3 +183,60 @@ def test_an_unplaceable_track_is_never_reported_as_observed():
     # ...while the long track in the same clip did get placed.
     long_track = next(p for p in doc["persons"] if p["track_id"] == 1)
     assert np.asarray([s["position"] for s in long_track["root_trajectory"]]).std(0).max() > 0.1
+
+# --------------------------------------------------------------------------- honesty
+
+def test_none_is_still_reachable_on_the_camera_space_path():
+    """The wiring made `grounded` much EASIER to reach -- all three measured
+    clips flipped from `none` to `grounded`.  That is only a good result if
+    `none` is still the answer when the evidence is absent, so these are the
+    three ways a real clip runs out of evidence, checked against the camera-
+    space solve rather than the old character-local one.
+
+    Guards the same property DESIGN.md 7h and evaluation/clips.yaml's
+    `stress-cropped-feet` slot exist for: never fake a floor.
+    """
+    import copy
+
+    import grounding as g
+
+    npz_bytes, _, _ = _synth_npz(travel_m=4.0)
+    data = np.load(io.BytesIO(npz_bytes), allow_pickle=True)
+    n = len(data["per_frame"])
+    times = np.asarray(data["sample_times_s"], dtype=float)
+    placement = wp.place_track(data, 1)
+    assert placement is not None
+
+    assert g.solve_grounding_camera_space([placement], times, n).grounding["status"] == "grounded"
+
+    # 1. the detector never sees the ankles (feet cropped out of the shot)
+    blind = copy.deepcopy(placement)
+    blind["visible"] = np.zeros_like(placement["visible"])
+    assert g.solve_grounding_camera_space([blind], times, n).grounding["status"] == "none"
+
+    # 2. nothing could be placed at all
+    refused = g.solve_grounding_camera_space([None], times, n)
+    assert refused.grounding["status"] == "none"
+    assert refused.grounding["floor_plane"] is None
+    # ...and the log says WHICH evidence ran out, not just that feet were not
+    # visible -- there were no pooled tracks for feet to be visible in.
+    assert refused.diagnostics["n_placements"] == 1
+    assert refused.diagnostics["n_placed"] == 0
+    assert refused.diagnostics["n_pooled"] == 0
+
+
+def test_a_declined_track_is_counted_in_the_diagnostics():
+    """solo-07 track 3 is the real case: placed, but short and 7-9 m out, and
+    its own floor sits 53 cm off track 1's.  Pooling it moves the shared plane
+    by 0.7 cm, so it is left in -- but whether a track was declined has to be
+    visible in the log, or a `none` cannot be explained after the fact."""
+    import grounding as g
+
+    npz_bytes, _, _ = _synth_npz(travel_m=4.0)
+    data = np.load(io.BytesIO(npz_bytes), allow_pickle=True)
+    n = len(data["per_frame"])
+    times = np.asarray(data["sample_times_s"], dtype=float)
+    placement = wp.place_track(data, 1)
+
+    d = g.solve_grounding_camera_space([placement, None], times, n).diagnostics
+    assert (d["n_placements"], d["n_placed"], d["n_pooled"]) == (2, 1, 1)
