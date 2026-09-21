@@ -613,15 +613,122 @@ gltf_image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install("torch==2.8.0")
     .pip_install("pymomentum-gpu==0.1.114.post0")
-    # pygltflib: W10's region_mask.py post-processes the GLB
-    # save_gltf_from_skel_states writes, splitting its one mesh into named
-    # region_<id> sub-meshes (docs/OPEN-DECISIONS.md E3) -- plain glTF JSON/
-    # buffer manipulation, no pymomentum/trimesh API needed for it.
+    # pygltflib: post-export GLB surgery, now for TWO independent reasons that
+    # both land on the same dependency.
+    #   * W10's region_mask.py splits the single skinned mesh
+    #     save_gltf_from_skel_states writes into named region_<id> sub-meshes
+    #     (docs/OPEN-DECISIONS.md E3).
+    #   * export-quality's `_rewrite_interpolation_linear` fixes up the sampler
+    #     interpolation mode, because pymomentum has no interpolation knob
+    #     (verified empirically against this exact pin).
+    # Plain glTF JSON/buffer manipulation in both cases -- no pymomentum or
+    # trimesh API needed for either.
     .pip_install("numpy", "trimesh", "pygltflib")
     # Mounted at container start, same pattern as cv_image's VENDOR_DIR --
     # editing region_mask.py doesn't force a rebuild of the layers above.
     .add_local_dir(GLTF_TOOLS_DIR, remote_path="/app/motion-api-tools")
 )
+
+
+# glTF sampler interpolation, fixed up after pymomentum writes the file.
+#
+# pymomentum 0.1.114.post0 emits `STEP` on every animation sampler and offers
+# no way to ask for anything else. That is not a guess: every export path it
+# exposes was tried against the real MHR skeleton and all three produce STEP --
+# `Character.save_gltf_from_skel_states` plain, the same call with a
+# `FileSaveOptions`, and the lower-level `GltfBuilder.add_skeleton_states`.
+# `FileSaveOptions` has nine fields (blend_shapes, collisions,
+# coord_system_info, extensions, fbx_namespace, gltf_file_format, locators,
+# mesh, permissive) and none concerns interpolation, and every plausible
+# keyword (`interpolation=`, `interp=`, `linear=`, ...) is rejected by the
+# pybind11 signature. So a post-export rewrite is the only available fix, and
+# it follows the precedent already set for GLB post-processing with pygltflib.
+#
+# STEP means no interpolation at all: the pose snaps to each keyframe and holds
+# it until the next one. Measured on the real solo-01 export, sampling 4x denser
+# than the 15 fps keyframes: 75.8% of rendered samples are a dead freeze and the
+# body then teleports up to 629 mm in a single sample. That is the "tracking the
+# movements properly, but not crisp like human movement" complaint, exactly.
+#
+# LINEAR, not CUBICSPLINE. Measured by holding out every other real keyframe from
+# the solo-01 export and reconstructing it (world joint error, mm):
+#
+#     STEP          median 74.58   p90 233.51   max 629.10
+#     LINEAR        median 47.48   p90 131.62   max 382.88
+#     CUBICSPLINE   median 42.01   p90 122.53   max 368.23
+#
+# CUBICSPLINE buys 11% on the median over LINEAR and costs 3x the animation
+# bytes (it stores an in- and out-tangent per keyframe), makes bone length
+# slightly WORSE between keyframes (18.84 mm worst vs LINEAR's 18.05 mm), and
+# -- the deciding argument -- those tangents are fabricated. Nothing in the
+# reconstruction measures velocity; a Catmull-Rom tangent is invented and then
+# rendered indistinguishably from measured data, which is precisely what
+# DESIGN.md §7h forbids. LINEAR adds no numbers at all: on rotations the glTF
+# spec defines it as slerp, and every value in the file is still one the
+# pipeline actually produced.
+#
+# This is pure metadata. The binary chunk is byte-identical across the rewrite
+# (verified: same length, same bytes, max keyframe-value difference exactly
+# 0.0), so bone lengths at every keyframe are untouched and the bone-constraint
+# work's CV survives exactly.
+#
+# Known, measured cost of LINEAR, disclosed rather than hidden: pymomentum
+# carries part of some joints' bone DIRECTION in the translation channel rather
+# than the parent's rotation (l_index1's local offset swings 79 degrees between
+# adjacent keyframes while its length stays constant to 6 decimal places).
+# Lerping a direction takes the chord, so those bones shorten transiently
+# BETWEEN keyframes -- median 0.00006 mm, p90 0.44 mm, but up to 18 mm (23% of
+# its length) on a finger. It is exact again at every keyframe. glTF has no
+# "slerp the translation" mode, so the only real fix is re-deriving the local
+# decomposition so bone direction lives in the rotation channel; that is a
+# change to the export itself, not to this attribute, and it is recorded in
+# docs/OPEN-DECISIONS.md rather than guessed at here.
+GLTF_INTERPOLATION = "LINEAR"
+
+
+def _rewrite_interpolation_linear(glb_path: str) -> dict:
+    """Rewrite every animation sampler's interpolation mode in place.
+
+    Verifies its own work before returning: a silently-failed rewrite would
+    ship a snapping animation that looks like a viewer bug, and a corrupted
+    binary chunk would ship an invisible model. Both are checked, not assumed.
+    """
+    import numpy as np
+    import pygltflib
+
+    gltf = pygltflib.GLTF2().load(glb_path)
+    before = gltf.binary_blob()
+
+    n_rewritten = 0
+    n_samplers = 0
+    for anim in gltf.animations:
+        for sampler in anim.samplers:
+            n_samplers += 1
+            if sampler.interpolation != GLTF_INTERPOLATION:
+                sampler.interpolation = GLTF_INTERPOLATION
+                n_rewritten += 1
+    gltf.save(glb_path)
+
+    after = pygltflib.GLTF2().load(glb_path)
+    blob = after.binary_blob()
+    if blob != before:
+        raise ValueError(
+            f"{glb_path}: the interpolation rewrite changed the binary chunk "
+            f"({len(before)} -> {len(blob)} bytes). It must be metadata-only -- "
+            "refusing to ship an animation whose keyframe data was altered."
+        )
+    modes = {s.interpolation for a in after.animations for s in a.samplers}
+    if modes != {GLTF_INTERPOLATION}:
+        raise ValueError(
+            f"{glb_path}: interpolation is {modes} after the rewrite, expected "
+            f"{{'{GLTF_INTERPOLATION}'}}."
+        )
+    if not np.all(np.isfinite(np.frombuffer(blob, dtype=np.float32))):
+        raise ValueError(
+            f"{glb_path}: non-finite values in the binary chunk after rewrite. "
+            "Refusing to write a GLB that would render as nothing."
+        )
+    return {"n_samplers": n_samplers, "n_rewritten": n_rewritten, "interpolation": GLTF_INTERPOLATION}
 
 
 @app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights}, timeout=600)
@@ -1001,7 +1108,20 @@ def export_clip_gltf(clip_id: str):
 
     lod_path = f"{WEIGHTS_DIR}/mhr-assets/lod3.fbx"
     mhr_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
-    fps = 15.0  # matches process_clip's default; TODO thread the real fps through the npz if it ever varies
+
+    # The real sample rate, derived from the npz's own timeline rather than
+    # hardcoded. run_clip takes an `fps` argument, so the old hardcoded 15.0
+    # silently mislabelled the timing of any run that did not use the default
+    # -- a 30 fps reconstruction was exported as a 15 fps animation, i.e.
+    # playing at half speed. sample_times_s is written by process_clip as
+    # `i / fps`, so the spacing IS the sample rate, and deriving it here also
+    # keeps a standalone re-export correct without threading a parameter
+    # through that could disagree with the data it describes.
+    sample_times_s = data["sample_times_s"]
+    if len(sample_times_s) < 2:
+        raise ValueError(f"{clip_id}: need at least 2 samples to establish a frame rate")
+    fps = round(1.0 / float(sample_times_s[1] - sample_times_s[0]), 6)
+    print(f"sample rate from npz timeline: {fps} fps ({len(sample_times_s)} samples)")
 
     # Body shape, loaded once for the whole clip: the estimator predicts a 45-dim
     # MHR shape vector per person per frame and the export used to drop it on the
@@ -1129,8 +1249,27 @@ def export_clip_gltf(clip_id: str):
             print(f"track {track_id}: regions with NO surface (check before trusting masking): {empty_regions}")
         print(f"track {track_id}: region triangle counts: {region_triangle_counts}")
 
-        out_paths[track_id] = out_path
         print(f"SAVED {out_path} (region-split)")
+
+        # INTEGRATION (second pass): the interpolation rewrite runs LAST, after
+        # the region split, and the order is load-bearing in one direction only.
+        # Both stages rewrite the same GLB with pygltflib. split_glb_by_region
+        # leaves animation channels and samplers untouched but DOES rebuild the
+        # binary chunk (it appends new accessors for the per-region sub-meshes),
+        # so running the rewrite first would still leave LINEAR in the file --
+        # but unverified, because nothing would re-read the shipped bytes.
+        # Running it last means `_rewrite_interpolation_linear`'s three checks
+        # (binary chunk untouched by the rewrite, every sampler LINEAR, no
+        # non-finite float in the chunk) all execute against the file that is
+        # actually shipped, and the finite check now covers the split's new
+        # vertex accessors as well as the animation.
+        #
+        # pymomentum always writes STEP; nothing downstream can ask it not to.
+        # See _rewrite_interpolation_linear for the measurements behind LINEAR.
+        interp = _rewrite_interpolation_linear(out_path)
+        out_paths[track_id] = out_path
+        print(f"SAVED {out_path} (region-split, {interp['n_rewritten']}/{interp['n_samplers']} "
+              f"samplers rewritten to {interp['interpolation']})")
 
     # W4: api.py builds MotionResult from the npz + this manifest without
     # needing pymomentum/CUDA installed -- it never needs to know the GLB
@@ -1139,6 +1278,13 @@ def export_clip_gltf(clip_id: str):
     manifest = {
         "clip_id": clip_id,
         "fps": fps,
+        # How a PLAYER fills the time between two keyframes. Deliberately NOT
+        # the same thing as MotionResult's per-sample `provenance.interpolated`,
+        # which marks a whole pose this pipeline did not observe and held or
+        # filled in. A LINEAR sampler does not make any sample "interpolated"
+        # in the contract's sense -- every keyframe is still exactly what was
+        # reconstructed. Recorded here so the two can never be conflated.
+        "gltf_interpolation": GLTF_INTERPOLATION,
         "glb_paths": {str(tid): os.path.basename(p) for tid, p in out_paths.items()},
         # The exact vector baked into each GLB, so MotionResult.persons[].shape_params
         # reports what was rendered instead of re-deriving (and disagreeing with) it.

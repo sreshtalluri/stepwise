@@ -941,3 +941,308 @@ decisions — both are documented with their measurements in
 `tools/hand_crops.py` rather than silently assumed. E2 (the uncertain-limb
 render) is unaffected but now has a concrete worst case to design against:
 hands are `uncertain` essentially always.
+---
+
+## Export-quality addendum (2026-09-20): interpolation, frame rate, rotation
+
+Branch `export-quality`, off `bone-constraints`. Real Modal L40S sessions ran
+this pass — every number below is measured on a real exported GLB or a real
+reconstruction, none is estimated.
+
+### 1. `STEP` interpolation was the visible defect. Now `LINEAR`.
+
+**The defect.** Every one of the 218 animation samplers in the exported GLB
+carried `interpolation: "STEP"`. `STEP` means no interpolation at all: the
+pose snaps to each keyframe and holds it until the next. Measured on the real
+`solo-01` export by sampling 4× denser than its 15 fps keyframes: **75.4% of
+rendered samples were a dead freeze**, and the body then teleported up to
+**629 mm in a single sample** (p99 489 mm). That is the builder's "tracking
+the movements properly, but not as crisp and pure as human movement",
+quantified.
+
+**It is not fixable at the pymomentum call.** Verified empirically against the
+pinned `pymomentum-gpu==0.1.114.post0`, not assumed from docs: all three
+export paths it exposes emit `STEP` — `Character.save_gltf_from_skel_states`
+plain, the same call with a `FileSaveOptions`, and the lower-level
+`GltfBuilder.add_skeleton_states`. `FileSaveOptions` has nine fields
+(`blend_shapes`, `collisions`, `coord_system_info`, `extensions`,
+`fbx_namespace`, `gltf_file_format`, `locators`, `mesh`, `permissive`) and
+none concerns interpolation; every plausible keyword (`interpolation=`,
+`interp=`, `linear=`, `use_linear=`, `sampler_interpolation=`) is rejected by
+the pybind11 signature. So the fix is a post-export metadata rewrite
+(`_rewrite_interpolation_linear` in `modal_app.py`), following the precedent
+already set for post-processing an exported GLB with `pygltflib`.
+
+**`LINEAR`, not `CUBICSPLINE` — measured, not assumed.** Held out every other
+real keyframe from the `solo-01` export and reconstructed it with each mode,
+scoring world joint position error in mm against the real held-out frames
+(a 7.5 → 15 fps test, strictly harder than the case actually shipped):
+
+| mode | median | p90 | p99 | max |
+|---|---|---|---|---|
+| `STEP` | 74.58 mm | 233.51 | 399.10 | 629.10 |
+| `LINEAR` | 47.48 mm | 131.62 | 225.79 | 382.88 |
+| `CUBICSPLINE` | 42.01 mm | 122.53 | 221.44 | 368.23 |
+
+`CUBICSPLINE` buys 11% on the median over `LINEAR`. Against that it costs 3×
+the animation bytes (an in- and out-tangent per keyframe), makes bone length
+slightly *worse* between keyframes (18.84 mm worst vs `LINEAR`'s 18.05 mm),
+and — the deciding argument — **its tangents are fabricated**. Nothing in this
+pipeline measures velocity; a Catmull-Rom tangent is invented and then
+rendered indistinguishably from measured data, which is exactly what
+`DESIGN.md` §7h forbids. `LINEAR` adds no numbers at all: on rotations the
+glTF spec defines it as slerp, and every value in the file remains one the
+pipeline actually produced. **Fancier is not better here, and the measurement
+is what says so.**
+
+**Result on real hardware** (`solo-01`, `solo-07`, and a 30 fps `solo-01`
+re-exported through the deployed code):
+
+| | before | after |
+|---|---|---|
+| samplers `STEP` | 218 / 218 | 0 / 218 |
+| frozen rendered samples | 75.4% | **1.5%** |
+| largest single-sample jump | 629.10 mm | **185.07 mm** |
+
+### 2. The `provenance.interpolated` distinction (`DESIGN.md` §7h)
+
+A `LINEAR` sampler and `MotionResult`'s per-sample
+`provenance.interpolated` are **not the same thing and must never be
+conflated**. `provenance.interpolated` marks a whole pose the pipeline did not
+observe and held or filled in. Sampler interpolation is how a *player* fills
+the time between two keyframes, both of which are real reconstructions.
+Changing `STEP` → `LINEAR` does not make any sample "interpolated" in the
+contract's sense — no keyframe changed. The export manifest now records
+`gltf_interpolation` as a separate field from anything provenance-related, so
+the two cannot be read as one.
+
+What §7h *does* require disclosing is this: between two real keyframes the
+viewer now draws a pose that was never observed. At 15 fps with `LINEAR`
+between adjacent real samples that is a defensible straight-line guess, and
+§7's honesty rule is satisfied by saying so plainly rather than by refusing to
+draw it — `STEP` was not more honest, it was differently wrong (it asserted
+the body was *motionless* for 75% of playback, which is also a claim, and a
+false one).
+
+### 3. 15 fps vs 30 fps — evidence, not a default change
+
+**The default is unchanged at 15 fps.** This section is the evidence for
+deciding it, not a decision.
+
+Source `solo-01` is 30 fps (576×1024, 591 frames, 19.7 s). `ffmpeg`'s
+`fps=15` filter keeps every other source frame, so the 15 fps run and the
+**even** frames of a 30 fps run reconstruct *the same source images*. That
+gives a free control, and the whole measurement rests on it:
+
+- **A — noise floor.** 30 fps even frames vs the 15 fps run at the same times.
+  Same input pictures, so the difference is reconstruction non-determinism,
+  not interpolation. Nothing below this is measurable.
+- **B — interpolation error.** 30 fps **odd** frames (real reconstructions the
+  interpolator never saw) vs the 15 fps run `LINEAR`-interpolated to those
+  times. **This is exactly the motion interpolation fabricates rather than
+  recovers.**
+
+Interpolation was done the way a glTF viewer does it — in parent-local space,
+slerp on rotations — then forward-kinematics back to world joint positions.
+
+All 127 joints, mm:
+
+| | median | p90 | p99 | max |
+|---|---|---|---|---|
+| A noise floor | 8.91 | 24.89 | 107.10 | 296.58 |
+| B interpolated | 26.89 | 83.46 | 176.35 | 405.88 |
+| **B − A** | **17.98** | **58.57** | **69.25** | — |
+
+But the headline is misleading and the breakdown is the real finding: **every
+one of the ten "fastest" joints in this clip is a finger or finger tip moving
+at ~3.5 m/s.** A finger tip does not travel 3.5 m/s through a dance — that is
+SAM 3D Body's known-weak hand reconstruction (there is a whole `hands` branch
+about it), and resolving 30 fps worth of finger jitter recovers noise, not
+choreography. Split by region:
+
+| group | n | mean speed | A median | B median | B p90 | B − A median |
+|---|---|---|---|---|---|---|
+| **body (the choreography)** | 22 | 1.28 m/s | 4.65 mm | **16.67 mm** | 59.29 mm | **12.01 mm** |
+| fingers | 44 | 3.07 m/s | 14.06 mm | 45.36 mm | 108.96 mm | 31.30 mm |
+| face | 12 | 1.01 m/s | 5.55 mm | 17.31 mm | 38.30 mm | 11.76 mm |
+| rig helpers | 41 | 1.47 m/s | 5.85 mm | 21.36 mm | 61.61 mm | 15.51 mm |
+
+On the joints that carry the dance — and especially on the accents:
+
+| body joint | speed | B median | B p90 | B max | (noise floor) |
+|---|---|---|---|---|---|
+| `l_wrist` | 2.61 m/s | 37.87 mm | 92.96 | 251.00 | 12.97 |
+| `l_ball` (foot) | 2.48 m/s | 39.32 mm | 97.08 | 287.32 | 8.61 |
+| `r_ball` (foot) | 2.45 m/s | 40.27 mm | 102.88 | 296.67 | 8.42 |
+| `r_wrist` | 2.44 m/s | 38.23 mm | 87.72 | 256.25 | 13.65 |
+| `l_lowarm` | 1.94 m/s | 25.56 mm | 84.82 | 165.08 | 6.49 |
+
+Sharpest 10% of frames by peak joint acceleration: B median 41.75 mm, p90
+169.73 mm, max 405.88 mm.
+
+**The answer, in the terms the question was posed in: centimetres, not
+millimetres — but only on the accents.** A wrist or a striking foot is a
+median **~3.8–4.0 cm** away from where it really was, p90 ~9–10 cm, against a
+noise floor under 1.4 cm. A wrist at 2.6 m/s travels 174 mm between 15 fps
+samples, so a ~38 mm median error is ~22% of the travel — the path is
+genuinely curved at this timescale and 15 fps is undersampling it. The
+*typical* body joint, though, is only 1.2 cm off, and the whole effect is
+concentrated in a minority of fast frames.
+
+**Cost, measured on the same clip, same L40S:**
+
+| | 15 fps | 30 fps |
+|---|---|---|
+| frames reconstructed | 291 / 296 | 584 / 591 |
+| wall clock | ~155 s | 294.8 s |
+| cost | $0.0839 | **$0.1597** (1.90×) |
+| peak VRAM | 3.69 GB | 3.69 GB (unchanged) |
+
+**Recommendation — deliberately not shipped as a default.** The evidence does
+*not* support "30 fps is overkill": it recovers real, visible centimetre-scale
+motion exactly where a dance lesson cares most (wrist snaps, foot strikes).
+Nor does it support flipping the default blind, because the gain is confined
+to fast accents, the cost is 1.90× and recurring on a free public platform,
+and the `caching-retention` branch is separately adding dedupe that changes
+those economics materially. This is a cost/product call with the numbers now
+attached, so it is recorded in `OPEN-DECISIONS.md` (E7) rather than decided
+here. Note also that VRAM does not move, so 30 fps needs no bigger GPU — only
+more time.
+
+A cheaper third option worth pricing before committing to either: the
+detection pass is already the cheap one, so reconstructing at 30 fps *only*
+around high-acceleration frames would buy most of the accent fidelity at well
+under 1.90×. Not built, not costed — flagged, not assumed.
+
+### 4. World-vs-local rotation bug in `api.py` — confirmed and fixed
+
+**Confirmed independently, from the data.** `_build_motion_result` fed
+`skel_state`'s quaternions straight into `_rest_relative_rotation` as though
+they were already local-to-parent. They are **WORLD** rotations. The
+discriminator is the bone offset — a child's position expressed in its
+parent's frame is a property of the rig, so it cannot move as the dancer
+moves. On the real `solo-01` reconstruction (291 frames, 127 joints):
+
+| | q as WORLD | q as parent-relative |
+|---|---|---|
+| offset-vector wander / bone length, median | **0.000574** | 0.949570 |
+| \|mean offset − `rest_translation`\|, median | **0.004111 m** | 0.048569 m |
+
+The second row is checked against `joint_hierarchy`'s own `rest_translation`,
+dumped independently from the FBX skeleton, which neither hypothesis can tune
+itself against. Corroborating: `skel_state[:, :3]` are plainly absolute world
+positions — `c_head_null` sits 1.678 m from the origin, which no local bone
+offset could be. This matches `decompose()` on branch `smoothing`, which
+reached the same conclusion independently (round-trips to 5.7e-14 cm); that
+implementation was read rather than reinvented.
+
+**Impact of the bug:** the rotation served differed from the correct
+parent-relative one by a **median of 125.7°** (p90 168.2°, max 180.0°), with
+**125 of 127 joints** off by more than 20° on average. Every joint below the
+root was being served its whole chain's accumulated orientation instead of its
+own bend.
+
+**Fixed** by `_local_rotations()` in `api.py`. The root is deliberately left
+alone in `root_trajectory` — it has no parent, so its world rotation *is* its
+local one, and the body's world orientation is what that field asks for.
+Guarded by `services/motion-api/test_api_rotations.py` (6 tests, no GPU/Modal
+needed), which was itself verified to **fail** against the old behaviour — a
+test that passes either way guards nothing.
+
+**Note the GLB was never affected.** pymomentum consumes `skel_state` in its
+own native format and knows it is world, so the exported animation was always
+correct. This bug only ever corrupted the `MotionResult` joint rotations
+served over HTTP — consistent with the mesh having looked right all along.
+
+### 5. Frame-rate mislabelling in the export (found while fixing the above)
+
+`export_clip_gltf` hardcoded `fps = 15.0` while `run_clip` accepts an `fps`
+argument. Any non-default run was therefore exported with the wrong timing —
+the 30 fps reconstruction above would have shipped as a 15 fps animation,
+i.e. **playing at half speed**. Now derived from the npz's own
+`sample_times_s` spacing, which also keeps a standalone re-export correct
+without threading a parameter that could disagree with the data it describes.
+Verified on hardware: the 30 fps clip exported as `30.0 fps (591 samples)`,
+`solo-01` and `solo-07` as `15.0 fps`.
+
+### 6. Verification on real hardware
+
+`solo-01`, `solo-07` and the 30 fps `solo-01` re-exported through the deployed
+code, then checked locally against the downloaded GLBs:
+
+- **interpolation** — 218/218 samplers `LINEAR` on `solo-01` and `solo-07`
+  track 1, 218/218 on the 30 fps export, and 213–216/213–216 on `solo-07`'s
+  three partially-observed tracks. Zero `STEP` remaining, across 8 GLBs.
+- **non-finite values — zero**, in all of them. The NaN-frame-0 guard in
+  `export_clip_gltf` is untouched and still raises before writing; the rewrite
+  adds its own independent finite check afterwards, so a GLB that would render
+  as nothing now has to get past two separate guards.
+- **bone lengths survive exactly.** The rewrite is metadata-only and this was
+  verified rather than asserted: the GLB's **binary chunk is byte-identical**
+  before and after (same length, `==` on the bytes), and max keyframe delta is
+  exactly `0.000e+00` on translation, rotation and scale. Bone-length CV at
+  the keyframes is therefore unchanged to the last digit — median `9.983e-07`,
+  max `6.692e-06` (0.0007%), worst absolute spread over the whole clip
+  **0.000855 mm**. The `bone-constraints` result is intact.
+
+**A real caveat found, and it is not caused by this work.** `solo-07`'s npz on
+the results Volume was **stale — reconstructed before `bone-constraints`
+landed**: measured directly on the npz's own world positions, its bone CV was
+19.54% (median 1.84%), versus 0.0003% for `solo-01` and 0.0003% for the 30 fps
+run made today. The export faithfully carried that through, which is correct
+behaviour, but anyone reading an old `solo-07` GLB as evidence of bone
+rigidity would have been misled.
+
+Re-run through the full current pipeline this pass (`run_clip` → chained
+`export_clip_gltf`, which also exercises the whole fixed chain end to end
+rather than just the export stage in isolation). After: bone CV **0.0004%,
+0.0003%, 0.0004%, 0.0005%** on its four tracks — the defect was entirely the
+stale artifact. The refreshed `solo-07` track 1 GLB is `LINEAR`, zero
+non-finite, bone CV 0.0007%, worst absolute spread 0.001046 mm.
+
+Worth recording as a general hazard: **the results Volume mixes artifacts from
+different code generations and nothing in a `.npz` records which.** A
+`pipeline_git_sha` in the npz would make this self-diagnosing; `model_report`
+already carries one in the contract, but it is hardcoded in `api.py` rather
+than captured at reconstruction time, so it does not currently help.
+
+### 7. Known, measured, disclosed cost of `LINEAR`
+
+pymomentum carries part of some joints' bone *direction* in the translation
+channel rather than in the parent's rotation — `l_index1`'s local offset
+swings **79° between adjacent keyframes** while its length stays constant to
+six decimal places. Lerping a direction takes the chord, so those bones
+shorten transiently *between* keyframes: median 0.00006 mm, p90 0.44 mm, but
+up to **18 mm (23% of its length) on a finger**. It is exact again at every
+keyframe, and `CUBICSPLINE` is marginally worse (18.84 mm), so this is not an
+argument for the other mode.
+
+glTF has no "slerp the translation" mode, so the only real fix is re-deriving
+the local decomposition so bone direction lives in the rotation channel — a
+change to the export itself, not to a sampler attribute. Recorded in
+`OPEN-DECISIONS.md` (E8) rather than guessed at here. In practice it lands on
+finger bones, which this pipeline already reconstructs badly (see the fps
+breakdown above and the `hands` branch).
+
+### 8. What's still not measured
+
+- **No phone check.** Every number here is geometric, measured on the GLB and
+  the reconstruction. Whether the result *reads* as crisp human movement on a
+  real device is still unverified by this pass — the builder's "mesh 3d
+  looking much more smooth now" on a hand-patched file is the only
+  human-perception evidence, and it is not a measurement.
+- **One clip carries the fps conclusion.** The 15-vs-30 numbers are `solo-01`
+  only. A slower or faster dance would move them; a second clip would cost
+  ~$0.16 and has not been spent.
+- **The hybrid adaptive-rate option is unpriced** (§3).
+- **`group-synced-01` was not re-exported** this pass, so multi-dancer GLBs on
+  the Volume still predate these fixes.
+
+**Reproducing the fps experiment.** It needs a 30 fps reconstruction of a clip
+that also has a 15 fps one, so `solo-01.mp4` was copied to `solo01-30fps.mp4`
+on the `stepwise-eval` Volume and run with `--fps 30`, leaving
+`solo01-30fps.{npz,performance.json}` and `solo01-30fps_track1.glb` on
+`stepwise-results`. Those are kept deliberately, so the numbers above can be
+re-derived. **`solo01-30fps` is NOT in `evaluation/clips.yaml`** — it is a
+byte-identical copy of `solo-01` under a second id, not a new eval clip, and
+should not be treated as one.
