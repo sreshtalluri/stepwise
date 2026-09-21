@@ -103,7 +103,15 @@ So the honest version, which is what ships:
 
 ## 5. Scope
 
-**MVP input:** one clip, ≤60 s, **one dancer**, one front camera, mostly steady, no cuts. Partly-out-of-frame is handled, not rejected.
+**MVP input:** one clip, ≤60 s, **one or more dancers**, one front camera, mostly steady, no cuts. Partly-out-of-frame is handled, not rejected.
+
+**Multi-dancer, revised 2026-09-18.** An earlier draft capped the MVP at one dancer. That was wrong, and it would have cost *more* work rather than less: RTMO is multi-person by design, ByteTrack is multi-person by design, SAM 3D Body runs per-crop so N dancers is just N crops, and the frozen contract already declares `persons` as an unbounded array. Limiting to one would mean actively discarding tracks the pipeline already produced. Real TikTok dances frequently have two people.
+
+What is in the MVP: detect, track, reconstruct and render every dancer; a picker to choose whose body you are learning from; per-dancer colours.
+
+What stays in v2, because it is the genuinely expensive logic and not the reconstruction: cross-dancer consensus (using aligned dancers to correct one dancer's reconstruction errors), the sync check, the formation view (needs a solid floor solve first), and "which dancer in this group is me".
+
+The costs this accepts, honestly: GPU time scales roughly linearly with dancer count, so a two-dancer clip is about twice the price (~$0.15–0.25 rather than ~$0.07–0.13, possibly sub-linear given crop batching and 47 GB of idle VRAM). And identity swaps when dancers cross are the known hard case — the existing uncertainty design covers it: when track confidence collapses at a crossing, mark it, never silently swap.
 
 **MVP output:** hosted lesson page — video and 3D on a shared scrubber; orbit, mirror, front/back/side/top presets (non-front labeled *estimated*); speed 0.25–1×; A-B loop snapped to counts; **manually set** counts and named parts; invite-only shareable link.
 
