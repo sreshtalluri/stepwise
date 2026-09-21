@@ -361,17 +361,26 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
                     # This is skel_state's own character-local frame, and on
                     # real clips it is CONSTANT -- (0, 0.924, 0) on all 291
                     # solo-01 frames -- so the dancer dances in place instead
-                    # of travelling across the stage. Deliberately left that
-                    # way rather than composed with pred_cam_t: measured, that
-                    # composition would slide the dancer 7.75 m in depth on
-                    # solo-01, and an independent full-frame PnP against the
-                    # detector's own keypoints agrees with it (r = 0.983), so
-                    # the swing is the per-frame reconstruction, not just the
-                    # camera fit. A dancer sliding 8 m backwards because they
-                    # crouched is a worse lie than one who stands still.
-                    # Pinned-and-honest until OPEN-DECISIONS E6 is resolved;
-                    # docs/GATE-REPORT.md's grounding addendum has the numbers
-                    # and grounding.GroundingResult.evidence has the arrays.
+                    # of travelling across the stage.
+                    #
+                    # CORRECTION (docs/research/world-placement.md): the reason
+                    # previously recorded here was WRONG. It said composing
+                    # pred_cam_t would "slide the dancer 7.75 m because they
+                    # crouched". The source video says solo-01's dancer really
+                    # does start ~10 m away and run toward the camera -- the
+                    # 7.75 m is the choreography, and the -0.93 correlation
+                    # with bbox height is the pinhole relation working. The
+                    # independent PnP agreeing at r = 0.983 was confirmation,
+                    # not a shared error.
+                    #
+                    # Still pinned here only because composing a per-frame
+                    # translation changes what the export and the viewer mean
+                    # by world space, which is OPEN-DECISIONS E6 and the
+                    # builder's call. world-placement.md measures what the
+                    # composed version buys (foot contacts on one floor: 52%
+                    # -> 90%; five dancers agreeing on that floor to 5 cm
+                    # instead of 37 cm) and services/motion-api/
+                    # world_placement_probe.py reproduces it from an npz.
                     "position": [float(root_pos_cm[0]) / 100.0, float(root_pos_cm[1]) / 100.0, float(root_pos_cm[2]) / 100.0],
                     # Unconverted on purpose, unlike the per-joint rotations
                     # above: the root has no parent, so its world rotation IS

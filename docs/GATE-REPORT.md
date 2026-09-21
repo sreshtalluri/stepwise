@@ -1246,3 +1246,35 @@ on the `stepwise-eval` Volume and run with `--fps 30`, leaving
 re-derived. **`solo01-30fps` is NOT in `evaluation/clips.yaml`** — it is a
 byte-identical copy of `solo-01` under a second id, not a new eval clip, and
 should not be treated as one.
+
+## Correction (2026-09-20): the world-placement addendum above is wrong about *why*
+
+Branch `world-placement`. Full write-up and numbers:
+`docs/research/world-placement.md`.
+
+The addendum above states that solo-01's dancer "gets low in one spot, not
+receding 8 m", and that the reconstruction "turns got low into moved away".
+**Nobody had watched the clip.** The source video in `stepwise-eval` shows a
+static camera and a dancer who starts ~10 m away by a garage door, runs toward
+the camera between t=5 s and t=7 s, dances close for ~10 s, and retreats. The
+7.75 m depth swing is real travel.
+
+Three readings above invert as a result:
+
+* `corr(bbox_height, cam_t.z) = -0.93` is the pinhole relation `size ∝ 1/depth`
+  working correctly, not a crop-box artefact.
+* The independent full-frame PnP agreeing at r = 0.983 was two estimators
+  confirming real travel, not sharing an error.
+* The bbox bottom holding at 769–899 px while the top swings 159–635 px is what
+  an approaching dancer looks like to a camera **0.15 m off the ground pitched
+  12.9° up** — which is how all three eval clips were shot.
+
+What survives unchanged: the floor solve itself, the honesty gates, the
+measured intrinsics, and the verdict `none` on today's pipeline — because the
+export still discards the translation, so there is still no depth in the frame
+the floor is fitted in. What changes is the *route out*: not "accept a
+floorless product or build a WHAM-shaped optimiser", but compose the per-frame
+translation that the pipeline already has into `root_trajectory`, estimated by
+perspective rather than weak perspective. Measured on the same clips: foot
+contacts on one plane 52% → 90%, five dancers agreeing on one floor to 5 cm
+instead of 37 cm.
