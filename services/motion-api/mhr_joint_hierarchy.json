@@ -1,0 +1,2165 @@
+{
+  "rotation_convention": "local-to-parent quaternion, relative to MHR rest (A-pose), glTF component order [x,y,z,w]",
+  "root_joint_index": 1,
+  "joints": [
+    {
+      "name": "body_world",
+      "index": 0,
+      "parent_index": -1,
+      "glb_node_name": "body_world",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "root",
+      "index": 1,
+      "parent_index": 0,
+      "glb_node_name": "root",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.0,
+        0.923987,
+        0.0
+      ]
+    },
+    {
+      "name": "l_upleg",
+      "index": 2,
+      "parent_index": 1,
+      "glb_node_name": "l_upleg",
+      "rest_rotation": [
+        -0.51585692,
+        0.4933086,
+        -0.44414079,
+        0.54155082
+      ],
+      "rest_translation": [
+        0.082046,
+        -0.018406,
+        0.005326
+      ]
+    },
+    {
+      "name": "l_lowleg",
+      "index": 3,
+      "parent_index": 2,
+      "glb_node_name": "l_lowleg",
+      "rest_rotation": [
+        -0.00013798,
+        0.00207803,
+        0.01316207,
+        0.99991119
+      ],
+      "rest_translation": [
+        0.419694,
+        -0.007731,
+        0.0
+      ]
+    },
+    {
+      "name": "l_foot",
+      "index": 4,
+      "parent_index": 3,
+      "glb_node_name": "l_foot",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.420583,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_talocrural",
+      "index": 5,
+      "parent_index": 4,
+      "glb_node_name": "l_talocrural",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        1e-06,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_subtalar",
+      "index": 6,
+      "parent_index": 5,
+      "glb_node_name": "l_subtalar",
+      "rest_rotation": [
+        0.04284562,
+        0.03979585,
+        0.6030882,
+        0.79552823
+      ],
+      "rest_translation": [
+        0.033966,
+        -0.008989,
+        0.004672
+      ]
+    },
+    {
+      "name": "l_transversetarsal",
+      "index": 7,
+      "parent_index": 6,
+      "glb_node_name": "l_transversetarsal",
+      "rest_rotation": [
+        7e-08,
+        -4.1e-07,
+        1e-07,
+        1.0
+      ],
+      "rest_translation": [
+        -0.061096,
+        -0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_ball",
+      "index": 8,
+      "parent_index": 7,
+      "glb_node_name": "l_ball",
+      "rest_rotation": [
+        -0.00086409,
+        0.1103264,
+        0.08684406,
+        0.99009365
+      ],
+      "rest_translation": [
+        -0.065614,
+        -0.041564,
+        0.004394
+      ]
+    },
+    {
+      "name": "l_lowleg_twist1_proc",
+      "index": 9,
+      "parent_index": 3,
+      "glb_node_name": "l_lowleg_twist1_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.084117,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_lowleg_twist2_proc",
+      "index": 10,
+      "parent_index": 3,
+      "glb_node_name": "l_lowleg_twist2_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.168233,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_lowleg_twist3_proc",
+      "index": 11,
+      "parent_index": 3,
+      "glb_node_name": "l_lowleg_twist3_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.25235,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_lowleg_twist4_proc",
+      "index": 12,
+      "parent_index": 3,
+      "glb_node_name": "l_lowleg_twist4_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.336466,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_upleg_twist0_proc",
+      "index": 13,
+      "parent_index": 2,
+      "glb_node_name": "l_upleg_twist0_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_upleg_twist1_proc",
+      "index": 14,
+      "parent_index": 2,
+      "glb_node_name": "l_upleg_twist1_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.104923,
+        -0.001933,
+        0.0
+      ]
+    },
+    {
+      "name": "l_upleg_twist2_proc",
+      "index": 15,
+      "parent_index": 2,
+      "glb_node_name": "l_upleg_twist2_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.209847,
+        -0.003866,
+        0.0
+      ]
+    },
+    {
+      "name": "l_upleg_twist3_proc",
+      "index": 16,
+      "parent_index": 2,
+      "glb_node_name": "l_upleg_twist3_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.31477,
+        -0.005798,
+        0.0
+      ]
+    },
+    {
+      "name": "l_upleg_twist4_proc",
+      "index": 17,
+      "parent_index": 2,
+      "glb_node_name": "l_upleg_twist4_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.419694,
+        -0.007731,
+        0.0
+      ]
+    },
+    {
+      "name": "r_upleg",
+      "index": 18,
+      "parent_index": 1,
+      "glb_node_name": "r_upleg",
+      "rest_rotation": [
+        0.54155076,
+        0.44414076,
+        0.49330863,
+        0.51585692
+      ],
+      "rest_translation": [
+        -0.082046,
+        -0.018406,
+        0.005326
+      ]
+    },
+    {
+      "name": "r_lowleg",
+      "index": 19,
+      "parent_index": 18,
+      "glb_node_name": "r_lowleg",
+      "rest_rotation": [
+        -0.00013798,
+        0.00207802,
+        0.01316206,
+        0.99991119
+      ],
+      "rest_translation": [
+        -0.419694,
+        0.007731,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_foot",
+      "index": 20,
+      "parent_index": 19,
+      "glb_node_name": "r_foot",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.420583,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_talocrural",
+      "index": 21,
+      "parent_index": 20,
+      "glb_node_name": "r_talocrural",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.0,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "r_subtalar",
+      "index": 22,
+      "parent_index": 21,
+      "glb_node_name": "r_subtalar",
+      "rest_rotation": [
+        0.04284564,
+        0.03979587,
+        0.6030882,
+        0.79552823
+      ],
+      "rest_translation": [
+        -0.033966,
+        0.008989,
+        -0.004672
+      ]
+    },
+    {
+      "name": "r_transversetarsal",
+      "index": 23,
+      "parent_index": 22,
+      "glb_node_name": "r_transversetarsal",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.061096,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "r_ball",
+      "index": 24,
+      "parent_index": 23,
+      "glb_node_name": "r_ball",
+      "rest_rotation": [
+        -0.00086407,
+        0.110326,
+        0.08684415,
+        0.99009371
+      ],
+      "rest_translation": [
+        0.065614,
+        0.041564,
+        -0.004394
+      ]
+    },
+    {
+      "name": "r_lowleg_twist1_proc",
+      "index": 25,
+      "parent_index": 19,
+      "glb_node_name": "r_lowleg_twist1_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.084117,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_lowleg_twist2_proc",
+      "index": 26,
+      "parent_index": 19,
+      "glb_node_name": "r_lowleg_twist2_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.168233,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_lowleg_twist3_proc",
+      "index": 27,
+      "parent_index": 19,
+      "glb_node_name": "r_lowleg_twist3_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.25235,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_lowleg_twist4_proc",
+      "index": 28,
+      "parent_index": 19,
+      "glb_node_name": "r_lowleg_twist4_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.336466,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_upleg_twist0_proc",
+      "index": 29,
+      "parent_index": 18,
+      "glb_node_name": "r_upleg_twist0_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "r_upleg_twist1_proc",
+      "index": 30,
+      "parent_index": 18,
+      "glb_node_name": "r_upleg_twist1_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.104923,
+        0.001933,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_upleg_twist2_proc",
+      "index": 31,
+      "parent_index": 18,
+      "glb_node_name": "r_upleg_twist2_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.209847,
+        0.003866,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_upleg_twist3_proc",
+      "index": 32,
+      "parent_index": 18,
+      "glb_node_name": "r_upleg_twist3_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.31477,
+        0.005798,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_upleg_twist4_proc",
+      "index": 33,
+      "parent_index": 18,
+      "glb_node_name": "r_upleg_twist4_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.419694,
+        0.007731,
+        -0.0
+      ]
+    },
+    {
+      "name": "c_spine0",
+      "index": 34,
+      "parent_index": 1,
+      "glb_node_name": "c_spine0",
+      "rest_rotation": [
+        0.48993108,
+        0.50987011,
+        0.48993108,
+        0.50987011
+      ],
+      "rest_translation": [
+        0.0,
+        0.02022,
+        -0.032536
+      ]
+    },
+    {
+      "name": "c_spine1",
+      "index": 35,
+      "parent_index": 34,
+      "glb_node_name": "c_spine1",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.109884,
+        0.015431,
+        -0.0
+      ]
+    },
+    {
+      "name": "c_spine2",
+      "index": 36,
+      "parent_index": 35,
+      "glb_node_name": "c_spine2",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.110315,
+        -0.021572,
+        0.0
+      ]
+    },
+    {
+      "name": "c_spine3",
+      "index": 37,
+      "parent_index": 36,
+      "glb_node_name": "c_spine3",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.183773,
+        0.017662,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_clavicle",
+      "index": 38,
+      "parent_index": 37,
+      "glb_node_name": "r_clavicle",
+      "rest_rotation": [
+        0.64690876,
+        0.22266081,
+        0.70749503,
+        0.17714947
+      ],
+      "rest_translation": [
+        0.053133,
+        0.102892,
+        -0.028218
+      ]
+    },
+    {
+      "name": "r_uparm",
+      "index": 39,
+      "parent_index": 38,
+      "glb_node_name": "r_uparm",
+      "rest_rotation": [
+        -0.10732234,
+        -0.47982252,
+        0.18248397,
+        0.85144103
+      ],
+      "rest_translation": [
+        -0.176505,
+        -0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_lowarm",
+      "index": 40,
+      "parent_index": 39,
+      "glb_node_name": "r_lowarm",
+      "rest_rotation": [
+        0.00237862,
+        -0.00767948,
+        0.29585338,
+        0.95519954
+      ],
+      "rest_translation": [
+        -0.256801,
+        0.000463,
+        -3e-06
+      ]
+    },
+    {
+      "name": "r_wrist_twist",
+      "index": 41,
+      "parent_index": 40,
+      "glb_node_name": "r_wrist_twist",
+      "rest_rotation": [
+        0.83766538,
+        -0.03199685,
+        0.03672286,
+        0.54400772
+      ],
+      "rest_translation": [
+        -0.27,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_wrist",
+      "index": 42,
+      "parent_index": 41,
+      "glb_node_name": "r_wrist",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "r_pinky0",
+      "index": 43,
+      "parent_index": 42,
+      "glb_node_name": "r_pinky0",
+      "rest_rotation": [
+        -0.20703599,
+        -0.14034285,
+        0.0183118,
+        0.96804166
+      ],
+      "rest_translation": [
+        -0.020404,
+        -0.010705,
+        -0.022632
+      ]
+    },
+    {
+      "name": "r_pinky1",
+      "index": 44,
+      "parent_index": 43,
+      "glb_node_name": "r_pinky1",
+      "rest_rotation": [
+        0.09111302,
+        0.00407137,
+        0.02812922,
+        0.99543488
+      ],
+      "rest_translation": [
+        -0.045651,
+        -1e-06,
+        2e-06
+      ]
+    },
+    {
+      "name": "r_pinky2",
+      "index": 45,
+      "parent_index": 44,
+      "glb_node_name": "r_pinky2",
+      "rest_rotation": [
+        -0.03761665,
+        -0.0429377,
+        -0.01328605,
+        0.99828094
+      ],
+      "rest_translation": [
+        -0.030723,
+        -3e-06,
+        -3e-06
+      ]
+    },
+    {
+      "name": "r_pinky3",
+      "index": 46,
+      "parent_index": 45,
+      "glb_node_name": "r_pinky3",
+      "rest_rotation": [
+        0.00064475,
+        0.04917067,
+        -0.02401883,
+        0.99850136
+      ],
+      "rest_translation": [
+        -0.020308,
+        4e-06,
+        3e-06
+      ]
+    },
+    {
+      "name": "r_pinky_null",
+      "index": 47,
+      "parent_index": 46,
+      "glb_node_name": "r_pinky_null",
+      "rest_rotation": [
+        1e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.020399,
+        -3e-06,
+        -3e-06
+      ]
+    },
+    {
+      "name": "r_ring1",
+      "index": 48,
+      "parent_index": 42,
+      "glb_node_name": "r_ring1",
+      "rest_rotation": [
+        -0.05315936,
+        -0.1231034,
+        0.04981349,
+        0.98971623
+      ],
+      "rest_translation": [
+        -0.075024,
+        -0.007814,
+        -0.017099
+      ]
+    },
+    {
+      "name": "r_ring2",
+      "index": 49,
+      "parent_index": 48,
+      "glb_node_name": "r_ring2",
+      "rest_rotation": [
+        -0.03363252,
+        -0.00278985,
+        0.00567602,
+        0.99941427
+      ],
+      "rest_translation": [
+        -0.038994,
+        1e-06,
+        1e-06
+      ]
+    },
+    {
+      "name": "r_ring3",
+      "index": 50,
+      "parent_index": 49,
+      "glb_node_name": "r_ring3",
+      "rest_rotation": [
+        -0.00347746,
+        0.02917946,
+        -0.02502854,
+        0.99925476
+      ],
+      "rest_translation": [
+        -0.026577,
+        -3e-06,
+        -1e-06
+      ]
+    },
+    {
+      "name": "r_ring_null",
+      "index": 51,
+      "parent_index": 50,
+      "glb_node_name": "r_ring_null",
+      "rest_rotation": [
+        2e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.022154,
+        2e-06,
+        1e-06
+      ]
+    },
+    {
+      "name": "r_middle1",
+      "index": 52,
+      "parent_index": 42,
+      "glb_node_name": "r_middle1",
+      "rest_rotation": [
+        -0.00906632,
+        -0.05146559,
+        0.05183575,
+        0.99728739
+      ],
+      "rest_translation": [
+        -0.081976,
+        -0.003826,
+        0.002093
+      ]
+    },
+    {
+      "name": "r_middle2",
+      "index": 53,
+      "parent_index": 52,
+      "glb_node_name": "r_middle2",
+      "rest_rotation": [
+        -0.01122824,
+        -0.00437887,
+        -0.00197827,
+        0.99992543
+      ],
+      "rest_translation": [
+        -0.042926,
+        1e-06,
+        0.0
+      ]
+    },
+    {
+      "name": "r_middle3",
+      "index": 54,
+      "parent_index": 53,
+      "glb_node_name": "r_middle3",
+      "rest_rotation": [
+        -0.03431954,
+        -0.00461184,
+        -0.09300701,
+        0.99506313
+      ],
+      "rest_translation": [
+        -0.027548,
+        1e-06,
+        1e-06
+      ]
+    },
+    {
+      "name": "r_middle_null",
+      "index": 55,
+      "parent_index": 54,
+      "glb_node_name": "r_middle_null",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.023488,
+        -0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_index1",
+      "index": 56,
+      "parent_index": 42,
+      "glb_node_name": "r_index1",
+      "rest_rotation": [
+        0.03068309,
+        -0.01885559,
+        0.04328144,
+        0.99841362
+      ],
+      "rest_translation": [
+        -0.082327,
+        -0.008602,
+        0.023917
+      ]
+    },
+    {
+      "name": "r_index2",
+      "index": 57,
+      "parent_index": 56,
+      "glb_node_name": "r_index2",
+      "rest_rotation": [
+        -0.02585241,
+        -0.00711606,
+        0.00329294,
+        0.99963504
+      ],
+      "rest_translation": [
+        -0.037925,
+        4e-06,
+        1e-06
+      ]
+    },
+    {
+      "name": "r_index3",
+      "index": 58,
+      "parent_index": 57,
+      "glb_node_name": "r_index3",
+      "rest_rotation": [
+        -0.016056,
+        -0.02714872,
+        -0.07203399,
+        0.99690336
+      ],
+      "rest_translation": [
+        -0.024306,
+        -4e-06,
+        -2e-06
+      ]
+    },
+    {
+      "name": "r_index_null",
+      "index": 59,
+      "parent_index": 58,
+      "glb_node_name": "r_index_null",
+      "rest_rotation": [
+        2e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.021223,
+        5e-06,
+        2e-06
+      ]
+    },
+    {
+      "name": "r_thumb0",
+      "index": 60,
+      "parent_index": 42,
+      "glb_node_name": "r_thumb0",
+      "rest_rotation": [
+        0.37538692,
+        0.42458406,
+        -0.00777889,
+        0.8238644
+      ],
+      "rest_translation": [
+        -0.006401,
+        -0.012841,
+        0.010862
+      ]
+    },
+    {
+      "name": "r_thumb1",
+      "index": 61,
+      "parent_index": 60,
+      "glb_node_name": "r_thumb1",
+      "rest_rotation": [
+        0.26023021,
+        0.02433092,
+        0.12567803,
+        0.95702314
+      ],
+      "rest_translation": [
+        -0.024852,
+        1e-06,
+        0.0
+      ]
+    },
+    {
+      "name": "r_thumb2",
+      "index": 62,
+      "parent_index": 61,
+      "glb_node_name": "r_thumb2",
+      "rest_rotation": [
+        -0.08270364,
+        -0.07696168,
+        -0.08406223,
+        0.99003565
+      ],
+      "rest_translation": [
+        -0.032514,
+        -2e-06,
+        1e-06
+      ]
+    },
+    {
+      "name": "r_thumb3",
+      "index": 63,
+      "parent_index": 62,
+      "glb_node_name": "r_thumb3",
+      "rest_rotation": [
+        0.08350577,
+        0.06501569,
+        -0.05827408,
+        0.99267513
+      ],
+      "rest_translation": [
+        -0.033793,
+        2e-06,
+        -1e-06
+      ]
+    },
+    {
+      "name": "r_thumb_null",
+      "index": 64,
+      "parent_index": 63,
+      "glb_node_name": "r_thumb_null",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.025461,
+        -1e-06,
+        1e-06
+      ]
+    },
+    {
+      "name": "r_lowarm_twist1_proc",
+      "index": 65,
+      "parent_index": 40,
+      "glb_node_name": "r_lowarm_twist1_proc",
+      "rest_rotation": [
+        7e-08,
+        -0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.054,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_lowarm_twist2_proc",
+      "index": 66,
+      "parent_index": 40,
+      "glb_node_name": "r_lowarm_twist2_proc",
+      "rest_rotation": [
+        7e-08,
+        -0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.108,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "r_lowarm_twist3_proc",
+      "index": 67,
+      "parent_index": 40,
+      "glb_node_name": "r_lowarm_twist3_proc",
+      "rest_rotation": [
+        7e-08,
+        -0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.162,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "r_lowarm_twist4_proc",
+      "index": 68,
+      "parent_index": 40,
+      "glb_node_name": "r_lowarm_twist4_proc",
+      "rest_rotation": [
+        7e-08,
+        -0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.216,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_uparm_twist0_proc",
+      "index": 69,
+      "parent_index": 39,
+      "glb_node_name": "r_uparm_twist0_proc",
+      "rest_rotation": [
+        1e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "r_uparm_twist1_proc",
+      "index": 70,
+      "parent_index": 39,
+      "glb_node_name": "r_uparm_twist1_proc",
+      "rest_rotation": [
+        1e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.0642,
+        0.000116,
+        -1e-06
+      ]
+    },
+    {
+      "name": "r_uparm_twist2_proc",
+      "index": 71,
+      "parent_index": 39,
+      "glb_node_name": "r_uparm_twist2_proc",
+      "rest_rotation": [
+        1e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.1284,
+        0.000232,
+        -2e-06
+      ]
+    },
+    {
+      "name": "r_uparm_twist3_proc",
+      "index": 72,
+      "parent_index": 39,
+      "glb_node_name": "r_uparm_twist3_proc",
+      "rest_rotation": [
+        1e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.192601,
+        0.000348,
+        -2e-06
+      ]
+    },
+    {
+      "name": "r_uparm_twist4_proc",
+      "index": 73,
+      "parent_index": 39,
+      "glb_node_name": "r_uparm_twist4_proc",
+      "rest_rotation": [
+        1e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.256801,
+        0.000463,
+        -3e-06
+      ]
+    },
+    {
+      "name": "l_clavicle",
+      "index": 74,
+      "parent_index": 37,
+      "glb_node_name": "l_clavicle",
+      "rest_rotation": [
+        0.22266081,
+        -0.64690876,
+        -0.17714947,
+        0.70749503
+      ],
+      "rest_translation": [
+        0.053133,
+        0.102892,
+        0.028218
+      ]
+    },
+    {
+      "name": "l_uparm",
+      "index": 75,
+      "parent_index": 74,
+      "glb_node_name": "l_uparm",
+      "rest_rotation": [
+        -0.10732234,
+        -0.47982252,
+        0.18248397,
+        0.85144103
+      ],
+      "rest_translation": [
+        0.176505,
+        -0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_lowarm",
+      "index": 76,
+      "parent_index": 75,
+      "glb_node_name": "l_lowarm",
+      "rest_rotation": [
+        0.00237862,
+        -0.00767948,
+        0.29585338,
+        0.95519954
+      ],
+      "rest_translation": [
+        0.256801,
+        -0.000463,
+        3e-06
+      ]
+    },
+    {
+      "name": "l_wrist_twist",
+      "index": 77,
+      "parent_index": 76,
+      "glb_node_name": "l_wrist_twist",
+      "rest_rotation": [
+        0.83766538,
+        -0.03199685,
+        0.03672286,
+        0.54400772
+      ],
+      "rest_translation": [
+        0.27,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_wrist",
+      "index": 78,
+      "parent_index": 77,
+      "glb_node_name": "l_wrist",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_pinky0",
+      "index": 79,
+      "parent_index": 78,
+      "glb_node_name": "l_pinky0",
+      "rest_rotation": [
+        -0.20703599,
+        -0.14034285,
+        0.0183118,
+        0.96804166
+      ],
+      "rest_translation": [
+        0.020404,
+        0.010705,
+        0.022632
+      ]
+    },
+    {
+      "name": "l_pinky1",
+      "index": 80,
+      "parent_index": 79,
+      "glb_node_name": "l_pinky1",
+      "rest_rotation": [
+        0.09111302,
+        0.00407137,
+        0.02812922,
+        0.99543488
+      ],
+      "rest_translation": [
+        0.045651,
+        1e-06,
+        -2e-06
+      ]
+    },
+    {
+      "name": "l_pinky2",
+      "index": 81,
+      "parent_index": 80,
+      "glb_node_name": "l_pinky2",
+      "rest_rotation": [
+        -0.03761665,
+        -0.0429377,
+        -0.01328605,
+        0.99828094
+      ],
+      "rest_translation": [
+        0.03072,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_pinky3",
+      "index": 82,
+      "parent_index": 81,
+      "glb_node_name": "l_pinky3",
+      "rest_rotation": [
+        0.00064475,
+        0.04917067,
+        -0.02401883,
+        0.99850136
+      ],
+      "rest_translation": [
+        0.020311,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_pinky_null",
+      "index": 83,
+      "parent_index": 82,
+      "glb_node_name": "l_pinky_null",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.020397,
+        -0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_ring1",
+      "index": 84,
+      "parent_index": 78,
+      "glb_node_name": "l_ring1",
+      "rest_rotation": [
+        -0.05315936,
+        -0.1231034,
+        0.04981349,
+        0.98971623
+      ],
+      "rest_translation": [
+        0.075024,
+        0.007814,
+        0.017098
+      ]
+    },
+    {
+      "name": "l_ring2",
+      "index": 85,
+      "parent_index": 84,
+      "glb_node_name": "l_ring2",
+      "rest_rotation": [
+        -0.03363252,
+        -0.00278985,
+        0.00567602,
+        0.99941427
+      ],
+      "rest_translation": [
+        0.038996,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_ring3",
+      "index": 86,
+      "parent_index": 85,
+      "glb_node_name": "l_ring3",
+      "rest_rotation": [
+        -0.00347746,
+        0.02917946,
+        -0.02502854,
+        0.99925476
+      ],
+      "rest_translation": [
+        0.026573,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_ring_null",
+      "index": 87,
+      "parent_index": 86,
+      "glb_node_name": "l_ring_null",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.022156,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_middle1",
+      "index": 88,
+      "parent_index": 78,
+      "glb_node_name": "l_middle1",
+      "rest_rotation": [
+        -0.00906632,
+        -0.05146559,
+        0.05183575,
+        0.99728739
+      ],
+      "rest_translation": [
+        0.081977,
+        0.003828,
+        -0.002093
+      ]
+    },
+    {
+      "name": "l_middle2",
+      "index": 89,
+      "parent_index": 88,
+      "glb_node_name": "l_middle2",
+      "rest_rotation": [
+        -0.01122824,
+        -0.00437887,
+        -0.00197827,
+        0.99992543
+      ],
+      "rest_translation": [
+        0.042927,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_middle3",
+      "index": 90,
+      "parent_index": 89,
+      "glb_node_name": "l_middle3",
+      "rest_rotation": [
+        -0.03431954,
+        -0.00461184,
+        -0.09300701,
+        0.99506313
+      ],
+      "rest_translation": [
+        0.02755,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_middle_null",
+      "index": 91,
+      "parent_index": 90,
+      "glb_node_name": "l_middle_null",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.023488,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_index1",
+      "index": 92,
+      "parent_index": 78,
+      "glb_node_name": "l_index1",
+      "rest_rotation": [
+        0.03068309,
+        -0.01885559,
+        0.04328144,
+        0.99841362
+      ],
+      "rest_translation": [
+        0.082327,
+        0.008601,
+        -0.023918
+      ]
+    },
+    {
+      "name": "l_index2",
+      "index": 93,
+      "parent_index": 92,
+      "glb_node_name": "l_index2",
+      "rest_rotation": [
+        -0.02585241,
+        -0.00711606,
+        0.00329294,
+        0.99963504
+      ],
+      "rest_translation": [
+        0.037927,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_index3",
+      "index": 94,
+      "parent_index": 93,
+      "glb_node_name": "l_index3",
+      "rest_rotation": [
+        -0.016056,
+        -0.02714872,
+        -0.07203399,
+        0.99690336
+      ],
+      "rest_translation": [
+        0.024304,
+        -0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_index_null",
+      "index": 95,
+      "parent_index": 94,
+      "glb_node_name": "l_index_null",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.021226,
+        -0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_thumb0",
+      "index": 96,
+      "parent_index": 78,
+      "glb_node_name": "l_thumb0",
+      "rest_rotation": [
+        0.37538692,
+        0.42458406,
+        -0.00777889,
+        0.8238644
+      ],
+      "rest_translation": [
+        0.0064,
+        0.012839,
+        -0.010863
+      ]
+    },
+    {
+      "name": "l_thumb1",
+      "index": 97,
+      "parent_index": 96,
+      "glb_node_name": "l_thumb1",
+      "rest_rotation": [
+        0.26023021,
+        0.02433092,
+        0.12567803,
+        0.95702314
+      ],
+      "rest_translation": [
+        0.024853,
+        -0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_thumb2",
+      "index": 98,
+      "parent_index": 97,
+      "glb_node_name": "l_thumb2",
+      "rest_rotation": [
+        -0.08270364,
+        -0.07696168,
+        -0.08406223,
+        0.99003565
+      ],
+      "rest_translation": [
+        0.032513,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_thumb3",
+      "index": 99,
+      "parent_index": 98,
+      "glb_node_name": "l_thumb3",
+      "rest_rotation": [
+        0.08350577,
+        0.06501569,
+        -0.05827408,
+        0.99267513
+      ],
+      "rest_translation": [
+        0.033793,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_thumb_null",
+      "index": 100,
+      "parent_index": 99,
+      "glb_node_name": "l_thumb_null",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.02546,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_lowarm_twist1_proc",
+      "index": 101,
+      "parent_index": 76,
+      "glb_node_name": "l_lowarm_twist1_proc",
+      "rest_rotation": [
+        7e-08,
+        -0.0,
+        -0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.054,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_lowarm_twist2_proc",
+      "index": 102,
+      "parent_index": 76,
+      "glb_node_name": "l_lowarm_twist2_proc",
+      "rest_rotation": [
+        7e-08,
+        -0.0,
+        -0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.108,
+        -0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_lowarm_twist3_proc",
+      "index": 103,
+      "parent_index": 76,
+      "glb_node_name": "l_lowarm_twist3_proc",
+      "rest_rotation": [
+        7e-08,
+        -0.0,
+        -0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.162,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_lowarm_twist4_proc",
+      "index": 104,
+      "parent_index": 76,
+      "glb_node_name": "l_lowarm_twist4_proc",
+      "rest_rotation": [
+        7e-08,
+        -0.0,
+        -0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.216,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "l_uparm_twist0_proc",
+      "index": 105,
+      "parent_index": 75,
+      "glb_node_name": "l_uparm_twist0_proc",
+      "rest_rotation": [
+        1e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "l_uparm_twist1_proc",
+      "index": 106,
+      "parent_index": 75,
+      "glb_node_name": "l_uparm_twist1_proc",
+      "rest_rotation": [
+        1e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.0642,
+        -0.000116,
+        1e-06
+      ]
+    },
+    {
+      "name": "l_uparm_twist2_proc",
+      "index": 107,
+      "parent_index": 75,
+      "glb_node_name": "l_uparm_twist2_proc",
+      "rest_rotation": [
+        1e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.1284,
+        -0.000232,
+        2e-06
+      ]
+    },
+    {
+      "name": "l_uparm_twist3_proc",
+      "index": 108,
+      "parent_index": 75,
+      "glb_node_name": "l_uparm_twist3_proc",
+      "rest_rotation": [
+        1e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.192601,
+        -0.000348,
+        2e-06
+      ]
+    },
+    {
+      "name": "l_uparm_twist4_proc",
+      "index": 109,
+      "parent_index": 75,
+      "glb_node_name": "l_uparm_twist4_proc",
+      "rest_rotation": [
+        1e-08,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.256801,
+        -0.000463,
+        3e-06
+      ]
+    },
+    {
+      "name": "c_neck",
+      "index": 110,
+      "parent_index": 37,
+      "glb_node_name": "c_neck",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.16537341,
+        0.98623103
+      ],
+      "rest_translation": [
+        0.091767,
+        0.047655,
+        -0.0
+      ]
+    },
+    {
+      "name": "c_neck_twist1_proc",
+      "index": 111,
+      "parent_index": 110,
+      "glb_node_name": "c_neck_twist1_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.049646,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "c_neck_twist0_proc",
+      "index": 112,
+      "parent_index": 110,
+      "glb_node_name": "c_neck_twist0_proc",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "c_head",
+      "index": 113,
+      "parent_index": 110,
+      "glb_node_name": "c_head",
+      "rest_rotation": [
+        -0.0,
+        -0.0,
+        -0.14567602,
+        0.98933238
+      ],
+      "rest_translation": [
+        0.099293,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "c_jaw",
+      "index": 114,
+      "parent_index": 113,
+      "glb_node_name": "c_jaw",
+      "rest_rotation": [
+        -0.5,
+        -0.5,
+        -0.5,
+        0.5
+      ],
+      "rest_translation": [
+        0.017994,
+        0.018894,
+        0.0
+      ]
+    },
+    {
+      "name": "c_teeth",
+      "index": 115,
+      "parent_index": 114,
+      "glb_node_name": "c_teeth",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        -0.0,
+        -0.008973,
+        0.02375
+      ]
+    },
+    {
+      "name": "c_jaw_null",
+      "index": 116,
+      "parent_index": 114,
+      "glb_node_name": "c_jaw_null",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.0,
+        -0.042971,
+        0.078795
+      ]
+    },
+    {
+      "name": "c_tongue0",
+      "index": 117,
+      "parent_index": 114,
+      "glb_node_name": "c_tongue0",
+      "rest_rotation": [
+        -0.16117835,
+        -0.68849224,
+        0.16117835,
+        0.68849218
+      ],
+      "rest_translation": [
+        -0.0,
+        -0.008973,
+        0.000468
+      ]
+    },
+    {
+      "name": "c_tongue1",
+      "index": 118,
+      "parent_index": 117,
+      "glb_node_name": "c_tongue1",
+      "rest_rotation": [
+        -0.0,
+        -0.0,
+        -0.04956799,
+        0.99877077
+      ],
+      "rest_translation": [
+        0.010978,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "c_tongue2",
+      "index": 119,
+      "parent_index": 118,
+      "glb_node_name": "c_tongue2",
+      "rest_rotation": [
+        -0.0,
+        0.0,
+        -0.24462982,
+        0.96961653
+      ],
+      "rest_translation": [
+        0.021681,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "c_tongue3",
+      "index": 120,
+      "parent_index": 119,
+      "glb_node_name": "c_tongue3",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        -0.14135179,
+        0.98995942
+      ],
+      "rest_translation": [
+        0.018401,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "c_tongue4",
+      "index": 121,
+      "parent_index": 120,
+      "glb_node_name": "c_tongue4",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.010789,
+        0.0,
+        -0.0
+      ]
+    },
+    {
+      "name": "r_eye",
+      "index": 122,
+      "parent_index": 113,
+      "glb_node_name": "r_eye",
+      "rest_rotation": [
+        0.52362055,
+        0.52362055,
+        0.47520682,
+        -0.47520682
+      ],
+      "rest_translation": [
+        0.088331,
+        0.069878,
+        -0.032078
+      ]
+    },
+    {
+      "name": "r_eye_null",
+      "index": 123,
+      "parent_index": 122,
+      "glb_node_name": "r_eye_null",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        1e-06,
+        0.0,
+        0.016965
+      ]
+    },
+    {
+      "name": "l_eye",
+      "index": 124,
+      "parent_index": 113,
+      "glb_node_name": "l_eye",
+      "rest_rotation": [
+        -0.47520682,
+        -0.47520682,
+        -0.52362055,
+        0.52362055
+      ],
+      "rest_translation": [
+        0.088331,
+        0.069882,
+        0.03208
+      ]
+    },
+    {
+      "name": "l_eye_null",
+      "index": 125,
+      "parent_index": 124,
+      "glb_node_name": "l_eye_null",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        1e-06,
+        0.0,
+        0.016966
+      ]
+    },
+    {
+      "name": "c_head_null",
+      "index": 126,
+      "parent_index": 113,
+      "glb_node_name": "c_head_null",
+      "rest_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rest_translation": [
+        0.190763,
+        -0.0,
+        -0.0
+      ]
+    }
+  ]
+}

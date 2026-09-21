@@ -165,6 +165,16 @@ def process_clip(
     frame_files = sorted(Path(frames_dir).glob("frame_*.jpg"))
     print(f"{len(frame_files)} frames")
 
+    # W4: MotionResult.source_video.width_px/height_px need the real
+    # normalized frame size; cheapest correct source is the extracted frames
+    # themselves (ffmpeg's fps filter is the only normalization applied so far
+    # -- no resize/rotation yet, so this is also the source resolution).
+    frame_height, frame_width = (0, 0)
+    if frame_files:
+        first_img = cv2.imread(str(frame_files[0]))
+        if first_img is not None:
+            frame_height, frame_width = first_img.shape[:2]
+
     # ---- Pass 1: detection only -- who's in this clip, and is it too many? ----
     _emit(on_progress, "detecting", "Finding the dancers in the clip", 0.1)
     raw_detections = []  # for the "raw detector overlays visible" deliverable
@@ -205,6 +215,8 @@ def process_clip(
             "n_confident_dancers": n_confident,
             "sample_times_s": np.array(sample_times_s, dtype=np.float64),
             "raw_detections": raw_detections,
+            "frame_width": frame_width,
+            "frame_height": frame_height,
         }
 
     # ---- Pass 2: full reconstruction, confidently-tracked dancers only ----
@@ -273,6 +285,8 @@ def process_clip(
         "peak_vram_bytes": peak_vram_bytes,
         "n_frames_ok": n_ok,
         "n_frames_total": len(per_frame),
+        "frame_width": frame_width,
+        "frame_height": frame_height,
     }
 
 
@@ -290,6 +304,8 @@ def save_clip_result(result: dict, out_path: str) -> None:
             n_confident_dancers=result["n_confident_dancers"],
             sample_times_s=result["sample_times_s"],
             raw_detections=np.array(result["raw_detections"], dtype=object),
+            frame_width=result.get("frame_width", 0),
+            frame_height=result.get("frame_height", 0),
         )
         return
     np.savez_compressed(
@@ -302,6 +318,8 @@ def save_clip_result(result: dict, out_path: str) -> None:
         faces=result["faces"],
         elapsed_s=result["elapsed_s"],
         peak_vram_bytes=result["peak_vram_bytes"],
+        frame_width=result.get("frame_width", 0),
+        frame_height=result.get("frame_height", 0),
         n_frames_ok=result["n_frames_ok"],
         n_frames_total=result["n_frames_total"],
     )

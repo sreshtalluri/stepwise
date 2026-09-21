@@ -50,6 +50,14 @@ CLIPS_DIR = "/clips"
 results = modal.Volume.from_name("stepwise-results", create_if_missing=True)
 RESULTS_DIR = "/results"
 
+# W4: real user uploads, separate from the versioned eval-clip manifest above --
+# api.py writes here directly (Volume access works from any process with a
+# Modal token, not just inside a container). run_clip checks this volume
+# first, falling back to eval_clips, so evaluation/*.py's existing clip_id-only
+# calls (no upload involved) keep working unchanged.
+uploads = modal.Volume.from_name("stepwise-uploads", create_if_missing=True)
+UPLOADS_DIR = "/uploads"
+
 # Modal resolves every Secret referenced anywhere in the app at load time, so a
 # missing 'huggingface' secret would block even functions that never touch it
 # (verify_gpu, for one). Degrade gracefully: stage 1 stays runnable before the
@@ -275,23 +283,28 @@ GPU_HOURLY_USD = {"L40S": 1.95, "A10G": 1.10, "T4": 0.59}
 @app.function(
     image=cv_image,
     gpu=GPU_TIER,
-    volumes={WEIGHTS_DIR: weights, CLIPS_DIR: eval_clips, RESULTS_DIR: results},
+    volumes={WEIGHTS_DIR: weights, CLIPS_DIR: eval_clips, UPLOADS_DIR: uploads, RESULTS_DIR: results},
     timeout=3600,
 )
-def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1, job_id: str | None = None):
-    """Stage 5: the week-one deliverable. One real clip from evaluation/clips.yaml,
-    through RTMO+ByteTrack -> SAM3DBodyEstimator, every confidently-tracked dancer
-    up to the 6-dancer cap (docs/PRD.md section 5's revised multi-dancer MVP),
-    saved to the results Volume for stage 6 (export).
+def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1,
+             job_id: str | None = None, retry_count: int = 0):
+    """Stage 5: the week-one deliverable. One real clip -- a real user upload
+    (services/motion-api/api.py writes it to the `stepwise-uploads` Volume) or
+    an evaluation/clips.yaml clip (the `stepwise-eval` Volume, checked as a
+    fallback so evaluation/*.py's existing calls are unaffected) -- through
+    RTMO+ByteTrack -> SAM3DBodyEstimator, every confidently-tracked dancer up
+    to the 6-dancer cap (docs/PRD.md section 5's revised multi-dancer MVP).
 
-    W8: also emits job-status.schema.json-compliant progress documents to the
+    W8: emits job-status.schema.json-compliant progress documents to the
     results Volume as `{job_id}.job-status.json`, one write per real pipeline
-    stage transition -- not just the final result. There is no live API polling
-    this yet (ponytail: a JSON file on a Volume, not a queue/pubsub -- upgrade
-    to real push/poll once services/motion-api has an HTTP layer to serve it
-    from); this is the real emitter W7's processing screen needs behind it.
+    stage transition. W4: api.py's HTTP layer polls/serves this file, and this
+    function itself now dispatches export_clip_gltf.remote() once reconstruction
+    succeeds -- so the whole run_clip -> export_clip_gltf order (spec item 2)
+    happens inside one spawned worker, and "succeeded" is only written once a
+    GLB actually exists for every dancer, not right after reconstruction.
     """
     import json
+    import os
     import sys
     import time
 
@@ -301,7 +314,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     job_id = job_id or f"job_{clip_id}_{int(time.time())}"
     status_path = f"{RESULTS_DIR}/{job_id}.job-status.json"
 
-    def write_status(state: str, stage_message: str, progress, error=None, retry_count: int = 0):
+    def write_status(state: str, stage_message: str, progress, error=None):
         doc = {
             "schema_version": "1.0.0",
             "job_id": job_id,
@@ -321,7 +334,18 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
 
     write_status("queued", "", None)
 
-    video_path = f"{CLIPS_DIR}/{clip_id}.mp4"
+    upload_path = f"{UPLOADS_DIR}/{clip_id}.mp4"
+    if not os.path.exists(upload_path):
+        # Real bug caught by an actual end-to-end run (see docs/GATE-REPORT.md
+        # W4 addendum): a container started immediately after api.py's
+        # batch_upload().commit() can win a race against that commit's
+        # propagation and see a stale mount, silently falling through to the
+        # eval-clip path and failing with a confusing "file not found in the
+        # wrong volume" error. One reload() + recheck before falling back to
+        # the eval volume is the cheap fix; this is a Volume, not a queue --
+        # there is no delivery guarantee beyond "eventually consistent".
+        uploads.reload()
+    video_path = upload_path if os.path.exists(upload_path) else f"{CLIPS_DIR}/{clip_id}.mp4"
     checkpoint_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/model.ckpt"
     mhr_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
 
@@ -371,7 +395,18 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
 
     cost = wall_s / 3600 * GPU_HOURLY_USD.get(GPU_TIER, 0.0)
     n_dancers = len(result["confident_track_ids"])
-    write_status("succeeded", "", 1.0)
+
+    # Real, measured numbers for MotionResult.model_report.measured_performance
+    # (motion-result.schema.json) -- api.py reads this rather than re-deriving
+    # fps/vram/cost from the npz itself.
+    perf = {
+        "fps": round(result["n_frames_total"] / result["elapsed_s"], 3) if result["elapsed_s"] > 0 else 0.0,
+        "peak_vram_mb": round(result["peak_vram_bytes"] / 1e6, 1),
+        "cost_usd": round(cost, 4),
+    }
+    with open(f"{RESULTS_DIR}/{clip_id}.performance.json", "w") as f:
+        json.dump(perf, f)
+
     print(
         f"\nSAVED {out_path}\n"
         f"wall clock: {wall_s:.1f}s  pipeline-internal: {result['elapsed_s']:.1f}s\n"
@@ -382,6 +417,25 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         "(warm compute only -- excludes cold start, storage, retries, idle billing; see PRD G7. "
         "Measured for THIS clip's dancer count -- do not extrapolate the solo-01 gate numbers.)"
     )
+
+    # W4 spec item 2: dispatch export ONLY after run_clip succeeds, in order.
+    # Blocking .remote() here is fine -- this whole function was already
+    # dispatched off the HTTP request via .spawn() in api.py, so blocking
+    # inside this worker does not block any client. "succeeded" is written
+    # only once the GLB(s) genuinely exist, not right after reconstruction --
+    # a client polling job status should never see "succeeded" for a job
+    # whose MotionResult/assets aren't actually fetchable yet.
+    write_status("processing", "Building the 3D body file", 0.97)
+    try:
+        export_result = export_clip_gltf.remote(clip_id)
+    except Exception as e:  # noqa: BLE001 -- a real crash in the export stage, not a pipeline_error
+        write_status(
+            "failed", "", None,
+            error={"code": "export_error", "message": str(e), "retryable": True},
+        )
+        raise
+
+    write_status("succeeded", "", 1.0)
     return {
         "refused": False,
         "wall_s": wall_s,
@@ -390,6 +444,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         "n_frames_ok": result["n_frames_ok"],
         "n_frames_total": result["n_frames_total"],
         "estimated_cost_usd": round(cost, 4),
+        "export": export_result,
     }
 
 
@@ -676,6 +731,51 @@ def export_neutral_pose_smoke_test():
     return {"out_path": out_path, "size_bytes": size_bytes}
 
 
+@app.function(image=gltf_image, volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results}, timeout=300)
+def dump_joint_hierarchy():
+    """W4: one-off introspection, not a per-request call. `joint_hierarchy` is
+    "fixed for the life of schema v1.0.0" per motion-result.schema.json, so it
+    is generated here once and saved as a static file
+    (services/motion-api/mhr_joint_hierarchy.json) that api.py loads from disk
+    -- the lightweight FastAPI service should not need pymomentum/CUDA installed
+    just to answer a status/result poll. No GPU requested: skeleton
+    introspection is CPU-only (Character/Skeleton are plain data, not a model
+    forward pass).
+    """
+    import numpy as np
+    import pymomentum.geometry as pym_geo
+
+    lod_path = f"{WEIGHTS_DIR}/mhr-assets/lod3.fbx"
+    character = pym_geo.Character.load_fbx(lod_path)
+    skeleton = character.skeleton
+    names = list(skeleton.joint_names)
+    parents = list(skeleton.joint_parents)  # -1 for root, per pymomentum convention
+    # Rest pose: skeleton exposes offsets (translation) and pre-rotation per
+    # joint in its own attribute names -- introspect rather than guess.
+    print("skeleton attrs:", [a for a in dir(skeleton) if not a.startswith("_")])
+    rest_translations = np.asarray(skeleton.offsets) if hasattr(skeleton, "offsets") else None
+    rest_rotations = None
+    for attr in ("pre_rotations", "rest_rotations", "joint_rotations"):
+        if hasattr(skeleton, attr):
+            rest_rotations = np.asarray(getattr(skeleton, attr))
+            print(f"rest rotation source: {attr}, shape {rest_rotations.shape}")
+            break
+    print(f"joints: {len(names)}, parents sample: {parents[:10]}")
+    if rest_translations is not None:
+        print(f"rest_translations shape: {rest_translations.shape}")
+    out = {
+        "names": names,
+        "parents": parents,
+        "rest_translations": rest_translations.tolist() if rest_translations is not None else None,
+        "rest_rotations": rest_rotations.tolist() if rest_rotations is not None else None,
+    }
+    import json
+    with open(f"{RESULTS_DIR}/mhr_skeleton_raw.json", "w") as f:
+        json.dump(out, f)
+    results.commit()
+    return out
+
+
 @app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results}, timeout=600)
 def export_clip_gltf(clip_id: str):
     """Stage 6c: the real fix (W8) -- export the ACTUAL reconstructed motion
@@ -698,6 +798,8 @@ def export_clip_gltf(clip_id: str):
     docs/GATE-REPORT.md) replaces this; a held pose plays as a visible freeze,
     which is honest -- it does not claim motion that wasn't observed.
     """
+    import os
+
     import numpy as np
     import pymomentum.geometry as pym_geo
 
@@ -717,22 +819,55 @@ def export_clip_gltf(clip_id: str):
     out_paths = {}
     for track_id in confident_track_ids:
         skel_states = np.zeros((n_samples, 127, 8), dtype=np.float32)
-        held = None
-        n_observed = 0
+
+        # Pass 1: collect the observed poses by sample index.
+        observed: dict[int, "np.ndarray"] = {}
         for i in range(n_samples):
             person = per_frame[i].get(track_id) if isinstance(per_frame[i], dict) else None
             if person is not None and "skel_state" in person:
-                held = np.asarray(person["skel_state"], dtype=np.float32)
-                n_observed += 1
-            if held is None:
-                # Leading gap before this dancer's first observed frame -- no
-                # pose to hold yet. Neutral (all-zero) is the honest fallback:
-                # it renders as an A-pose, not a fabricated motion guess.
-                skel_states[i] = np.zeros((127, 8), dtype=np.float32)
-            else:
-                skel_states[i] = held
+                observed[i] = np.asarray(person["skel_state"], dtype=np.float32)
+        n_observed = len(observed)
+        if not observed:
+            print(f"track {track_id}: no observed samples, skipping export")
+            continue
 
-        print(f"track {track_id}: {n_observed}/{n_samples} samples observed")
+        # Pass 2: forward-hold, and BACK-FILL the leading gap from the first
+        # observed pose.
+        #
+        # The leading gap used to be filled with np.zeros((127, 8)). That is
+        # NOT a neutral pose: a skel_state row carries a quaternion, and an
+        # all-zero quaternion has zero norm, so normalizing it yields NaN.
+        # A single NaN frame propagates through the skeleton's world matrices
+        # and makes the ENTIRE model vanish in any glTF viewer -- verified
+        # against solo-01, whose frame 0 is one of its 5 unreconstructed
+        # frames: 128 of 235 animation channels had a NaN at frame 0 and
+        # nothing rendered at all.
+        #
+        # Back-filling is the same honesty argument the forward-hold already
+        # makes (a held pose plays as a visible freeze, it does not claim
+        # motion that was not observed), just applied at the start of the
+        # clip instead of the middle. It also needs no knowledge of the
+        # skel_state layout, unlike constructing a true identity pose.
+        first_observed_idx = min(observed)
+        held = observed[first_observed_idx]
+        for i in range(n_samples):
+            if i in observed:
+                held = observed[i]
+            skel_states[i] = held
+
+        if not np.all(np.isfinite(skel_states)):
+            # Never export a NaN/Inf animation: it fails silently at render
+            # time (an invisible model), which is the worst possible failure
+            # mode -- it looks like a viewer bug, not a pipeline bug.
+            bad = np.argwhere(~np.isfinite(skel_states))
+            raise ValueError(
+                f"track {track_id}: non-finite skel_state values before export "
+                f"({len(bad)} entries, first at sample {bad[0][0]} joint {bad[0][1]}). "
+                "Refusing to write a GLB that would render as nothing."
+            )
+
+        print(f"track {track_id}: {n_observed}/{n_samples} samples observed "
+              f"(first at {first_observed_idx}, leading gap back-filled)")
 
         character = pym_geo.Character.load_fbx(lod_path)
         out_path = f"{RESULTS_DIR}/{clip_id}_track{track_id}.glb"
@@ -740,6 +875,17 @@ def export_clip_gltf(clip_id: str):
         out_paths[track_id] = out_path
         print(f"SAVED {out_path}")
 
+    # W4: api.py builds MotionResult from the npz + this manifest without
+    # needing pymomentum/CUDA installed -- it never needs to know the GLB
+    # naming scheme or fps used here, only this file's contents.
+    import json
+    manifest = {
+        "clip_id": clip_id,
+        "fps": fps,
+        "glb_paths": {str(tid): os.path.basename(p) for tid, p in out_paths.items()},
+    }
+    with open(f"{RESULTS_DIR}/{clip_id}.export-manifest.json", "w") as f:
+        json.dump(manifest, f)
     results.commit()
     return {"clip_id": clip_id, "glb_paths": out_paths, "n_dancers": len(confident_track_ids)}
 

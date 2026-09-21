@@ -1,0 +1,19 @@
+# services/motion-api/api.py -- the lightweight HTTP layer. Deliberately
+# separate from modal_app.py's pinned CV/GPU stack (this process never
+# touches CUDA/torch/pymomentum): fastapi + modal client + numpy (to read the
+# npz) is the whole dependency surface.
+#
+#   uv venv --python 3.12 .venv
+#   uv pip install --python .venv/bin/python -r requirements-api.txt
+#   .venv/bin/python -m uvicorn api:app --port 8811
+#
+# Also requires packages/motion-contract/python's `motion_contract` package
+# to be importable -- api.py adds it to sys.path directly rather than
+# packaging this as an installable dependency, since both live in this repo.
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.9
+modal>=1.5
+numpy>=2.0
+jsonschema>=4.23
+pydantic>=2.9

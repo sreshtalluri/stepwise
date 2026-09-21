@@ -45,3 +45,28 @@ comes from Fast-SAM-3D-Body's setup script, because Detectron2 compiles against
 that CUDA toolkit. `pymomentum` is deliberately absent: its wheels target
 Python 3.12/3.13 with Torch 2.8, which cannot coexist here. glTF export gets a
 separate image and the two exchange plain arrays.
+
+## W4: the HTTP layer (`api.py`)
+
+`modal_app.py` is the GPU worker; `api.py` is the plain FastAPI service that
+turns an HTTP upload into a dispatched Modal job and serves its status/result.
+It never imports torch/CUDA/pymomentum -- run it anywhere with a Modal token:
+
+```sh
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements-api.txt
+modal deploy modal_app.py          # api.py looks up run_clip via Function.from_name
+.venv/bin/python -m uvicorn api:app --port 8811
+```
+
+Endpoints: `POST /clips` (multipart upload -> dispatches, returns `job_id`
+immediately), `GET /jobs/{job_id}` (poll -- the real job-status.schema.json
+document, unmodified), `GET /jobs/{job_id}/result` (once succeeded -- the
+assembled, schema-validated `MotionResult`), `POST /jobs/{job_id}/retry`
+(only for `retryable: true` failures), `GET /assets/{asset_id}` (resolves a
+`source_video.asset_id` / `AnimationRef.glb_asset_id` to bytes).
+
+See `api.py`'s module docstring for the object-storage decision (Modal
+Volumes, not S3) and the known scope boundary in `_build_motion_result`
+(per-joint visibility/suppression and true world-space root placement are
+Milestone A/W9 work, not built here).
