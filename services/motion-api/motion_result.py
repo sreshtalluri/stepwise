@@ -442,16 +442,41 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                 "reference_width_px": width or 1,
                 "reference_height_px": height or 1,
             },
-            # WIRED (OPEN-DECISIONS E6): the camera sits at this document's
-            # world origin, oriented by the same 180-degree-about-X flip
-            # applied to root_trajectory.position and grounding.floor_plane
-            # (grounding.solve_grounding_camera_space's _CAMERA_TO_WORLD_FLIP)
-            # -- negate Y and Z, no translation. Column-major: columns are
-            # (1,0,0,0), (0,-1,0,0), (0,0,-1,0), (0,0,0,1). This is no longer
-            # an identity placeholder standing in for "not placed yet"; it is
-            # the actual camera pose this document's world space is built
-            # around. NOT verified in the viewer yet -- see OPEN-DECISIONS E6.
-            "camera_to_world": [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1],
+            # WIRED (OPEN-DECISIONS E6). Still the identity -- but for the
+            # opposite reason it used to be, and the same 16 numbers now mean
+            # something completely different.
+            #
+            # BEFORE: a placeholder. World space was the GLB's character-local
+            # frame, the body was pinned at the origin, and there was no camera
+            # pose to write, so the identity stood in for "not placed yet".
+            #
+            # NOW: a measurement. World space IS the camera's own frame, and
+            # camera_to_world is the camera's POSE IN THAT FRAME, which is by
+            # construction the identity -- the camera sits at the world origin,
+            # looking down -Z, which is the glTF convention this contract
+            # mandates.
+            #
+            # The trap, and it was walked into once here: the
+            # 180-degree-about-X flip (negate Y and Z) that
+            # root_trajectory.position and grounding.floor_plane are built
+            # through is NOT this matrix. That flip converts the probe's camera
+            # convention (Y-down, Z-forward, positive depth) into the glTF
+            # convention (Y-up, Z-backward); it is a change of basis applied to
+            # the POINTS, already baked into every coordinate in this document.
+            # Writing it here as well applies it a second time.
+            #
+            # Measured, because the two are indistinguishable by inspection.
+            # apps/web/lib/motion.ts's projectToFrame is the one consumer; fed
+            # 234 solo-01 ankle samples whose detector pixels place_track was
+            # fitted against:
+            #
+            #   camera_to_world = identity        -> median 7.46 px, p90 22.75 px
+            #   camera_to_world = diag(1, -1, -1) -> 234/234 behind the camera,
+            #                                        projectToFrame returns null
+            #
+            # test_world_placement_wiring.py checks that round trip rather than
+            # this literal, because the literal is exactly what was wrong.
+            "camera_to_world": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
         },
         # Real floor solve (grounding.py). Still returns "none" whenever the
         # evidence does not earn a plane -- DESIGN.md §10 forbids faking one,

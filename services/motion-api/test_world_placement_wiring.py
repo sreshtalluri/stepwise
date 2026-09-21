@@ -135,11 +135,85 @@ def test_the_recovered_position_matches_the_known_translation():
     assert np.median(err) < 0.05, f"median placement error {np.median(err):.3f} m"
 
 
-def test_camera_to_world_is_not_the_identity_placeholder():
-    """It was `identity` only for as long as the body was pinned at the origin.
-    An identity here again means the two halves disagree about world space."""
-    doc, _ = _build()
-    assert doc["camera"]["camera_to_world"] == [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1]
+def _project_through_contract(doc, world_pt):
+    """apps/web/lib/motion.ts's `projectToFrame`, ported line for line.
+
+    The point of porting rather than approximating: this is the ONE consumer of
+    `camera.camera_to_world`, so "is the matrix right" is not a question about
+    the matrix, it is a question about whether this function lands on the right
+    pixel. Returns None exactly where the TS returns null.
+    """
+    m = doc["camera"]["camera_to_world"]
+    t = m[12:15]
+    d = [world_pt[i] - t[i] for i in range(3)]
+    cam = [
+        m[0] * d[0] + m[1] * d[1] + m[2] * d[2],
+        m[4] * d[0] + m[5] * d[1] + m[6] * d[2],
+        m[8] * d[0] + m[9] * d[1] + m[10] * d[2],
+    ]
+    depth = -cam[2]          # glTF: the camera looks down -Z
+    if depth <= 1e-6:
+        return None
+    k = doc["camera"]["intrinsics"]
+    return (k["cx"] + k["fx"] * cam[0] / depth, k["cy"] - k["fy"] * cam[1] / depth)
+
+
+def test_camera_to_world_round_trips_world_points_back_onto_their_pixels():
+    """The matrix is checked by what it DOES, not by its 16 numbers.
+
+    A literal assertion is worthless here and was actively harmful once: the
+    identity and the 180-degree-about-X flip are indistinguishable by
+    inspection, both "look right" next to a comment, and the wrong one was
+    committed. The flip that builds `root_trajectory.position` out of the
+    probe's camera convention is a change of basis on the POINTS -- already
+    applied -- not the camera's pose, and writing it here applies it twice.
+    Measured on solo-01, the wrong matrix put 234 of 234 real ankle samples
+    BEHIND the camera, i.e. projectToFrame returned null for the whole clip.
+
+    So: take the document's own world-space root, push it back through the
+    document's own camera, and require the pixel it lands on to be the pixel
+    the body was actually reconstructed at.
+    """
+    npz_bytes, manifest, truth = _synth_npz(travel_m=4.0)
+    doc = mr.build_motion_result("job_synth", "synth", npz_bytes, manifest, None)
+    pos = _positions(doc)
+
+    errs = []
+    for i in sorted(truth[1]):
+        t = truth[1][i]                       # known camera-space translation
+        want = (FOCAL * t[0] / t[2] + WIDTH / 2.0, FOCAL * t[1] / t[2] + HEIGHT / 2.0)
+        got = _project_through_contract(doc, pos[i])
+        assert got is not None, (
+            f"sample {i} projects to nothing -- every world point is behind the "
+            f"camera, which is what a double-applied axis flip looks like"
+        )
+        errs.append(np.hypot(got[0] - want[0], got[1] - want[1]))
+    errs = np.asarray(errs)
+    assert errs.size > 40
+    # Tolerances are the 5-frame median filter on the translation, not slack:
+    # it is deliberately smoothing, so the ends of the clip and the fastest
+    # frames lag the exact answer by a pixel or two. Anything that breaks the
+    # frame breaks this by hundreds of pixels, or by returning None above.
+    assert np.median(errs) < 2.0, np.median(errs)
+    assert errs.max() < 6.0, errs.max()
+
+
+def test_the_axis_flip_is_not_the_camera_pose():
+    """The negative half of the test above, stated on its own because this is
+    the specific mistake that was made: writing the points' change of basis
+    into `camera_to_world` as though it were the camera's orientation. It does
+    not merely shift the projection, it sends the entire clip behind the
+    camera -- so the check is cheap and total."""
+    npz_bytes, manifest, truth = _synth_npz(travel_m=4.0)
+    doc = mr.build_motion_result("job_synth", "synth", npz_bytes, manifest, None)
+    pos = _positions(doc)
+
+    doc["camera"]["camera_to_world"] = [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1]
+    projected = [_project_through_contract(doc, pos[i]) for i in sorted(truth[1])]
+    assert all(q is None for q in projected), (
+        "the double-flipped matrix projected something, so this test would no "
+        "longer notice the frame being applied twice"
+    )
 
 
 def test_grounding_runs_on_the_camera_space_solve():
