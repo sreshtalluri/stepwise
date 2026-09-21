@@ -249,6 +249,10 @@ Postgres 16 container; `pg_dump --schema-only` exits clean at 11,322 bytes with
 DATABASE_URL='postgresql://…-pooler.…neon.tech/stepwise?sslmode=require' \
   python3 services/motion-api/migrate.py
 #    -> "apply 001_init"  then  "tables: assets, clips, creator_tokens, …"
+#
+#    If the Neon endpoint is not reachable from your laptop, migrations/ is
+#    mounted into the API image for exactly this: `modal shell` into the `web`
+#    function and run `python3 /app/services/motion-api/migrate.py` there.
 
 # 3. hand it to Modal and flip the backend
 modal secret create stepwise-db \

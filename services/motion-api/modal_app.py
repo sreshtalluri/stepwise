@@ -1585,8 +1585,11 @@ api_image = (
     # "packages" / "motion-contract" / "python"` resolves inside the container
     # exactly as it does on a laptop. Reproducing the repo's shape is cheaper
     # and less surprising than patching the path at import.
+    # migrations/ is 11 KB and deliberately NOT excluded: `modal shell` into
+    # this container is the one place that is guaranteed to be able to reach a
+    # private Neon endpoint, so `python3 migrate.py` has to work from here.
     .add_local_dir(MOTION_API_DIR, remote_path="/app/services/motion-api",
-                   ignore=["vendor/**", "migrations/**", "**/__pycache__/**", "*.pyc"])
+                   ignore=["vendor/**", "**/__pycache__/**", "*.pyc"])
     .add_local_dir(os.path.join(REPO_ROOT, "packages", "motion-contract", "python"),
                    remote_path="/app/packages/motion-contract/python",
                    ignore=["**/__pycache__/**", "*.pyc", ".venv/**"])
