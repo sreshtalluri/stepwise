@@ -48,7 +48,15 @@ from pathlib import Path
 # Pure numpy, no web framework and no torch, so it imports fine in the glTF
 # container as well as the API container. modal_app mounts it alongside this
 # file for exactly that reason.
-from grounding import camera_intrinsics_from_clip, solve_grounding_for_clip
+from grounding import camera_intrinsics_from_clip, solve_grounding_camera_space
+# world_placement_probe.place_track is the measured world-placement solve
+# (docs/research/world-placement.md, OPEN-DECISIONS E6): rigid skeleton +
+# per-frame 3-DoF PnP against the detector's own keypoints + a 5-frame median
+# filter. Imported, not re-implemented -- see the INTEGRATION NOTE below for
+# why a "verbatim lift" of this exact logic has already gone wrong once.
+# modal_app mounts it (and skeleton_constraints.py, which it needs) alongside
+# grounding.py and this file for the same reason.
+import world_placement_probe as wp
 
 JOINT_HIERARCHY = json.loads(
     (Path(__file__).resolve().parent / "mhr_joint_hierarchy.json").read_text()
@@ -195,13 +203,58 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
     parents = [j["parent_index"] for j in joints_def]
     root_idx = JOINT_HIERARCHY["root_joint_index"]
 
+    confident_track_ids = data["confident_track_ids"].tolist()
+
+    # World-placement solve, once per confidently-tracked dancer. None means
+    # "not placed" -- fewer than 25 frames (world_placement_probe's own
+    # minimum-evidence gate) or the npz predates frame_width/frame_height
+    # (place_track requires them; older lessons rebuilt through api.py's
+    # fallback path do not have them). Either way the dancer still gets a
+    # best-effort root_trajectory below, from skel_state alone, exactly as
+    # before this change.
+    placements: dict[int, dict | None] = {}
+    for track_id in confident_track_ids:
+        try:
+            placements[track_id] = wp.place_track(data, track_id)
+        except Exception as e:  # noqa: BLE001
+            print(f"[world-placement] {clip_id} track {track_id}: not placed ({e})")
+            placements[track_id] = None
+
     persons = []
-    for pi, track_id in enumerate(data["confident_track_ids"].tolist()):
+    for pi, track_id in enumerate(confident_track_ids):
         held = None  # most recent observed skel_state (127, 8) for this track
         samples_out = []
         root_traj = []
         n_observed = 0
         shape_vec = None
+
+        # Composed world position per sample index, contract world space
+        # (metres, Y-up) -- see world-placement.md and the CORRECTION comment
+        # below. Built once per track: place_track's rows only cover frames
+        # where the track was actually seen by both the reconstruction and
+        # the detector, and its own 5-frame median filter can still leave a
+        # row NaN (long correspondence gaps), so this is a sparse map, held
+        # forward across gaps exactly like `held` (skel_state) is below.
+        placement = placements.get(track_id)
+        composed_position = {}
+        if placement is not None:
+            world_pts = (placement["joints"][:, root_idx, :] + placement["trans"]) * np.array([1.0, -1.0, -1.0])
+            valid_rows = np.isfinite(world_pts).all(axis=1)
+            for k, i in enumerate(placement["idx"]):
+                if valid_rows[k]:
+                    composed_position[int(i)] = world_pts[k]
+        # Seeded with the FIRST solved position rather than None, i.e. the
+        # leading gap is BACK-FILLED -- the same argument, and the same fix,
+        # modal_app.export_clip_gltf already applies to skel_state's leading
+        # gap.  A track can be reconstructed on a sample whose placement did
+        # not solve (solo-01's first sample is one of its 4 NaN translation
+        # rows), and leaving those on the pinned constant put the dancer at
+        # the old character-local origin for one frame and then TELEPORTED
+        # them 6.14 m -- measured; solo-07 track 3 jumped 7.73 m.  A held
+        # pose reads as a freeze, which is honest; a 6 m jump reads as real
+        # travel, which is a lie about what the pipeline saw.
+        placed = bool(composed_position)
+        held_position = composed_position[min(composed_position)] if placed else None
         # branch `hands`: crop rects are computed in the GPU stage (they need the
         # detector keypoints and the real post-rotation frame size, both of which
         # only exist there) and carried per-person in the npz, same as
@@ -223,6 +276,8 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                     # frame's estimate, which is a noisy sample of the body rather
                     # than the clip-wide fit ShapeParams.source promises.
                     shape_vec = person["shape_params"].tolist()
+            if i in composed_position:
+                held_position = composed_position[i]
 
             if held is None:
                 # Leading gap: never reconstructed yet at all for this track.
@@ -231,7 +286,25 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                     for _ in range(n_joints)
                 ]
                 root_traj.append({
-                    "position": [0.0, 0.0, 0.0],
+                    # Back-filled from this track's first solved placement, not
+                    # the origin.  The contract is explicit that a position on a
+                    # suppressed sample is not a claim, and `out_of_frame` +
+                    # `absent` joints say plainly that nobody was there yet --
+                    # but the origin STOPPED being a neutral placeholder the
+                    # moment world space became the camera's.  It is now a real
+                    # spot in the room, inside the camera, metres from the
+                    # dancer, and a consumer that reads position without first
+                    # reading provenance gets a specific wrong answer instead of
+                    # an obviously empty one.  apps/web's `travelExtent` is
+                    # exactly that consumer: it ranges over every sample, so
+                    # group-synced-01 track 5 -- 261 of its 496 samples are
+                    # leading gap -- would have reported ~6.6 m of travel that
+                    # is entirely this placeholder.  Holding the first real
+                    # position is the same back-fill export_clip_gltf already
+                    # does for skel_state, and it costs no honesty: the sample
+                    # is still `out_of_frame`, still `absent`, still not
+                    # `observed`.
+                    "position": [float(v) for v in held_position] if held_position is not None else [0.0, 0.0, 0.0],
                     "rotation": [0, 0, 0, 1],
                     "provenance": {"observed": False, "interpolated": False, "suppressed": "out_of_frame"},
                 })
@@ -259,40 +332,70 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                         "visibility": visibility,
                     })
                 root_pos_cm = held[root_idx, 0:3]
+                if held_position is not None:
+                    # WIRED (docs/research/world-placement.md, OPEN-DECISIONS
+                    # E6): world_placement_probe.place_track's composed
+                    # per-frame translation, converted into this same contract
+                    # world space. `held` above is skel_state's own
+                    # character-local frame, which on real clips is CONSTANT
+                    # -- (0, 0.924, 0) on all 291 solo-01 frames -- because it
+                    # never had the camera-space translation added in. This
+                    # does: the dancer travels now instead of dancing in
+                    # place. Forward-filled across any sample this track's
+                    # placement could not solve (held_position only changes
+                    # where `composed_position` has an entry for `i`), same as
+                    # `held` (skel_state) is above -- a gap holds the last
+                    # real placement rather than snapping back to the pinned
+                    # constant.
+                    #
+                    # Falls back to the pinned constant only when this track
+                    # was never placed at all (fewer than 25 frames, or an
+                    # older npz missing frame_width/frame_height -- see
+                    # `placements` above). Absolute metric scale is unverified
+                    # beyond +/-10% and short/distant tracks are noisier
+                    # (solo-07 track 3 measured 53 cm off) -- both still OPEN
+                    # in OPEN-DECISIONS E6, not resolved by this wiring.
+                    position = [float(v) for v in held_position]
+                    # Placement is a per-sample claim of its own: a sample
+                    # whose own translation solved is observed, one that
+                    # inherited a held/back-filled position is not.  This is
+                    # NOT the joint provenance above -- the pose can be
+                    # observed on a sample whose placement was not.
+                    root_prov = provenance if i in composed_position else {
+                        "observed": False, "interpolated": True,
+                        "suppressed": provenance["suppressed"] or "low_confidence",
+                    }
+                else:
+                    # CORRECTION: the reason this was pinned was WRONG, not
+                    # merely incomplete. It said composing pred_cam_t would
+                    # "slide the dancer 7.75 m because they crouched". The
+                    # source video says solo-01's dancer really does start
+                    # ~10 m away and run toward the camera -- the 7.75 m is
+                    # the choreography, and the -0.93 correlation with bbox
+                    # height is the pinhole relation working, not an error.
+                    position = [float(root_pos_cm[0]) / 100.0, float(root_pos_cm[1]) / 100.0, float(root_pos_cm[2]) / 100.0]
+                    # This track was never placed (too few frames for
+                    # world_placement_probe's 25-frame minimum -- solo-07
+                    # tracks 5 and 9 have 21 and 14).  The pinned constant is
+                    # NOT a world position in this document's world space: it
+                    # sits 2.16 m above solo-07's own fitted floor, next to
+                    # the camera.  A Vec3 is required here and there is no
+                    # honest one, so the position stays the old placeholder
+                    # and the provenance says so -- never `observed`, so a
+                    # consumer that respects provenance (DESIGN.md 7h) does
+                    # not draw this dancer standing in a spot nobody measured.
+                    root_prov = {"observed": False, "interpolated": False,
+                                 "suppressed": "low_confidence"}
                 root_traj.append({
                     # cm -> meters, same scale factor verified against
                     # joint_hierarchy.rest_translation (see dump_joint_hierarchy).
-                    #
-                    # This is skel_state's own character-local frame, and on
-                    # real clips it is CONSTANT -- (0, 0.924, 0) on all 291
-                    # solo-01 frames -- so the dancer dances in place instead
-                    # of travelling across the stage.
-                    #
-                    # CORRECTION (docs/research/world-placement.md): the reason
-                    # previously recorded here was WRONG. It said composing
-                    # pred_cam_t would "slide the dancer 7.75 m because they
-                    # crouched". The source video says solo-01's dancer really
-                    # does start ~10 m away and run toward the camera -- the
-                    # 7.75 m is the choreography, and the -0.93 correlation
-                    # with bbox height is the pinhole relation working. The
-                    # independent PnP agreeing at r = 0.983 was confirmation,
-                    # not a shared error.
-                    #
-                    # Still pinned here only because composing a per-frame
-                    # translation changes what the export and the viewer mean
-                    # by world space, which is OPEN-DECISIONS E6 and the
-                    # builder's call. world-placement.md measures what the
-                    # composed version buys (foot contacts on one floor: 52%
-                    # -> 90%; five dancers agreeing on that floor to 5 cm
-                    # instead of 37 cm) and services/motion-api/
-                    # world_placement_probe.py reproduces it from an npz.
-                    "position": [float(root_pos_cm[0]) / 100.0, float(root_pos_cm[1]) / 100.0, float(root_pos_cm[2]) / 100.0],
+                    "position": position,
                     # Unconverted on purpose, unlike the per-joint rotations
                     # above: the root has no parent, so its world rotation IS
                     # its local one, and the body's world orientation is
                     # exactly what root_trajectory is asking for.
                     "rotation": list(tuple(float(v) for v in held[root_idx, 3:7])),
-                    "provenance": provenance,
+                    "provenance": root_prov,
                 })
 
             samples_out.append({"joints": joints_sample})
@@ -334,12 +437,17 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
     width = int(data["frame_width"]) if "frame_width" in data else 0
     height = int(data["frame_height"]) if "frame_height" in data else 0
 
-    # One floor per clip, from every dancer's foot contacts pooled. The
-    # diagnostics are deliberately NOT put in the document (Grounding is
+    # One floor per clip, from every dancer's foot contacts pooled, in the
+    # same camera space `placements` above solved translation in (real per-
+    # frame depth, not the character-local frame's flattened one -- see
+    # grounding.solve_grounding_camera_space). The diagnostics are
+    # deliberately NOT put in the document (Grounding is
     # additionalProperties: false, and they are engineering numbers, not a
     # product claim) -- they go to the log so a "none" is explainable without
     # re-running the job.
-    solved = solve_grounding_for_clip(data, [j["name"] for j in joints_def])
+    solved = solve_grounding_camera_space(
+        [placements.get(tid) for tid in confident_track_ids], sample_times_s, n_samples,
+    )
     grounding = solved.grounding
     print(f"[grounding] {clip_id}: {grounding['status']} -- {json.dumps(solved.diagnostics)}")
     intrinsics = camera_intrinsics_from_clip(data)
@@ -378,14 +486,40 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                 "reference_width_px": width or 1,
                 "reference_height_px": height or 1,
             },
-            # ponytail: identity, i.e. this document's "world space" IS the
-            # exported GLB's own character-local frame -- which is what
-            # root_trajectory and grounding.floor_plane are both expressed in,
-            # so the document is self-consistent. It is NOT camera space, and
-            # it cannot be until the dancer can be placed in the room at all
-            # (OPEN-DECISIONS E6). Writing a real camera_to_world here while
-            # the body is still pinned at the origin would make the document
-            # internally inconsistent, not more truthful.
+            # WIRED (OPEN-DECISIONS E6). Still the identity -- but for the
+            # opposite reason it used to be, and the same 16 numbers now mean
+            # something completely different.
+            #
+            # BEFORE: a placeholder. World space was the GLB's character-local
+            # frame, the body was pinned at the origin, and there was no camera
+            # pose to write, so the identity stood in for "not placed yet".
+            #
+            # NOW: a measurement. World space IS the camera's own frame, and
+            # camera_to_world is the camera's POSE IN THAT FRAME, which is by
+            # construction the identity -- the camera sits at the world origin,
+            # looking down -Z, which is the glTF convention this contract
+            # mandates.
+            #
+            # The trap, and it was walked into once here: the
+            # 180-degree-about-X flip (negate Y and Z) that
+            # root_trajectory.position and grounding.floor_plane are built
+            # through is NOT this matrix. That flip converts the probe's camera
+            # convention (Y-down, Z-forward, positive depth) into the glTF
+            # convention (Y-up, Z-backward); it is a change of basis applied to
+            # the POINTS, already baked into every coordinate in this document.
+            # Writing it here as well applies it a second time.
+            #
+            # Measured, because the two are indistinguishable by inspection.
+            # apps/web/lib/motion.ts's projectToFrame is the one consumer; fed
+            # 234 solo-01 ankle samples whose detector pixels place_track was
+            # fitted against:
+            #
+            #   camera_to_world = identity        -> median 7.46 px, p90 22.75 px
+            #   camera_to_world = diag(1, -1, -1) -> 234/234 behind the camera,
+            #                                        projectToFrame returns null
+            #
+            # test_world_placement_wiring.py checks that round trip rather than
+            # this literal, because the literal is exactly what was wrong.
             "camera_to_world": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
         },
         # Real floor solve (grounding.py). Still returns "none" whenever the
