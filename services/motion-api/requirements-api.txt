@@ -11,6 +11,14 @@
 # to be importable -- api.py adds it to sys.path directly rather than
 # packaging this as an installable dependency, since both live in this repo.
 #
+# And the `yt-dlp` BINARY on PATH (uv tool install yt-dlp), for the pasted-link
+# front door (ingest.py). Same reasoning as ffmpeg below: invoked as a
+# subprocess, never imported, so none of its terms reach this repo. Also
+# optional in the same way -- without it `POST /clips/link` refuses with a
+# retryable "links are not working right now" and file upload is unaffected.
+# It is given NO credentials: no cookies, no --netrc, no browser cookie
+# import. A platform that demands a login gets a refusal, not a session.
+#
 # And the `ffmpeg` + `ffprobe` BINARIES on PATH (brew install ffmpeg / apt
 # install ffmpeg), for the upload fingerprint that skips a GPU reconstruction
 # when the same dance has already been processed (fingerprint.py). Not listed
