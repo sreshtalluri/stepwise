@@ -11,10 +11,15 @@ import {
   regionVisibility,
   absentNotes,
   dancerColor,
+  followStep,
+  deadzoneFor,
+  damp,
+  FOLLOW,
   VIEW_PRESETS,
   type MotionResult,
   type ViewId,
   type Visibility,
+  type Vec3,
 } from "../lib/motion";
 
 /* ----------------------------------------------------------------- materials */
@@ -72,8 +77,14 @@ function uncertainMaterial(ramp: THREE.DataTexture): THREE.MeshToonMaterial {
   return mat;
 }
 
-/** Bounds the view presets frame against, refreshed from the posed skeleton. */
-interface Focus {
+/**
+ * Bounds the view presets frame against, refreshed from the posed skeleton.
+ *
+ * Also the single source of truth for the video pane's crop: `LessonViewer` owns this
+ * ref, passes it down, and projects `body` through the clip's camera. One number
+ * frames both panes, so they cannot drift apart (see `projectBoxToFrame`).
+ */
+export interface Focus {
   body: THREE.Box3;
   hands: THREE.Box3;
   feet: THREE.Box3;
@@ -319,17 +330,64 @@ function Lights({ grounded }: { grounded: boolean }) {
 
 /* ------------------------------------------------------------- view presets */
 
+/**
+ * Distance at which `bounds` exactly fills the panel for this camera.
+ *
+ * Frame the body to the panel rather than to a fixed distance: the two stages are
+ * very different shapes on phone and desktop, and a preset that crops the feet on one
+ * of them is not a preset.
+ */
+function frameRadius(bounds: THREE.Box3, cam: THREE.PerspectiveCamera, margin: number): number {
+  const size = bounds.getSize(new THREE.Vector3());
+  const halfV = THREE.MathUtils.degToRad(cam.fov) / 2;
+  const halfH = Math.atan(Math.tan(halfV) * cam.aspect);
+  return Math.max(size.y / 2 / Math.tan(halfV), Math.max(size.x, size.z) / 2 / Math.tan(halfH)) * 1.18 * margin;
+}
+
+/**
+ * The view preset AND the follow rig — the two are deliberately one component,
+ * because they are two axes of the same camera and have to compose rather than
+ * override each other:
+ *
+ *   the preset  decides the DIRECTION you look from (azimuth/elevation), and is a
+ *               one-shot: it aims the camera, then hands over to OrbitControls so
+ *               the learner can orbit freely.
+ *   follow      decides WHAT is looked at and from HOW FAR, every frame, and does it
+ *               by translating the whole orbit rig — target and camera move by the
+ *               same delta — so the learner's orbit angle survives untouched. You can
+ *               orbit a following camera, and following never resets your angle.
+ *
+ * With follow off this is byte-for-byte the old one-shot behaviour.
+ */
 function ViewRig({
   view,
+  follow,
+  selectedIndex,
   focusRef,
   controlsRef,
 }: {
   view: ViewId;
+  follow: boolean;
+  selectedIndex: number;
   focusRef: RefObject<Focus | null>;
   controlsRef: RefObject<any>;
 }) {
   const { camera, size } = useThree();
   const applied = useRef<ViewId | null>(null);
+  /** Where the camera is currently aiming — the damped, deadzoned follow point. */
+  const aim = useRef<Vec3>([0, 0, 0]);
+  /** The framing distance the rig is driving toward, before the learner's own zoom. */
+  const autoDist = useRef(0);
+  /** Distance we last wrote, so a change means the learner dollied. */
+  const lastDist = useRef(0);
+  /**
+   * The learner's zoom, kept as a RATIO of the automatic framing rather than an
+   * absolute distance. Without this, follow's per-frame distance correction would
+   * silently overwrite the scroll wheel; with it, someone who zooms in twice as close
+   * stays twice as close as the dancer moves toward and away from the camera.
+   */
+  const zoomBias = useRef(1);
+  const switching = useRef(false);
 
   // Presets frame the body to the panel, so a panel that changes shape — turning on
   // compare, promoting a stage, rotating the phone — has to re-frame or it crops.
@@ -337,36 +395,95 @@ function ViewRig({
     applied.current = null;
   }, [size.width, size.height]);
 
-  useFrame(() => {
+  // A dancer switch is resolved on the next frame, once the newly selected dancer has
+  // written its own bounds into focusRef.
+  useEffect(() => {
+    switching.current = true;
+  }, [selectedIndex]);
+
+  const subject = useRef(new THREE.Vector3());
+  const delta = useRef(new THREE.Vector3());
+  const offset = useRef(new THREE.Vector3());
+  const extent = useRef(new THREE.Vector3());
+
+  useFrame((_, dt) => {
     const focus = focusRef.current;
     const controls = controlsRef.current;
-    if (!focus || !controls || applied.current === view) return;
-    applied.current = view;
+    if (!focus || !controls) return;
 
     const preset = VIEW_PRESETS.find((p) => p.id === view)!;
     // Close-ups frame the hands or feet themselves, not a fraction of the whole body:
     // a dancer in a wide pose and a dancer with arms down need very different
     // distances for the same "hands" preset.
     const bounds = focus[preset.focus].isEmpty() ? focus.body : focus[preset.focus];
-    const size = bounds.getSize(new THREE.Vector3());
-    const target = bounds.getCenter(new THREE.Vector3());
-
-    // Frame the body to the panel rather than to a fixed distance: the two stages are
-    // very different shapes on phone and desktop, and a preset that crops the feet on
-    // one of them is not a preset.
     const cam = camera as THREE.PerspectiveCamera;
-    const halfV = THREE.MathUtils.degToRad(cam.fov) / 2;
-    const halfH = Math.atan(Math.tan(halfV) * cam.aspect);
-    const radius =
-      Math.max(size.y / 2 / Math.tan(halfV), Math.max(size.x, size.z) / 2 / Math.tan(halfH)) * 1.18 * preset.distance;
+    bounds.getCenter(subject.current);
+    const radius = frameRadius(bounds, cam, preset.distance);
 
-    camera.position.set(
-      target.x + Math.sin(preset.azimuth) * Math.cos(preset.elevation) * radius,
-      target.y + Math.sin(preset.elevation) * radius,
-      target.z + Math.cos(preset.azimuth) * Math.cos(preset.elevation) * radius,
+    // DESIGN.md §7a2: switching dancer is one tap and the lesson re-anchors. How it
+    // re-anchors depends on how far it has to go. Within `cutDistance` the follow
+    // damping simply walks the camera across, which keeps the spatial relationship
+    // between the two bodies legible — you SEE that you moved to the person on the
+    // left. Beyond it a glide is a slow pan across empty floor that tells you nothing
+    // and loses the dancer for a second, so it cuts instead. Same rule the rest of
+    // the viewer uses: show the relationship when it is readable, do not fake one
+    // when it is not.
+    if (switching.current) {
+      switching.current = false;
+      const far = subject.current.distanceTo(new THREE.Vector3(...aim.current)) > FOLLOW.cutDistance;
+      if (!follow || far) applied.current = null;
+    }
+
+    // ---- one-shot: mount, view change, resize, double-tap reset, or a hard cut ----
+    if (applied.current !== view) {
+      applied.current = view;
+      aim.current = [subject.current.x, subject.current.y, subject.current.z];
+      autoDist.current = radius;
+      lastDist.current = radius * zoomBias.current;
+      camera.position.set(
+        subject.current.x + Math.sin(preset.azimuth) * Math.cos(preset.elevation) * lastDist.current,
+        subject.current.y + Math.sin(preset.elevation) * lastDist.current,
+        subject.current.z + Math.cos(preset.azimuth) * Math.cos(preset.elevation) * lastDist.current,
+      );
+      controls.target.copy(subject.current);
+      controls.update();
+      return;
+    }
+
+    // Follow off: hand the camera to OrbitControls and never touch it again — this is
+    // exactly the pre-existing behaviour, so the toggle is a true no-op when off.
+    if (!follow) return;
+
+    // A distance we did not write means the learner dollied. Record it as a ratio.
+    const now = camera.position.distanceTo(controls.target);
+    if (Math.abs(now - lastDist.current) > 1e-4 && autoDist.current > 0) {
+      zoomBias.current = THREE.MathUtils.clamp(now / autoDist.current, 0.2, 5);
+    }
+
+    aim.current = followStep(
+      aim.current,
+      [subject.current.x, subject.current.y, subject.current.z],
+      deadzoneFor(bounds.getSize(extent.current).y),
+      dt,
     );
-    controls.target.copy(target);
+    autoDist.current = damp(autoDist.current, radius, FOLLOW.tauDistance, Math.min(dt, 0.1));
+
+    // Translate the whole rig: moving target and camera by the same vector leaves
+    // `camera.position - target` — which is all OrbitControls stores an orbit as —
+    // completely unchanged. This is why follow and orbit compose instead of fighting.
+    delta.current.set(aim.current[0], aim.current[1], aim.current[2]).sub(controls.target);
+    controls.target.add(delta.current);
+    camera.position.add(delta.current);
+
+    // Then set the framing distance along the direction the learner is looking from.
+    offset.current.copy(camera.position).sub(controls.target);
+    const want = autoDist.current * zoomBias.current;
+    if (offset.current.lengthSq() > 1e-12) {
+      offset.current.setLength(want);
+      camera.position.copy(controls.target).add(offset.current);
+    }
     controls.update();
+    lastDist.current = camera.position.distanceTo(controls.target);
   });
   return null;
 }
@@ -379,6 +496,18 @@ export interface Stage3DProps {
   view: ViewId;
   mirrored: boolean;
   timeRef: RefObject<number>;
+  /**
+   * Keep the selected dancer framed at a constant, studiable size. A separate axis
+   * from `view` — see ViewRig.
+   */
+  follow?: boolean;
+  /**
+   * Optional: the caller's own handle on the selected dancer's live world bounds,
+   * written every frame. `LessonViewer` passes one so the video pane can crop to the
+   * SAME bounds this stage frames — see `projectBoxToFrame`. A ref, not a callback,
+   * because this updates 60 times a second and must not re-render React.
+   */
+  focusRef?: RefObject<Focus | null>;
   onAbsent?: (notes: string[]) => void;
   /** DESIGN.md §10: double-tap returns to the camera view. */
   onResetView?: () => void;
@@ -392,8 +521,20 @@ export interface Stage3DProps {
   glbUrls: string[];
 }
 
-export default function Stage3D({ doc, selectedIndex, view, mirrored, timeRef, onAbsent, onResetView, glbUrls }: Stage3DProps) {
-  const focusRef = useRef<Focus | null>(null);
+export default function Stage3D({
+  doc,
+  selectedIndex,
+  view,
+  mirrored,
+  timeRef,
+  follow = false,
+  focusRef: externalFocusRef,
+  onAbsent,
+  onResetView,
+  glbUrls,
+}: Stage3DProps) {
+  const ownFocusRef = useRef<Focus | null>(null);
+  const focusRef = externalFocusRef ?? ownFocusRef;
   const controlsRef = useRef<any>(null);
   const [resetKey, setResetKey] = useState(0);
 
@@ -430,7 +571,16 @@ export default function Stage3D({ doc, selectedIndex, view, mirrored, timeRef, o
           focusRef={i === selectedIndex ? focusRef : undefined}
         />
       ))}
-      <ViewRig key={`${view}-${selectedIndex}-${resetKey}`} view={view} focusRef={focusRef} controlsRef={controlsRef} />
+      {/* No `selectedIndex` in the key any more: a remount is a hard cut, and with
+          follow on a nearby dancer should be glided to instead. ViewRig decides. */}
+      <ViewRig
+        key={`${view}-${resetKey}`}
+        view={view}
+        follow={follow}
+        selectedIndex={selectedIndex}
+        focusRef={focusRef}
+        controlsRef={controlsRef}
+      />
       {/* Orbit, damped, clamped so the camera never flips over the pole or goes
           under the floor. Pan is off: dragging the stage always orbits, and scrubbing
           only ever happens on the bars (OPEN-DECISIONS C3 — still open, this is the

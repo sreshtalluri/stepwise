@@ -201,7 +201,8 @@ function writeVideo(doc, file) {
 
 /* ------------------------------------- derived two-dancer document (see note) */
 
-function buildTwoDancers(good) {
+/** `half` = metres each dancer is offset from the origin, so they stand 2*half apart. */
+function buildTwoDancers(good, half = 0.62) {
   const doc = structuredClone(good);
   doc.job_id = "job_dev_two_dancers_0000000000000000000000";
   // More than one dancer => the per-clip sampled accent is not used (DESIGN §3):
@@ -225,8 +226,8 @@ function buildTwoDancers(good) {
     feet: Array.from({ length: n }, (_, i) => structuredClone(a.crop_rects.feet[(i + shift) % n])),
   };
   for (let i = 0; i < n; i++) {
-    a.root_trajectory[i].position[0] -= 0.62;
-    b.root_trajectory[i].position[0] += 0.62;
+    a.root_trajectory[i].position[0] -= half;
+    b.root_trajectory[i].position[0] += half;
   }
 
   // A crossing: track confidence collapses where the two overlap. DESIGN §7a2 —
@@ -244,6 +245,48 @@ function buildTwoDancers(good) {
   return doc;
 }
 
+/* ------------------------------------- derived travelling document (see note) */
+
+/**
+ * A dancer who actually crosses the floor.
+ *
+ * WHY THIS IS SYNTHETIC AND MUST STAY LABELLED SO. `root_trajectory` in every real
+ * document today is effectively constant — the pipeline pins the dancer to the origin
+ * and world placement is unresolved (OPEN-DECISIONS E6, under research on the
+ * `world-placement` branch). So there is nothing for a follow camera to follow, and
+ * no way to tell a working follow rig from a broken one on the shipped fixtures.
+ *
+ * This document adds travel and CHANGES NOTHING ELSE: the same joint rotations, the
+ * same visibility, the same timeline. It is the second regime the viewer has to work
+ * in. It is derived here rather than added to `packages/motion-contract/fixtures/`
+ * precisely because it is not pipeline output — inventing a travelling clip in the
+ * frozen contract package would suggest the pipeline produces one. Delete this the
+ * day E6 lands and a real travelling clip exists.
+ *
+ * The path: 2.6 m laterally and 1.5 m in depth — lateral so the dancer would slide
+ * out of frame without follow, depth so they would visibly shrink without it. Both
+ * failure modes the feature exists to fix, in one clip. Motion is confined to the
+ * middle of the clip so the fixture also exercises the still -> travelling -> still
+ * transition, which is where the deadzone and the lag are visible.
+ */
+function buildTravellingDancer(good) {
+  const doc = structuredClone(good);
+  doc.job_id = "job_dev_travelling_00000000000000000000000";
+  const t = doc.sample_times_s;
+  const p = doc.persons[0];
+  const span = t[t.length - 1];
+  for (let i = 0; i < t.length; i++) {
+    // 0 -> 1 -> 0 over the middle 60% of the clip, smoothstepped so the dancer starts
+    // and stops rather than teleporting into motion.
+    const u = Math.min(Math.max((t[i] / span - 0.2) / 0.6, 0), 1);
+    const s = u * u * (3 - 2 * u);
+    const swing = Math.sin(s * Math.PI * 2) * 0.5 + s * 0.5; // net displacement, not a loop
+    p.root_trajectory[i].position[0] += swing * 2.6;
+    p.root_trajectory[i].position[2] += Math.sin(s * Math.PI) * 1.5;
+  }
+  return doc;
+}
+
 /* ---------------------------------------------------------------------- main */
 
 const lessons = [
@@ -251,6 +294,28 @@ const lessons = [
   { name: "failure-lesson", doc: JSON.parse(readFileSync(path.join(contractFixtures, "failure-lesson.json"), "utf-8")) },
 ];
 lessons.push({ name: "two-dancers", doc: buildTwoDancers(lessons[0].doc) });
+// 4.4 m apart — past FOLLOW.cutDistance, so switching dancer cuts instead of gliding.
+// Both sides of that rule need to be reachable in the viewer or neither is verified.
+lessons.push({
+  name: "two-dancers-apart",
+  doc: (() => {
+    const d = buildTwoDancers(lessons[0].doc, 2.2);
+    d.job_id = "job_dev_two_dancers_apart_00000000000000000";
+    return d;
+  })(),
+});
+lessons.push({ name: "travelling", doc: buildTravellingDancer(lessons[0].doc) });
+// The same travelling path, but with the floor taken away — the regime DESIGN.md §10
+// forbids drawing a floor in, and the one every real clip is currently in.
+lessons.push({
+  name: "travelling-no-floor",
+  doc: (() => {
+    const d = buildTravellingDancer(lessons[0].doc);
+    d.job_id = "job_dev_travelling_nofloor_000000000000000";
+    d.grounding = { status: "none", floor_plane: null };
+    return d;
+  })(),
+});
 
 for (const { name, doc } of lessons) {
   writeFileSync(path.join(outDir, `${name}.json`), JSON.stringify(doc));
