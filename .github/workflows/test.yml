@@ -71,7 +71,10 @@ jobs:
         if: matrix.suite == 'motion-contract'
         run: |
           uv venv --python 3.12
-          uv pip install pytest jsonschema
+          # pydantic is not optional here even though the tests only import
+          # `validate`: motion_contract/__init__.py imports the generated
+          # MotionResult dataclasses, which are pydantic models.
+          uv pip install pytest jsonschema pydantic
           cd packages/motion-contract/python && ../../../.venv/bin/python -m pytest -q
 
       - name: beat-detect
@@ -85,14 +88,24 @@ jobs:
         if: matrix.suite == 'cv-tools'
         run: |
           uv venv --python 3.12
-          # No torch, no detectron2, no onnxruntime: these suites are the pure
-          # numpy/scipy halves of the pipeline (smoothing, bone constraints,
-          # hand crops, the RTMO detector's geometry). Installing the pinned CV
-          # stack would turn a 40-second job into a 15-minute one to run the
-          # same 41 tests.
-          uv pip install pytest numpy scipy filterpy opencv-python-headless
-          cd services/motion-api/vendor/fast-sam-3d-body
-          ../../../../.venv/bin/python -m pytest -q tools
+          # No torch and no detectron2: these five suites are the parts of the
+          # pipeline that are pure numpy/scipy geometry (smoothing, bone
+          # constraints, hand crops, clip processing) plus the RTMO detector's
+          # wrapper. Installing the pinned CV stack would turn a one-minute job
+          # into a fifteen-minute one to run the same 41 tests.
+          #
+          # onnxruntime and rtmlib ARE needed -- test_rtmo_detector.py imports
+          # the module under test, which imports them at module scope. The CPU
+          # onnxruntime wheel is the right one here; note that rtmlib is the
+          # package GATE-REPORT.md G3 caught silently downgrading
+          # onnxruntime-gpu, which is a GPU-image problem and cannot bite on a
+          # CPU runner. Order still matters: onnxruntime first.
+          uv pip install pytest numpy scipy filterpy onnxruntime rtmlib
+          # Run from INSIDE tools/: these modules import each other by bare
+          # name (`import hand_crops`), so the directory has to be on sys.path.
+          # pytest only does that for a rootdir it picks itself.
+          cd services/motion-api/vendor/fast-sam-3d-body/tools
+          ../../../../../.venv/bin/python -m pytest -q .
 
   # The database tests, against the same plain Postgres 16 the schema was
   # developed on. Neon is not involved and deliberately never will be here:
@@ -138,6 +151,14 @@ jobs:
           node-version: "22"
       - run: npm ci
         working-directory: ${{ matrix.package }}
+      # apps/web's tests read public/fixtures/*.json, which are generated from
+      # packages/motion-contract's fixtures and are not committed. Without this
+      # the copy tests pass and the one test that reads a real document fails
+      # with ENOENT -- a failure that looks like a missing file and is actually
+      # a missing build step.
+      - run: npm run assets
+        if: matrix.package == 'apps/web'
+        working-directory: ${{ matrix.package }}
       - run: npm test
         working-directory: ${{ matrix.package }}
 
@@ -155,6 +176,13 @@ jobs:
       - run: npm ci
         working-directory: apps/web
       - run: npm run typecheck
+        working-directory: apps/web
+      # Same reason as above, and it bites harder here: `app/lesson/[lesson]`
+      # is a server component that reads a fixture off disk at build time via
+      # generateStaticParams, so a missing fixture is a prerender failure, not
+      # a missing page. (That build-time read is itself a stand-in for the real
+      # "resolve lesson" API call -- infrastructure.md §6, migration step 8.)
+      - run: npm run assets
         working-directory: apps/web
       - run: npm run build
         working-directory: apps/web
