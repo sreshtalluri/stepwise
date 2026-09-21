@@ -187,6 +187,23 @@ export const lesson = {
     placeholder: (perMinute: number) =>
       `Counts are not set for this clip. The ${perMinute} a minute on screen is a placeholder, not the music — set count 1 and the tempo under Counts and parts.`,
   },
+
+  /**
+   * The hand/feet close-up panel. `crop_rects` is real video pixels, not a 3D
+   * estimate, so there is no "estimated view" label to carry here — the honesty
+   * work is entirely in `unavailable`, DESIGN.md §7h: a `null` sample means the
+   * region was not confidently localized, and the panel has to say that plainly
+   * rather than hold the last frame it drew. A frozen close-up shown as current
+   * is exactly the confident-wrong-output failure this line exists to prevent.
+   */
+  crop: {
+    hands: "Hands",
+    feet: "Feet",
+    unavailable: "Not confidently located here.",
+    toggleOn: "Close-up on",
+    toggleOff: "Close-up off",
+    toggleHint: "hands and feet",
+  },
 };
 
 /**

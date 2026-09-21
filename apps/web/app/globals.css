@@ -588,6 +588,56 @@ button {
 }
 .lesson .inset .view-label { top: 6px; left: 8px; font-size: 0.65rem; }
 
+/* Hand/feet close-up (crop_rects). Bottom-right of the VIDEO stage only — the
+ * 3D stage's own `.inset` (above) lives in a different section, so the two
+ * never compete for the same corner. Sized so two side by side plus their
+ * labels fit inside the smallest stage height (240px) with room to spare;
+ * hidden entirely rather than shrunk further when the pane is demoted. */
+.lesson .crop-peek-group {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 3;
+  display: flex;
+  gap: 6px;
+  pointer-events: none;
+}
+.lesson .crop-peek {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--stage-deep);
+  border: 1px solid rgba(242, 239, 233, 0.22);
+}
+.lesson .crop-peek canvas { display: block; width: 100%; height: 100%; }
+.lesson .crop-peek-label {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  z-index: 1;
+  font-size: 0.6rem;
+  color: var(--ink-faint);
+}
+/* The honesty state — DESIGN.md §7h. Opaque, not a caption under the box: it
+ * has to fully replace the claim the canvas would otherwise be making, not
+ * sit beside a stale frame. */
+.lesson .crop-peek-msg {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  text-align: center;
+  font-size: 0.6rem;
+  line-height: 1.15;
+  color: var(--ink-faint);
+  background: var(--stage-deep);
+}
+
 /* --------------------------------------------------------------- annotations */
 
 .lesson .legend { font-size: 0.8125rem; color: var(--ink-muted); }
