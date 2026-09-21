@@ -673,24 +673,36 @@ sweeper_image = (
                     "/app/storage.py")
 )
 
-# The R2 credentials. Absent -> every caller keeps its Volume path and says so
-# (storage.enabled()), rather than the app failing to load. Same graceful-
-# degradation pattern as HF_SECRET above, and for the same reason: Modal
-# resolves every Secret referenced anywhere in the app at load time, so one
-# missing Secret would block functions that never touch it.
-try:
-    R2_SECRET = [modal.Secret.from_name("stepwise-r2")]
-except Exception:  # noqa: BLE001 -- any lookup failure means "not configured yet"
-    R2_SECRET = []
+def optional_secret(name: str) -> list:
+    """`[Secret]` if it exists in this Environment, `[]` if it does not.
+
+    `modal.Secret.from_name` is lazy -- it returns a handle and only fails when
+    the deploy resolves it -- so the try/except around HF_SECRET above catches
+    nothing, and a missing Secret takes down the whole `modal deploy` including
+    every function that never referenced it. `.hydrate()` forces the lookup
+    here, where it can be answered with "not configured yet" instead of a
+    traceback. This is the difference between "the API cannot be deployed until
+    Neon exists" and "the API is deployed and says in /health that Neon does
+    not exist yet".
+    """
+    try:
+        s = modal.Secret.from_name(name)
+        s.hydrate()
+        return [s]
+    except Exception:  # noqa: BLE001 -- any lookup failure means "not configured yet"
+        print(f"[modal_app] Secret {name!r} not found; continuing without it.")
+        return []
+
+
+# R2 credentials. Absent -> every caller keeps its Volume path and says so
+# (storage.enabled()), rather than the app failing to load.
+R2_SECRET = optional_secret("stepwise-r2")
 
 # The database. Does not exist yet (Neon is being provisioned in parallel);
 # until it does, `STEPWISE_JOB_BACKEND` stays unset and jobstore.py serves job
-# state from the results Volume exactly as before. Creating the Secret is the
-# whole cutover -- see docs/DEPLOYMENT.md.
-try:
-    DB_SECRET = [modal.Secret.from_name("stepwise-db")]
-except Exception:  # noqa: BLE001
-    DB_SECRET = []
+# state from the results Volume exactly as before. Creating the Secret and
+# setting the variable is the whole cutover -- see docs/DEPLOYMENT.md.
+DB_SECRET = optional_secret("stepwise-db")
 
 
 # glTF sampler interpolation, fixed up after pymomentum writes the file.
@@ -1639,8 +1651,10 @@ def verify_r2_access():
             content_range = r.headers.get("Content-Range")
     finally:
         storage.delete(key)
-    return {"ok": status == 206 and body == data[100:200], "status": status,
-            "content_range": content_range, "bucket_env_set": True}
+    out = {"ok": status == 206 and body == data[100:200], "status": status,
+           "content_range": content_range, "bucket_env_set": True}
+    print(f"[verify_r2_access] {out}")
+    return out
 
 
 @app.local_entrypoint()
