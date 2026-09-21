@@ -78,3 +78,19 @@ demo scripts).
 - `tools/process_clip.py`: one marked block at the end of `process_clip`
   calling `constrain_clip` over the finished `per_frame` data, and one import.
   Nothing else in the file changed.
+
+## Hands / crop rects (branch `hands`)
+
+- `tools/hand_crops.py`: new file, not upstream. Hand and foot video-crop
+  rectangles (normalized to the frozen `MotionResult` `CropRect` shape) plus a
+  per-hand confidence for the 3D finger pose. Pure numpy, no torch/CV
+  dependency; `test_hand_crops.py` is its self-check. Its module docstring
+  carries the measurements that decided against adding a hand model.
+- `tools/process_clip.py`: one marked block at the end of `process_clip`
+  calling `annotate_clip`, and one import. Nothing else in the file changed.
+- **Not changed, but worth knowing:** `sam_3d_body/metadata/mhr70.py`'s two
+  WRIST entries are swapped relative to the rest of that name list. Verified on
+  solo-01 and solo-07: its `left-wrist` sits 0.11 m from the 127-joint
+  skeleton's `r_wrist` and 0.56 m from `l_wrist`, while every elbow and all 40
+  finger names are correctly sided. Nothing in this pipeline reads those two
+  entries, so the vendored file is left untouched rather than forked further.

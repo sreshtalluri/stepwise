@@ -916,11 +916,19 @@ def smooth_clip_result(result: dict, hierarchy: Optional[dict] = None) -> dict:
         skel = np.zeros((F, J, 8))
         observed = np.zeros(F, dtype=bool)
         kps = np.full((F, 17, 3), np.nan)
+        # The seam this module documents at `correction_m`: how far the upstream
+        # bone-length constraint had to move each joint. Stays None when that
+        # stage did not run, which is what "optional by design" means.
+        corr = np.full((F, J), np.nan)
+        saw_correction = False
         for i in range(F):
             person = per_frame[i].get(track_id) if isinstance(per_frame[i], dict) else None
             if person is not None and "skel_state" in person:
                 skel[i] = np.asarray(person["skel_state"], dtype=np.float64)
                 observed[i] = True
+            if person is not None and "bone_length_correction_m" in person:
+                corr[i] = np.asarray(person["bone_length_correction_m"], dtype=np.float64)
+                saw_correction = True
             track_ids = raw_detections[i]["track_ids"].tolist()
             if track_id in track_ids:
                 kps[i] = raw_detections[i]["keypoints"][track_ids.index(track_id)]
@@ -929,7 +937,8 @@ def smooth_clip_result(result: dict, hierarchy: Optional[dict] = None) -> dict:
         if width > 0 and height > 0:
             conf, oof = detector_joint_signals(kps, width, height, names, parents)
         track = smooth_track(times, skel, observed, parents,
-                             joint_conf=conf, joint_out_of_frame=oof)
+                             joint_conf=conf, joint_out_of_frame=oof,
+                             correction_m=corr if saw_correction else None)
         out[track_id] = {
             "skel_states": track.skel_states,
             "visibility": track.visibility,

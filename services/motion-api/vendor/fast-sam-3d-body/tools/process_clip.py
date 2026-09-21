@@ -146,6 +146,7 @@ def process_clip(
     from sam_3d_body import load_sam_3d_body, SAM3DBodyEstimator
     from tools.build_detector import HumanDetector
     from tools.skeleton_constraints import constrain_clip  # branch: bone-constraints
+    from tools.hand_crops import annotate_clip  # branch: hands
 
     _emit(on_progress, "loading", "Loading the motion model", 0.0)
     device = torch.device("cuda")
@@ -268,27 +269,6 @@ def process_clip(
 
     elapsed_s = time.time() - t_start
     n_ok = sum(1 for f in per_frame if f)
-    # W9: temporal smoothing + suppression. Everything it needs is already in
-    # the arrays built above, so it is one call over the finished per-frame
-    # data -- see tools/smoothing.py. It runs LAST, after any per-frame
-    # anatomical correction, and it does not modify `per_frame`: the raw
-    # estimates stay in the npz next to the smoothed ones, because a smoothed
-    # value with honest flags is only checkable against the thing it smoothed.
-    from tools.smoothing import smooth_clip_result
-
-    smoothed = smooth_clip_result({
-        "per_frame": per_frame,
-        "raw_detections": raw_detections,
-        "sample_times_s": np.array(sample_times_s, dtype=np.float64),
-        "confident_track_ids": sorted(confident_track_ids),
-        "frame_width": frame_width,
-        "frame_height": frame_height,
-    })
-    for tid, track in smoothed.items():
-        s = track["stats"]
-        print(f"  smoothing track {tid}: {s['n_samples_observed']} observed, "
-              f"{s['n_samples_uncertain']} uncertain, {s['n_samples_absent']} absent "
-              f"joint-samples ({s['n_samples_implausible']} physically impossible)")
     print(
         f"done: {n_ok}/{len(per_frame)} frames reconstructed, "
         f"{elapsed_s:.1f}s total ({len(per_frame) / elapsed_s:.2f} fps), "
@@ -308,9 +288,51 @@ def process_clip(
               f"{r['n_frames']} frames carry an uncertain joint")
     # -----------------------------------------------------------------------
 
+    # ---- hand/foot video crops + per-hand confidence (branch `hands`) -------
+    # Runs after the bone constraint because it reads that stage's per-joint
+    # `bone_length_confidence` at the wrist. Rects come from the detector's own
+    # wrist/ankle keypoints and are normalized to [0,1] against the real
+    # post-rotation frame size. See tools/hand_crops.py for why the answer to
+    # "articulated 3D hands" is measured-no and the crop is the product.
+    crop_report = annotate_clip(
+        per_frame, raw_detections, sorted(confident_track_ids), frame_width, frame_height
+    )
+    for tid, r in crop_report.items():
+        print(f"  crops, track {tid}: hands {r['n_hand_rects']}/{r['n_frames']} frames, "
+              f"feet {r['n_foot_rects']}/{r['n_frames']} frames")
+    # -----------------------------------------------------------------------
+
+    # ---- W9 temporal smoothing + suppression (branch `smoothing`) ----------
+    # INTEGRATION ORDER (docs/INTEGRATION.md): raw estimates -> bone-length
+    # constraint (spatial) -> smoothing + suppression (temporal) -> export.
+    # `smoothing` was cut from `w4-jobservice`, before the bone stage existed,
+    # so its own insertion point was above the `done:` print and git merged it
+    # there cleanly and silently -- i.e. temporal-before-spatial, which is the
+    # wrong way round and which both branches' comments say must not happen.
+    # Moved here at integration. It does not modify `per_frame`: the raw
+    # estimates stay in the npz next to the smoothed ones, because a smoothed
+    # value with honest flags is only checkable against the thing it smoothed.
+    from tools.smoothing import smooth_clip_result
+
+    smoothed = smooth_clip_result({
+        "per_frame": per_frame,
+        "raw_detections": raw_detections,
+        "sample_times_s": np.array(sample_times_s, dtype=np.float64),
+        "confident_track_ids": sorted(confident_track_ids),
+        "frame_width": frame_width,
+        "frame_height": frame_height,
+    })
+    for tid, track in smoothed.items():
+        s = track["stats"]
+        print(f"  smoothing track {tid}: {s['n_samples_observed']} observed, "
+              f"{s['n_samples_uncertain']} uncertain, {s['n_samples_absent']} absent "
+              f"joint-samples ({s['n_samples_implausible']} physically impossible)")
+    # -----------------------------------------------------------------------
+
     return {
         "refused": False,
         "bone_length_report": bone_report,
+        "crop_report": crop_report,
         "sample_times_s": np.array(sample_times_s, dtype=np.float64),
         "per_frame": per_frame,  # list of {track_id: person_dict}, one per sample time
         "smoothed": smoothed,  # W9: {track_id: smoothed skel_states + visibility/provenance}

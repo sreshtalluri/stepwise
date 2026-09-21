@@ -327,10 +327,18 @@ def constrain_clip(
             continue
         joints = np.stack([per_frame[i][tid]["pred_joint_coords"] for i in present])
         fixed = enforce_bone_lengths(joints, parents, coincident=coincident)
+        # How far this stage had to move each joint, in metres (pred_joint_coords
+        # is metres -- see jc_to_ss above, which scales by 100 to reach skel_state's
+        # centimetres). smoothing.smooth_track takes this as `correction_m` and
+        # turns an over-large correction into a `low_confidence` flag. Recorded
+        # here because `pred_joint_coords` is overwritten in place below, so this
+        # is the only moment the before/after difference exists.
+        correction_m = np.linalg.norm(fixed.joints - joints, axis=-1)
         for k, i in enumerate(present):
             person = per_frame[i][tid]
             coords = fixed.joints[k].astype(np.float32)
             person["pred_joint_coords"] = coords
+            person["bone_length_correction_m"] = correction_m[k].astype(np.float32)
             if "skel_state" in person:
                 skel = np.array(person["skel_state"], dtype=np.float32)
                 skel[:, :3] = (coords * jc_to_ss).astype(np.float32)

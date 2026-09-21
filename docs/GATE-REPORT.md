@@ -837,3 +837,107 @@ letting the player interpolate across a gap (`docs/PRD.md` §4's
   the identity-rotation root. `smoothing.decompose()` already produces the
   correct local-to-parent quaternion, so wiring W9 into api.py fixes it for
   free — flagged for whoever does that wiring rather than fixed here.
+---
+
+## Hands addendum (2026-09-18, branch `hands`)
+
+The PRD (§5, §9) and `evaluation/clips.yaml`'s `stress-hands` entry both
+*assumed* articulated hands would be unreliable and a video crop would be the
+right answer. This pass measured it instead of assuming it, on the real
+`solo-01.npz` / `solo-07.npz` in `stepwise-results` and the matching 576x1024
+clips in `stepwise-eval`. The assumption was right, but two of the reasons
+given for it were wrong, which matters for when to revisit.
+
+### 1. Do MHR's existing finger channels carry hand shape? Measured: barely.
+
+`skel_state`'s quaternion block is the joint's **global** rotation — it
+converts to `pred_global_rots` with max abs difference 6e-8. Raw per-frame
+deltas on those channels therefore show finger joints "moving" ~34 deg/frame,
+which is the wrist carrying them, not articulation. Composing with the parent's
+inverse first gives the real picture — full angular span of each joint's
+local rotation over a whole clip:
+
+| joint | solo-01 t4 (291 f) | solo-07 t1 (353 f) |
+|---|---|---|
+| shoulder | 170 deg | 137 deg |
+| elbow | 146 deg | 132 deg |
+| knee | 125 deg | 147 deg |
+| wrist | 80 deg | 94 deg |
+| **finger knuckles (30)** | **23 deg median, 42 max** | **22 deg median, 33 max** |
+
+Open hand to fist is ~90 deg at every knuckle. The fingers explore about a
+quarter of that and reach neither end. Per-frame jitter (2.6 deg) is the same
+order as the entire clip's variation (3.7 deg): this is wobble about a fixed
+mean hand pose, not motion.
+
+### 2. Is it a prior, or weak evidence? Measured: weak evidence.
+
+Compared against an independent 2D hand landmarker run over the estimator's own
+hand crops from the real footage, using scale/rotation-free descriptors:
+
+- Whole-hand shape (Procrustes RMS): **0.889 / 0.984 on matched frames vs
+  0.939 / 0.982 on deliberately shuffled frame pairs.** Indistinguishable from
+  no relationship at all.
+- Per-finger curl correlation: **r = +0.30 to +0.49** (shuffled-null p95 ~0.10).
+  Real, but ~16% of variance.
+- MHR's curl never drops below 0.50 (1.0 = straight); the landmarker's reaches
+  0.23. **MHR does not make fists.**
+
+### 3. Would a dedicated hand model fix it? Measured: no, and not for the
+reason the PRD gave.
+
+The `clips.yaml` RESOLUTION FINDING estimated 15-20 px per hand. Measured, the
+hand is bigger than that: the estimator's hand crop is **median 121 px
+(solo-01) / 110 px (solo-07)**, with the hand's own reprojected span ~38 px.
+Resolution is not the binding constraint. What is:
+
+| hand crop px | landmarker detection rate | its own frame-to-frame curl jump | wrong-hand label rate |
+|---|---|---|---|
+| 0-60 | 34.5% | 0.242 | 20.4% |
+| 60-90 | 64.8% | 0.068 | 34.3% |
+| 90-120 | 67.4% | 0.188 | 24.5% |
+| 120-160 | 70.6% | 0.182 | 22.5% |
+| 160-220 | 90.3% | 0.086 | 28.2% |
+
+Its own jitter (0.14-0.18) is more than half its entire spread (0.26), and it
+mislabels which hand it is looking at in 20-34% of crops **at every size**. That
+is motion blur and source compression, not pixel count, so more pixels alone
+does not fix it. Retargeting that onto MHR's finger chains would trade a flat
+wrong hand for a jittery, sometimes-mirrored wrong hand — the exact "confident
+wrong hand shape" failure `DESIGN.md` §7h forbids. **No hand model was added.**
+
+### 4. What shipped instead
+
+- `crop_rects.hands` and `.feet` populated from the **detector's** wrist/ankle
+  keypoints (MHR's reprojected ankles are 51.8 px / p90 106 px off the
+  detector's on solo-01 — a crop built from them misses the foot).
+- A per-hand `hand_confidence` capped at **0.25**, the measured ceiling
+  (r^2 ~ 0.09-0.24). Measured output: mean 0.046, max 0.20; both hands at zero
+  confidence on 37% of reconstructed frames. Any sane suppression threshold
+  renders hands `uncertain`, which is the correct product outcome.
+
+### 5. What is still missing
+
+`stress-hands` has no sourced footage and this work could not validate against
+it. What it needs, concretely: a clip with **deliberate, held, distinguishable
+hand shapes** (fist / flat palm / point / two-finger), filmed **at 1080p or
+better** so the hand crop lands above 200 px, **front-on**, with the shapes held
+for at least ~0.5 s so per-frame blur is not the dominant error. The builder's
+own dance school is the realistic source, and it also solves the `rights:`
+problem that blocks every scraped clip. Until such a clip exists, "hands are
+unreliable" is measured on incidental hand poses only — nobody in solo-01 or
+solo-07 is deliberately making a shape.
+
+**Revisit trigger, stated so it is falsifiable:** re-open the hand-model
+question when a candidate's per-finger curl correlates **r > 0.8** with
+independent evidence on real footage *and* its own frame-to-frame jitter is
+below a quarter of its spread. Neither is close today.
+
+**OPEN-DECISIONS.md check.** Nothing here required deciding an item still
+marked OPEN. `MAX_CROP_FRAME_FRAC` (when two hands can no longer share the
+contract's single `hands` rect) and `HAND_POSE_CEILING` are measured
+implementation thresholds inside the frozen contract, not new product
+decisions — both are documented with their measurements in
+`tools/hand_crops.py` rather than silently assumed. E2 (the uncertain-limb
+render) is unaffected but now has a concrete worst case to design against:
+hands are `uncertain` essentially always.
