@@ -50,7 +50,16 @@ separate image and the two exchange plain arrays.
 
 `modal_app.py` is the GPU worker; `api.py` is the plain FastAPI service that
 turns an HTTP upload into a dispatched Modal job and serves its status/result.
-It never imports torch/CUDA/pymomentum -- run it anywhere with a Modal token:
+It never imports torch/CUDA/pymomentum.
+
+**It is deployed, on Modal, as `modal_app.py::web`:**
+<https://sreshta-talluri--stepwise-motion-web.modal.run>. `docs/DEPLOYMENT.md`
+is the runbook -- what is live, what is blocked on which credential, and what to
+do when it breaks. `modal deploy modal_app.py` ships the API and the GPU
+functions together, because they are one app.
+
+Running it on a laptop is unchanged and still the escape hatch -- the Modal
+coupling is exactly one decorator deep:
 
 ```sh
 brew install ffmpeg                # or: apt install ffmpeg. See "Dedupe" below.
@@ -58,6 +67,38 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements-api.txt
 modal deploy modal_app.py          # api.py looks up run_clip via Function.from_name
 .venv/bin/python -m uvicorn api:app --port 8811
+```
+
+### Where the bytes are (`storage.py`)
+
+Video, GLBs and the materialised `MotionResult` live in **Cloudflare R2**;
+`.npz` and the model weights stay on Modal Volumes. `GET /assets/{asset_id}`
+answers **302** to an R2 URL that honours `Range:`, which is the whole reason
+for the move: the old byte proxy read entire objects into memory and returned a
+200, so video scrubbing could not work. `asset_id` is still opaque and
+immutable, never a signed URL.
+
+```sh
+python3 verify_r2.py                         # laptop: write, range-read, delete
+modal run modal_app.py::verify_r2_access     # the same, using the Modal Secret
+python3 e2e_check.py <url> <clip.mp4>        # upload -> poll -> result -> 206
+```
+
+`e2e_check.py` costs one real GPU reconstruction. It is a deliberate act;
+`GET /health` is the cheap one, and it reports which degraded mode the service
+is in rather than merely saying "ok".
+
+### Where job status lives (`jobstore.py`, `migrations/`)
+
+`{job_id}.job-status.json` on a Volume is still the default. Postgres is built
+and tested but not switched on -- Neon does not exist yet.
+`STEPWISE_JOB_BACKEND=postgres` selects it; unsetting it rolls back. Nothing
+above the HTTP boundary can tell the difference, which is the point.
+
+```sh
+docker run -d -p 5433:5432 -e POSTGRES_PASSWORD=stepwise postgres:16
+DATABASE_URL=postgresql://postgres:stepwise@localhost:5433/postgres python3 migrate.py
+DATABASE_URL=… python3 -m pytest test_schema.py -q      # 12 tests
 ```
 
 Endpoints: `POST /clips` (multipart upload -> dispatches, returns `job_id`
@@ -135,8 +176,15 @@ modal run modal_app.py::sweep_expired --dry-run
 ```
 
 **Removal** (`POST /lessons/{clip_id}/removal`). Deletes the video, every GLB,
-the MotionResult, the manifests, the job records and the fingerprint, and
-leaves a tombstone so the link answers 410 Gone. Immediate, not queued.
+the MotionResult, the manifests, the job records and the fingerprint -- **on
+both the Volumes and R2** -- and leaves a tombstone so the link answers 410
+Gone. Immediate, not queued. Verified against the live service on 2026-09-21:
+9 Volume paths plus 3 R2 keys removed, nothing left in the bucket holding that
+lesson, and `/jobs`, `/assets/video:` and `/assets/*.glb` all 410.
+
+One thing that is **not** handled and will matter the day a custom domain
+exists: deleting the origin object does not delete the CDN's edge copy. See
+`retention._delete_r2_objects` and `docs/DEPLOYMENT.md` §5.2.
 
 ```sh
 python3 -m pytest test_retention.py -q

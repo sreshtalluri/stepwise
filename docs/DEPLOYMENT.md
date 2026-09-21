@@ -53,6 +53,21 @@ GET  /assets/…_track1.glb 302 -> R2
                           Cache-Control: public, max-age=31536000, immutable
 ```
 
+And the takedown path, against that same live lesson (`POST
+/lessons/{clip_id}/removal`) — because a delete path that knows about one of two
+storage systems is not a storage leak, it is a privacy leak:
+
+```
+removed: 9 Volume paths
+       + r2:video/…​.mp4
+       + r2:motion-result/…​.json.gz
+       + r2:glb/…_track1.glb
+already_absent: []
+
+GET /jobs/{id}      410      GET /assets/video:…  410      GET /assets/…glb  410
+R2 objects still holding that lesson: none
+```
+
 **The 206 is the point.** `api.py::_volume_read_bytes` did
 `volume.read_file_into_fileobj(path, buf)` then `buf.getvalue()` — the whole
 object into memory, returned as one `Response`. A `<video>` asking for
