@@ -178,6 +178,15 @@ jobs:
           node-version: "22"
       - run: npm ci
         working-directory: apps/web
+      # `packages/navigation` is a plain directory, not a workspace member --
+      # apps/web reaches it by relative path (next.config.mjs explains why).
+      # That means `tsc` follows into LessonNavigator.tsx, which resolves
+      # `react` by walking up from packages/navigation/ and finds nothing,
+      # because only apps/web's tree was installed. Locally it passes on a
+      # node_modules left behind by an earlier `npm test` in that package,
+      # so this only ever fails in CI. Install the package's own deps too.
+      - run: npm ci
+        working-directory: packages/navigation
       - run: npm run typecheck
         working-directory: apps/web
       # Same reason as above, and it bites harder here: `app/lesson/[lesson]`
