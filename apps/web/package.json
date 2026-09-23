@@ -8,7 +8,10 @@
     "build": "next build",
     "start": "next start",
     "test": "node --import tsx --test lib/*.test.ts test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "cf:build": "npm run assets && STEPWISE_CF_BUILD=1 MOTION_API_URL=https://sreshta-talluri--stepwise-motion-web.modal.run next build && node scripts/flatten-standalone.mjs && opennextjs-cloudflare build --skipNextBuild",
+    "cf:preview": "npm run cf:build && opennextjs-cloudflare preview",
+    "cf:deploy": "npm run cf:build && opennextjs-cloudflare deploy"
   },
   "dependencies": {
     "@react-three/drei": "10.7.8",
@@ -19,11 +22,13 @@
     "three": "0.186.0"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.20.6",
     "@types/node": "^26.5.1",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/three": "0.186.0",
     "tsx": "^4.19.4",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "wrangler": "^4.135.0"
   }
 }

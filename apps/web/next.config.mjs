@@ -34,10 +34,43 @@ import { fileURLToPath } from "node:url";
  * @type {import('next').NextConfig}
  */
 const MOTION_API = process.env.MOTION_API_URL ?? "http://127.0.0.1:8811";
+const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 export default {
   reactStrictMode: true,
-  turbopack: { root: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..") },
+  turbopack: { root: path.resolve(APP_DIR, "..", "..") },
+
+  /**
+   * 3. `outputFileTracingRoot` is deliberately NOT set here. Do not add it.
+   *
+   * It looks like the fix for the Cloudflare build: Next emits the standalone
+   * tree at `.next/standalone/apps/web/.next/` (because it infers the repo as
+   * the workspace root), while OpenNext looks for `.next/standalone/.next/`
+   * (because it finds the root by walking up for a *lockfile*, and
+   * `apps/web/package-lock.json` is the first hit). Pointing this at the app
+   * directory makes the two agree on paper.
+   *
+   * In Next 16 it also clamps module resolution, overriding `turbopack.root`
+   * above, so every `../../../packages/navigation/...` import in (1) fails with
+   * "Module not found" -- five of them, and the build never reaches the step
+   * the setting was added to fix. The two are not independent knobs here.
+   *
+   * The path mismatch is reconciled in `scripts/flatten-standalone.mjs`
+   * instead, which is why `cf:build` runs the Next build itself rather than
+   * letting `opennextjs-cloudflare build` drive it.
+   */
+
+  /**
+   * 4. Standalone output, only for the Cloudflare build.
+   *
+   * `opennextjs-cloudflare build` normally injects this itself when it drives
+   * the Next build. `cf:build` drives the Next build instead (see (3)), so it
+   * has to be asked for here -- and asked for *conditionally*, because plain
+   * `next build` is what CI and `npm run build` run, and neither has any use
+   * for a second full copy of the server tree on disk.
+   */
+  output: process.env.STEPWISE_CF_BUILD ? "standalone" : undefined,
+
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${MOTION_API}/:path*` }];
   },
