@@ -114,15 +114,26 @@ export function StateBlock({
   );
 }
 
+/** The site's top bar: the logo home, and one link. Every page but the lesson has it. */
+export function SiteNav({ to = "lessons" }: { to?: "lessons" | "add" }) {
+  return (
+    <nav className="fd-nav">
+      <Lockup />
+      <div className="fd-nav-r">
+        {to === "add" ? (
+          <Link href="/upload" className="fd-btn fd-btn-sm">{marketing.nav.add}</Link>
+        ) : (
+          <Link href="/lessons">{marketing.nav.myLessons}</Link>
+        )}
+      </div>
+    </nav>
+  );
+}
+
 export default function StateScreen(props: Parameters<typeof StateBlock>[0]) {
   return (
     <main className="fd ss">
-      <nav className="fd-nav">
-        <Lockup />
-        <div className="fd-nav-r">
-          <Link href="/lessons">{marketing.nav.myLessons}</Link>
-        </div>
-      </nav>
+      <SiteNav />
       <div className="ss-body">
         <StateBlock {...props} />
       </div>

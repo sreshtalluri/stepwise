@@ -5,7 +5,7 @@ import Link from "next/link";
 import { LESSONS } from "../../lib/lessons";
 import { myLessons as copy } from "../../lib/copy";
 import { forgetLesson, listMyLessons, type SavedLesson } from "../../lib/myLessons";
-import { StateBlock } from "../../components/StateScreen";
+import { SiteNav, StateBlock } from "../../components/StateScreen";
 import s from "./lessons.module.css";
 
 /**
@@ -23,6 +23,8 @@ export default function MyLessonsPage() {
     new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 
   return (
+    <>
+    <div className="fd"><SiteNav to="add" /></div>
     <main className="wrap app-screen">
       <h1 className="app-title">{copy.title}</h1>
       <p className="muted">{copy.subtitle}</p>
@@ -86,5 +88,6 @@ export default function MyLessonsPage() {
       </section>
       )}
     </main>
+    </>
   );
 }
