@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import { REVEAL_DURATION_MS, easeInOutCubic, revealAzimuth } from "../lib/reveal";
 import { isJobStatus, timeRemaining } from "../lib/jobStatus";
+import { lessonSource } from "../lib/lessons";
+import type { MotionResult } from "../lib/motion";
 
 test("the reveal is one full orbit that settles back at the front", () => {
   assert.equal(revealAzimuth(0), 0);
@@ -66,4 +68,27 @@ test("job status guard rejects a malformed payload", () => {
   assert.ok(!isJobStatus({ ...ok, stage_message: 42 }));
   assert.ok(!isJobStatus(null));
   assert.ok(!isJobStatus("queued"));
+});
+
+test("a lesson id resolves to fixture files or to the job API", () => {
+  const persons = [
+    { person_id: "p0", animation: { glb_asset_id: "clip1_track0.glb" } },
+    { person_id: "p1", animation: { glb_asset_id: "clip1_track1.glb" } },
+  ];
+  const doc = { persons } as unknown as MotionResult;
+
+  const fixture = lessonSource("good-lesson");
+  assert.equal(fixture.docUrl, "/fixtures/good-lesson.json");
+  assert.equal(fixture.videoUrl, "/fixtures/good-lesson.mp4");
+  assert.deepEqual(fixture.glbUrls(doc), ["/fixtures/good-lesson.p0.glb", "/fixtures/good-lesson.p1.glb"]);
+  assert.ok(fixture.title);
+
+  const job = lessonSource("job 1/x");
+  assert.equal(job.title, null);
+  assert.equal(job.docUrl, "/api/jobs/job%201%2Fx/result");
+  assert.equal(job.videoUrl, "/api/jobs/job%201%2Fx/video");
+  assert.deepEqual(job.glbUrls(doc), ["/api/assets/clip1_track0.glb", "/api/assets/clip1_track1.glb"]);
+
+  // A prototype key is a job id, not a fixture.
+  assert.equal(lessonSource("constructor").docUrl, "/api/jobs/constructor/result");
 });

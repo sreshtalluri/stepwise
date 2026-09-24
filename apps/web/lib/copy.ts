@@ -209,6 +209,22 @@ export const legend = "Solid = seen · sketchy = unsure · dotted = out of frame
 
 export const lesson = {
   /**
+   * Opening a lesson by its link, keyed by what services/motion-api answered.
+   * An unknown job_id reads as "queued" there, not 404, so a mistyped link lands
+   * on `notReady` — which is why that line does not promise the lesson exists.
+   */
+  load: {
+    loading: "Loading the lesson.",
+    jobTitle: "Your lesson",
+    notReady: "This lesson is not ready yet.",
+    notReadyLink: "See how it is going",
+    removed: "This lesson was removed and is not coming back.",
+    notFound: "There is no lesson at this link. Check the link, or add a clip to make one.",
+    notFoundLink: "Add a clip",
+    failed: "The lesson did not load. Reload the page to try again.",
+  },
+
+  /**
    * Where the counts on screen came from, while they are still a guess. One of
    * these shows above the count strip until the learner edits anything; after
    * that the grid is theirs and none of them applies.
