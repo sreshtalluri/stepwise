@@ -33,8 +33,8 @@ const PASSES_TO_FULL_AND_ONCE_MORE = 6;
 /**
  * The phone lesson (docs/DESIGN.md §6, mockups/phone): the page never scrolls. The clip
  * is full-bleed and the stage takes TikTok's gestures — tap to play, swipe up or down
- * for the next or previous 8-count, hold for half speed. The bottom sheet holds the
- * 8-count chips and the transport; More opens it the rest of the way. On its side it
+ * for the next or previous counts (by the loop length), hold for half speed. The
+ * bottom sheet holds the chips, the loop length and the transport; More opens it the rest of the way. On its side it
  * is video and 3D side by side. "Prop it up" drops all chrome for a phone leaning on
  * the wall across the room.
  */
@@ -94,12 +94,12 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
   };
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
-  // ---- prop it up: build up runs on its own and moves on to the next 8.
+  // ---- prop it up: build up runs on its own and moves on to the next counts.
   const enterProp = () => {
     setProp(true);
     setOpen(false);
     document.documentElement.requestFullscreen?.().catch(() => {}); // Android; iOS only from the Home Screen
-    if (!l.loop) l.stepEight(0);
+    if (!l.loop) l.stepLoop(0);
     l.setBuildUp(true);
     countInThen(l.play, 0.5);
   };
@@ -111,16 +111,16 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
   };
   const propNext = (d: number) => {
     l.pause();
-    l.stepEight(d);
+    l.stepLoop(d);
     countInThen(l.play, 0.5);
   };
   useEffect(() => {
     if (!prop || !auto || !l.buildUp || l.passes < PASSES_TO_FULL_AND_ONCE_MORE) return;
-    if (!l.loopEight || l.loopEight.n === l.eights.length) return;
+    if (!l.next) return;
     l.pause();
     show(copy.phone.zoneNext);
     const t = window.setTimeout(() => {
-      l.stepEight(1);
+      l.stepLoop(1);
       countInThen(l.play, 0.5);
     }, 900);
     return () => clearTimeout(t);
@@ -148,7 +148,7 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
     if (s.held) return l.setHoldSlow(false);
     const dx = e.clientX - s.x, dy = e.clientY - s.y;
     if (Math.abs(dy) > 50 && Math.abs(dy) > Math.abs(dx) * 1.3) {
-      l.stepEight(dy < 0 ? 1 : -1, { play: l.playing });
+      l.stepLoop(dy < 0 ? 1 : -1, { play: l.playing });
       setHint(false);
       return;
     }
@@ -208,7 +208,7 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
           )}
           {hint && !prop && <p className="ls-ph-hint">{copy.phone.hint}</p>}
           {l.next && !prop && (
-            <button type="button" className="ls-next ls-ph-next" onClick={() => l.setLoop({ startCount: l.next!.startCount, endCount: l.next!.endCount }, { play: l.playing })}>
+            <button type="button" className="ls-next ls-ph-next" onClick={() => l.setLoop(l.next, { play: l.playing })}>
               {copy.chips.next(spanLabel(l.next))}
               <Icon name="right" size={16} />
             </button>
@@ -323,7 +323,7 @@ function useFlash() {
 }
 
 /**
- * Add to Home Screen, offered once the learner has looped one 8-count at full speed
+ * Add to Home Screen, offered once the learner has looped some counts at full speed
  * here — not on the landing page, where nobody knows yet whether they want it. iOS
  * has no install prompt, so it gets the one-line how-to; Chromium gets its own prompt.
  */

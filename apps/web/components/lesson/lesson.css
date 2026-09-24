@@ -359,6 +359,27 @@
 .ls-count.ls-out {
   opacity: 0.4;
 }
+/* Looped at full speed: a quiet dot, the count's own tick (§7g). */
+.ls-count {
+  position: relative;
+}
+.ls-count.ls-done::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.ls-stage-counts .ls-count {
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
 
 /* ------------------------------------------------------------------ dancers */
 
@@ -992,6 +1013,35 @@
   margin: 0;
   accent-color: var(--accent);
   cursor: pointer;
+}
+.ls-chips-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.ls-chips-top .ls-scrub {
+  flex: 1;
+  min-width: 0;
+}
+/* "Loop 2 · 4 · 8 counts": small, beside the scrubber, so it costs no row. */
+.ls-looplen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+.ls-looplen .ls-seg {
+  padding: 2px;
+}
+.ls-looplen .ls-seg button {
+  min-height: 32px;
+  min-width: 36px;
+  padding: 0 10px;
+  justify-content: center;
+  font-weight: 600;
 }
 .ls-chips {
   display: flex;

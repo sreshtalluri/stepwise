@@ -27,7 +27,7 @@ const MAX_EXTRAS = 2;
 /**
  * Desktop and tablet (DESIGN.md §6): the mesh on the video with a 3D angle beside it
  * (add a second or third), close-ups on the right, and under them the one row of
- * 8-count chips and the transport. Everything else is under More.
+ * chips, the loop length and the transport. Everything else is under More.
  */
 export default function DesktopLesson({ l }: { l: Lesson }) {
   useLessonKeys(l);
@@ -55,7 +55,7 @@ export default function DesktopLesson({ l }: { l: Lesson }) {
         <div className="ls-views" data-n={1 + l.extras.length}>
           <MainStage l={l}>
             <div className="ls-stage-counts">
-              <CountBar l={l} />
+              <CountBar l={l} select />
             </div>
           </MainStage>
           {l.extras.map((a, i) => (
