@@ -19,6 +19,17 @@ export const LESSONS: Record<string, { title: string }> = {
   "unplaced-dancer": { title: "One dancer placed, one the pipeline could not place" },
 };
 
+/**
+ * The job id out of a pasted lesson or processing link ("…/lesson/job_abc",
+ * "/job/job_abc?x"), or null. Fixture ids are not lessons anyone can remove.
+ */
+export function lessonIdFromLink(text: string): string | null {
+  const m = text.trim().match(/\/(?:lesson|job)\/([^/?#\s]+)/);
+  if (!m) return null;
+  const id = decodeURIComponent(m[1]);
+  return Object.hasOwn(LESSONS, id) ? null : id;
+}
+
 export interface LessonSource {
   /** null for a job: the MotionResult carries no title. */
   title: string | null;
