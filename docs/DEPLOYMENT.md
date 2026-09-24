@@ -26,6 +26,7 @@ execution.
 | Database | **LIVE** — Neon, `001_init` applied | §5.1 |
 | Frontend hosting | **LIVE** — Cloudflare Worker (OpenNext), no custom domain yet | `https://stepwise.sreshta-talluri.workers.dev`; `/api/*` is `app/api/[...path]/route.ts` → Modal |
 | Origin lock | **LIVE** — the Modal API answers only the Worker (404 otherwise; `/health` open) | Modal Secret `stepwise-origin` = Worker secret `STEPWISE_ORIGIN_KEY`, value in `~/.stepwise-secrets/origin.env`. Calling the API direct (e2e_check.py): export that file first |
+| Analytics | **built, not deployed** — first-party events, `report_*` views, `/admin`, 13-month roll-up | §3.1 |
 | Error tracking | **backend LIVE** (`stepwise-sentry` Secret exists, deployed); browser goes live with the frontend deploy | §5.3 |
 
 One app, one `modal deploy`, one set of credentials. `api.py` was already a
@@ -138,7 +139,8 @@ developer-machine copy only; the Modal Secrets are the deployed source of truth.
 |---|---|---|---|
 | `huggingface` | `HF_TOKEN` | `download_weights` | **yes** |
 | `stepwise-r2` | `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, *(later)* `R2_PUBLIC_BASE_URL` | `web`, `export_clip_gltf`, `sweep_expired`, `verify_r2_access` | **yes** — created 2026-03, **verified working 2026-09-21** |
-| `stepwise-db` | `DATABASE_URL` (pooled), `STEPWISE_JOB_BACKEND=postgres` | `web` | **no** — blocked on Neon |
+| `stepwise-db` | `DATABASE_URL` (pooled), `STEPWISE_JOB_BACKEND=postgres` | `web`, `sweep_expired` (analytics roll-up) | yes (§1) |
+| `stepwise-admin` | `STEPWISE_ADMIN_KEY` | `web` (`GET /metrics`, the `/admin` page) | **no** — §3.1 |
 
 ### Verifying `stepwise-r2` rather than trusting it
 
@@ -177,6 +179,80 @@ continues without it if it is absent. This matters more than it looks:
 nothing and one missing Secret fails the entire `modal deploy` — including every
 function that never referenced it. That is what "the API cannot be deployed
 until Neon exists" would have looked like.
+
+### 3.1 Analytics: turning it on and looking at it
+
+What it is: `services/motion-api/analytics.py` (the design is on the
+`research-identity-analytics` branch, identity-and-analytics.md §3, and the
+choice of tools is in docs/research/analytics-options.md). The browser beacons
+allowlisted events to `POST /api/events`. The API writes `job_created` /
+`job_finished` itself. Everything lands in `events` with a one-day hash and no
+IP. With no database it drops events and never errors. What /privacy promises
+is in `lib/copy.ts` → `privacy` → "Usage counts".
+
+```sh
+# 1. apply migration 002 (tables, report_* views, the stepwise_reader role).
+#    Same as §5.1: from a laptop that can reach Neon, or via `modal shell`.
+cd services/motion-api
+set -a; . ~/.stepwise-secrets/neon.env; set +a      # DATABASE_URL, not printed
+python3 migrate.py
+#    -> "apply 002_analytics"
+
+# 2. the admin key: generated into a file, never echoed, then handed to Modal.
+umask 077; printf 'STEPWISE_ADMIN_KEY=%s\n' "$(openssl rand -base64 32)" > ~/.stepwise-secrets/admin.env
+modal secret create stepwise-admin --from-dotenv ~/.stepwise-secrets/admin.env
+
+# 3. deploy (the sweeper also gains the DB secret for the roll-up)
+modal deploy modal_app.py        # then the Worker: cd apps/web && npm run cf:deploy
+```
+
+**Looking at it, the zero-setup way:** open `https://<site>/admin` (it is linked
+from nowhere and marked noindex), then paste the key from
+`~/.stepwise-secrets/admin.env`. The page asks the API server-side. The key is
+never in the bundle and never stored in a cookie. You can also use curl:
+`curl -H "x-stepwise-admin-key: $KEY" https://<site>/api/metrics?days=30`.
+
+**Dashboards (Grafana Cloud, free).** Grafana reads only the `report_*`
+views, as `stepwise_reader`. That role can `SELECT` those six views and nothing
+else (test_analytics.py proves it), and no view exposes a hash or a raw row.
+
+```sh
+# a. give the reader a password (Neon SQL editor or psql as the owner role).
+#    Generated locally and kept in your secrets, never in git:
+umask 077; printf 'READER_PASSWORD=%s\n' "$(openssl rand -hex 24)" > ~/.stepwise-secrets/reader.env
+# (stdin, not -c: psql only substitutes :'pw' in input it reads itself)
+echo "ALTER ROLE stepwise_reader WITH LOGIN PASSWORD :'pw';" |
+  psql "$DATABASE_URL" -v pw="$(cut -d= -f2 ~/.stepwise-secrets/reader.env)"
+```
+
+b. grafana.com → create a free stack → **Connections → Add new connection →
+   PostgreSQL**.
+c. Host: the host from `DATABASE_URL` with `-pooler` removed (Neon's direct
+   endpoint), plus `:5432`. Database: the name after the last `/` in the URL.
+   User: `stepwise_reader`. Password: the value in `reader.env`.
+   TLS/SSL mode: `require`. Version: 16. Then **Save & test**.
+d. **Dashboards → New → Add visualization**, pick the data source, switch to
+   Code, and start from these:
+   - Visitors and uploads: `SELECT day AS time, visitors, uploads, gpu_runs FROM report_daily WHERE $__timeFilter(day::timestamp) ORDER BY 1`
+   - Completion: `SELECT day AS time, succeeded::float / nullif(finished, 0) AS completion FROM report_daily WHERE $__timeFilter(day::timestamp) ORDER BY 1`
+   - Failures: `SELECT error_code, sum(jobs) FROM report_failures WHERE $__timeFilter(day::timestamp) GROUP BY 1 ORDER BY 2 DESC`
+   - Count-1 correction rate: `SELECT day AS time, avg(corrected_count_one::int) FROM report_lesson_visits WHERE $__timeFilter(day::timestamp) GROUP BY 1 ORDER BY 1`
+   - Median play per visit: `SELECT day AS time, percentile_cont(0.5) WITHIN GROUP (ORDER BY play_seconds) FROM report_lesson_visits WHERE $__timeFilter(day::timestamp) GROUP BY 1 ORDER BY 1`
+   - Feature use: `SELECT name, sum(events), sum(visitors) FROM report_events WHERE $__timeFilter(day::timestamp) GROUP BY 1 ORDER BY 2 DESC`
+   - Loops: `SELECT via, snapped, counts, sum(loops) FROM report_loops WHERE $__timeFilter(day::timestamp) GROUP BY 1, 2, 3 ORDER BY 4 DESC`
+
+**Metabase instead:** the same connection details (Admin → Databases → Add →
+PostgreSQL, SSL on). Cloud costs $100 a month after a 14-day trial, or you can
+self-host it for free.
+**Traffic** (page views, countries, Core Web Vitals) is not part of this. It
+is Cloudflare Web Analytics' free JS snippet, a separate one-line change that
+also needs its own /privacy line.
+
+**Revoking:** `ALTER ROLE stepwise_reader NOLOGIN;` for dashboards, and
+`modal secret create stepwise-admin --force STEPWISE_ADMIN_KEY=…` with a new
+value for /admin. **Retention:** `sweep_expired` rolls rows older than 13
+months into `event_daily` and deletes them. A dry run prints `events:
+{rolled_up_rows: N}`.
 
 ### Environments
 
