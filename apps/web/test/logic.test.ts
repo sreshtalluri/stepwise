@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { REVEAL_DURATION_MS, easeInOutCubic, revealAzimuth } from "../lib/reveal";
 import { isJobStatus, timeRemaining } from "../lib/jobStatus";
-import { lessonSource } from "../lib/lessons";
+import { lessonIdFromLink, lessonSource } from "../lib/lessons";
 import type { MotionResult } from "../lib/motion";
 
 test("the reveal is one full orbit that settles back at the front", () => {
@@ -91,4 +91,12 @@ test("a lesson id resolves to fixture files or to the job API", () => {
 
   // A prototype key is a job id, not a fixture.
   assert.equal(lessonSource("constructor").docUrl, "/api/jobs/constructor/result");
+});
+
+test("lessonIdFromLink takes a lesson or processing link, never a fixture", () => {
+  assert.equal(lessonIdFromLink("https://stepwise.example/lesson/job_abc123"), "job_abc123");
+  assert.equal(lessonIdFromLink("  /job/job_abc?x=1#y "), "job_abc");
+  assert.equal(lessonIdFromLink("https://www.tiktok.com/@someone/video/123"), null);
+  assert.equal(lessonIdFromLink("/lesson/good-lesson"), null);
+  assert.equal(lessonIdFromLink(""), null);
 });
