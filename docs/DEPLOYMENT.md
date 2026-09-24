@@ -17,14 +17,15 @@ execution.
 | | Status | Where |
 |---|---|---|
 | **HTTP API** | **LIVE** | `https://sreshta-talluri--stepwise-motion-web.modal.run` |
-| Dispatch rate limit | in code (`ratelimit.py`), live after the next backend deploy | 5/h · 20/day per IP, 200/day global, `STEPWISE_LIMIT_*` |
+| Dispatch rate limit | **LIVE** — per learner IP (forwarded by the Worker), retries charged and capped at 2, link downloads pre-checked | 5/h · 20/day per IP, 200/day global, `STEPWISE_LIMIT_*` |
 | GPU pipeline | live (unchanged) | Modal app `stepwise-motion`, workspace `sreshta-talluri`, environment `main` |
 | Asset delivery | **BROKEN since ≤2026-09-23 — R2 rejects the credentials** (`Unauthorized` on Put/Head/List, both the `stepwise-r2` Secret and `~/.stepwise-secrets/r2.env`). Serving falls back to the Volume proxy: lessons open, video seeking does not. `/health` still says `r2` because it checks env names, not access. Fix: new R2 API token → `modal secret create stepwise-r2 --force …` | Cloudflare R2 bucket, presigned URLs (no custom domain yet) |
 | Retention sweeper | live, daily | `sweep_expired`, `modal.Period(days=1)` |
 | Job state | **LIVE on Postgres** (Neon), Volume read-through (migration step 3) | `stepwise-db` Secret, `STEPWISE_JOB_BACKEND=postgres` |
 | CI | live | `.github/workflows/test.yml`, push + PR |
 | Database | **LIVE** — Neon, `001_init` applied | §5.1 |
-| Frontend hosting | **blocked** — no Cloudflare account/domain | `apps/web` builds clean, §5 |
+| Frontend hosting | **LIVE** — Cloudflare Worker (OpenNext), no custom domain yet | `https://stepwise.sreshta-talluri.workers.dev`; `/api/*` is `app/api/[...path]/route.ts` → Modal |
+| Origin lock | **LIVE** — the Modal API answers only the Worker (404 otherwise; `/health` open) | Modal Secret `stepwise-origin` = Worker secret `STEPWISE_ORIGIN_KEY`, value in `~/.stepwise-secrets/origin.env`. Calling the API direct (e2e_check.py): export that file first |
 | Error tracking | **backend LIVE** (`stepwise-sentry` Secret exists, deployed); browser goes live with the frontend deploy | §5.3 |
 
 One app, one `modal deploy`, one set of credentials. `api.py` was already a
