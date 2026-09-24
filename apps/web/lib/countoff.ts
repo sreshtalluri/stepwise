@@ -25,12 +25,17 @@ const backOut = (x: number) => {
   return 1 + (c + 1) * (x - 1) ** 3 + c * (x - 1) ** 2;
 };
 
-/** Pose for count `n` (1–8), `frac` of the way through it: snaps in over the first third. */
-export function poseAt(n: number, frac: number): Pt[] {
+const easeInOut = (x: number) => (x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2);
+
+/**
+ * Pose for count `n` (1–8), `frac` of the way through it: snaps in over the
+ * first third, or with `soft`, glides over the first 60% (the calm loading figure).
+ */
+export function poseAt(n: number, frac: number, soft = false): Pt[] {
   const i = (((n - 1) % 8) + 8) % 8;
   const a = POSES[(i + 7) % 8];
   const b = POSES[i];
-  const e = backOut(Math.min(1, frac / 0.32));
+  const e = soft ? easeInOut(Math.min(1, frac / 0.6)) : backOut(Math.min(1, frac / 0.32));
   return a.map((p, j) => [p[0] + (b[j][0] - p[0]) * e, p[1] + (b[j][1] - p[1]) * e]);
 }
 
@@ -42,11 +47,11 @@ export function drawFigure(
   h: number,
   n: number,
   frac: number,
-  o: { color: string; width: number; flip: boolean },
+  o: { color: string; width: number; flip: boolean; soft?: boolean; joints?: boolean },
 ) {
   const k = h / 200;
   const P = {} as Record<(typeof K)[number], Pt>;
-  poseAt(n, frac).forEach((p, j) => {
+  poseAt(n, frac, o.soft).forEach((p, j) => {
     P[K[j]] = [cx + (p[0] - 50) * k * (o.flip ? -1 : 1), by + (p[1] - 196) * k];
   });
   const sh = (d: number): Pt => [P.neck[0] + d * k, P.neck[1] + 4 * k];
@@ -70,7 +75,7 @@ export function drawFigure(
   ctx.beginPath();
   ctx.arc(P.head[0], P.head[1], 11 * k, 0, 7);
   ctx.fill();
-  for (const p of [P.lElb, P.lHand, P.rElb, P.rHand, P.lKnee, P.lFoot, P.rKnee, P.rFoot, P.pelvis]) {
+  if (o.joints !== false) for (const p of [P.lElb, P.lHand, P.rElb, P.rHand, P.lKnee, P.lFoot, P.rKnee, P.rFoot, P.pelvis]) {
     ctx.beginPath();
     ctx.arc(p[0], p[1], o.width * k * 1.6, 0, 7);
     ctx.fill();
