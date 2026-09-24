@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import LessonViewer from "./LessonViewer";
-import { lessonSource } from "../lib/lessons";
+import { LESSONS, lessonSource } from "../lib/lessons";
+import { captureThumb, forgetLesson, hasThumb, recordOpened } from "../lib/myLessons";
 import { lesson as lessonCopy } from "../lib/copy";
 import type { MotionResult } from "../lib/motion";
 
@@ -40,6 +41,22 @@ export default function LessonLoader({ lessonId }: { lessonId: string }) {
       cancelled = true;
     };
   }, [source.docUrl]);
+
+  // "My lessons" (lib/myLessons.ts): remember a job lesson on this device when
+  // it opens; forget it when its link says it was removed. Fixtures are listed
+  // as examples already.
+  useEffect(() => {
+    if (Object.hasOwn(LESSONS, lessonId)) return;
+    if (load.kind === "error" && load.status === 410) forgetLesson(lessonId);
+    if (load.kind !== "ok") return;
+    recordOpened({
+      id: lessonId,
+      title: source.title ?? lessonCopy.load.jobTitle,
+      durationS: load.doc.source_video.duration_s,
+      dancers: load.doc.persons.length,
+    });
+    if (!hasThumb(lessonId)) captureThumb(lessonId, source.videoUrl);
+  }, [load, lessonId, source.title, source.videoUrl]);
 
   if (load.kind === "ok") {
     return (
