@@ -76,6 +76,26 @@ export function dancerBox(doc: MotionResult, personIndex: number, sampleIndex: n
   return clampRect({ x: x0 - padX, y: y0 - padY, width: x1 - x0 + 2 * padX, height: y1 - y0 + 2 * padY });
 }
 
+/**
+ * The picker card's window onto the frame, in [0,1] frame space: centred on the
+ * dancer's box, grown to a 3:4 portrait IN PIXELS (so a 3:4 card shows it
+ * undistorted), and slid back inside the frame rather than padded past its edge.
+ * Shared by the canvas still and the live-video fallback so both frame the same.
+ */
+export function stillCrop(box: Rect | null, vw: number, vh: number): Rect {
+  const b = box ?? { x: 0, y: 0, width: 1, height: 1 };
+  let w = b.width * vw, h = b.height * vh;
+  if (w / h < 0.75) w = h * 0.75;
+  else h = w / 0.75;
+  // Too big for the frame: shrink both, keeping 3:4.
+  const fit = Math.min(1, vw / w, vh / h);
+  w *= fit;
+  h *= fit;
+  const cx = (b.x + b.width / 2) * vw, cy = (b.y + b.height / 2) * vh;
+  const sx = Math.min(Math.max(cx - w / 2, 0), vw - w), sy = Math.min(Math.max(cy - h / 2, 0), vh - h);
+  return { x: sx / vw, y: sy / vh, width: w / vw, height: h / vh };
+}
+
 /** "left" / "middle" / "right" of the frame, for the picker's second line. */
 export function sideWord(box: Rect | null): "left" | "middle" | "right" | null {
   if (!box) return null;
