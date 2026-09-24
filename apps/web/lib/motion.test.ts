@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 import {
   sampleIndexAt,
   cropRectAt,
+  steadyCropTrack,
+  steadyCropAt,
   regionVisibility,
   absentNotes,
   defaultPersonIndex,
@@ -88,6 +90,39 @@ test("cropRectAt is a step function on crop_rects.*, and null means not localize
 
   // An out-of-range person index is absent, not a crash.
   assert.equal(cropRectAt(failure, 99, "feet", 0), null);
+});
+
+test("steadyCropTrack: one zoom for the clip, smoothed centre, nulls stay null and are never averaged across", () => {
+  const W = 1000, H = 1000;
+  const n = 60;
+  const times = Array.from({ length: n }, (_, i) => i / 15);
+  // Jittery rects: size alternates 100/300 px, centre zig-zags +-40 px; a null gap at 30..32.
+  const rects = times.map((_, i) => {
+    if (i >= 30 && i <= 32) return null;
+    const s = i % 2 ? 300 : 100;
+    const cx = 500 + (i % 2 ? 40 : -40);
+    return { x: (cx - s / 2) / W, y: (500 - s / 2) / H, width: s / W, height: s / H };
+  });
+  const doc = {
+    sample_times_s: times,
+    source_video: { width_px: W, height_px: H },
+    persons: [{ crop_rects: { hands: rects, feet: rects } }],
+  } as unknown as MotionResult;
+
+  const track = steadyCropTrack(doc, 0, "hands");
+  assert.equal(track.length, n);
+  for (let i = 30; i <= 32; i++) assert.equal(track[i], null);
+  const real = track.filter((r) => r !== null);
+  // One size: the p90 side, 300 px.
+  for (const r of real) assert.ok(Math.abs(r!.width * W - 300) < 1e-9 && Math.abs(r!.height * H - 300) < 1e-9);
+  // The +-40 px zig-zag averages out in the middle of a run.
+  const cx = (r: NonNullable<(typeof track)[number]>) => (r.x + r.width / 2) * W;
+  assert.ok(Math.abs(cx(track[15]!) - 500) < 5, `centre ${cx(track[15]!)}`);
+  // Interpolates between two real samples, steps (no blending) next to the gap.
+  const mid = steadyCropAt(times, track, (times[10] + times[11]) / 2)!;
+  assert.ok(Math.abs(cx(mid) - (cx(track[10]!) + cx(track[11]!)) / 2) < 1e-9);
+  assert.deepEqual(steadyCropAt(times, track, (times[29] + times[30]) / 2), track[29]);
+  assert.equal(steadyCropAt(times, track, times[31]), null);
 });
 
 test("failure fixture: feet go absent, left arm goes uncertain, and the shin stays drawn", () => {
