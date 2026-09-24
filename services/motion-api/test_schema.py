@@ -282,3 +282,29 @@ def test_forget_removes_the_job_row(store, db):
     store._pg_write("job_f", "f", _status("job_f"))
     store.forget("job_f")
     assert store._pg_read("job_f") is None
+
+
+def test_a_dispatched_row_does_not_hide_the_workers_progress(store, db):
+    """The production bug: record_dispatch inserts `queued`, the worker writes
+    only the Volume, and the row used to be served forever. Every job since the
+    cutover sat at `queued` while the lesson was already built."""
+    db.execute("INSERT INTO clips (clip_id, content_sha256, fingerprint) VALUES ('d', 'hd', '{}')")
+    vol = FakeVolume()
+    store.record_dispatch(vol, "job_d", "d")
+    assert store.read_status(vol, "job_d", lambda _j: "d")["state"] == "queued"
+
+    done = _status("job_d", state="succeeded", progress=1.0, stage_message="")
+    vol.files["/job_d.job-status.json"] = json.dumps(done).encode()
+    assert store.read_status(vol, "job_d", lambda _j: "d") == done
+    assert store._pg_read("job_d") == done, "the terminal state was not mirrored"
+
+
+def test_a_retry_is_not_undone_by_the_previous_attempts_failure(store, db):
+    db.execute("INSERT INTO clips (clip_id, content_sha256, fingerprint) VALUES ('t', 'ht', '{}')")
+    vol = FakeVolume()
+    failed = _status("job_t", state="failed", progress=None, stage_message="",
+                     error={"code": "pipeline_error", "message": "boom", "retryable": True})
+    vol.files["/job_t.job-status.json"] = json.dumps(failed).encode()
+    store.record_retry(vol, "job_t", "t", 1)
+    served = store.read_status(vol, "job_t", lambda _j: "t")
+    assert served["state"] == "queued" and served["retry_count"] == 1

@@ -160,13 +160,20 @@ def read_status(volume, job_id: str, clip_id_for) -> Optional[dict]:
     if not postgres_enabled():
         return retention.read_json(volume, f"/{job_id}.job-status.json")
 
-    doc = _pg_read(job_id)
-    if doc is not None:
-        return doc
+    row = _pg_read(job_id)
+    if row is not None and row["state"] in ("succeeded", "failed"):
+        return row
     # Read-through. The worker is still writing the Volume during the migration
-    # (see module docstring), so a row miss is expected, not an error.
+    # (see module docstring), so the row alone is never enough for a live job:
+    # record_dispatch inserts it as `queued` and nothing but this read ever
+    # moves it on. (Returning the row whenever one existed left every job since
+    # the cutover reporting `queued` forever.) The Volume doc wins unless it is
+    # from an earlier attempt -- record_retry bumps the row's retry_count
+    # before the worker has overwritten the old `failed` document.
     doc = retention.read_json(volume, f"/{job_id}.job-status.json")
-    if doc is not None:
+    if doc is None or (row is not None and doc.get("retry_count", 0) < row["retry_count"]):
+        return row
+    if doc != row:
         try:
             _pg_write(job_id, clip_id_for(job_id), doc)
         except Exception as e:  # noqa: BLE001
