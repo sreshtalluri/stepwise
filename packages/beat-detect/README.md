@@ -55,9 +55,27 @@ owns the clip's true end, this module never invents one.
    half a beat off within ~25 counts. `_refine_grid` searches +-6% around it
    for the constant spacing and phase that land on the most onset energy
    (6 ms envelope, 0.5 ms / 4 ms steps).
-2. **Count 1.** `_count_one` takes the beat-of-the-bar (mod 4) with the
-   strongest low-band (<150 Hz, kick) onsets, first one after the music
-   starts. It warns when no phase is >=10% ahead of the runner-up.
+2. **Count 1.** `_count_one` finds the bar downbeat as the beat-of-the-bar
+   (mod 4) with the strongest low-band (<150 Hz, kick) onsets, then puts
+   count 1 on the EARLIEST strong beat (that downbeat, or the beat half a bar
+   from it) after the music starts. It warns when no phase is >=10% ahead of
+   the runner-up. The other three beats of the bar ride along as
+   `count_one_alternates` (strongest accent first) for "try another 1".
+
+   Why not the downbeat itself: on solo-02, the only clip with an owner label,
+   the dancer's 1 is 0.862 s, and Beat This! (with and without DBN), madmom's
+   RNN+DBN and the kick heuristic all put the bar downbeat at 1.88-1.905 s,
+   exactly half a bar late. The earliest-strong-beat rule gets solo-02 right,
+   but it is fitted to ONE label and moves count 1 two beats earlier than the
+   music models on solo-01 (0.44 vs 1.29) and solo-07 (0.43 vs 1.36). Label
+   more clips (below) before trusting either rule.
+
+   Labelling protocol: in the app, open the lesson, scrub to where the dancer
+   counts 1, press "Set count 1 here". The structure is saved in
+   `localStorage["stepwise.lesson-structure.v1.<lessonId>"]`; copy
+   `grid.countOneS` per lesson from the browser console. Score a rule by its
+   error in beats modulo 8 (`((pred - truth) / spc)` rounded, mod 8, folded to
+   -4..+4): 0 is right, +-2 is the half-bar error, +-4 the bar error.
 
 Checked against Beat This! (CPJKU, run offline as a reference, not shipped):
 
@@ -70,7 +88,7 @@ Checked against Beat This! (CPJKU, run offline as a reference, not shipped):
 
 Known gaps: a track that changes tempo (solo-07) cannot fit one constant
 grid; and which of two bars starts the 8-count phrase is not modelled --
-count 1 is the first strong downbeat. The dancer's joint speed (15 fps
+count 1 is the first strong beat. The dancer's joint speed (15 fps
 MotionResult) was tried as a phase cue and did not separate the beats of the
 bar on any clip, so it is not used. "Set count 1" stays the override.
 

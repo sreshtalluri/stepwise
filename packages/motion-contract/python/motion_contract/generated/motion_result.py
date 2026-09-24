@@ -197,6 +197,27 @@ class TempoAlternate(BaseModel):
     bpm: PositiveFloat
 
 
+class CountOneAlternate(BaseModel):
+    """
+    Another beat of the same grid that could be count 1.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    count_one_s: confloat(ge=0.0) = Field(
+        ..., description='Timeline seconds of this candidate count 1.'
+    )
+    shift_counts: int = Field(
+        ...,
+        description="Counts from the proposal's count_one_s (-1 = one count earlier, 2 = half a bar later).",
+    )
+    confidence: confloat(ge=0.0, le=1.0) = Field(
+        ...,
+        description="Share of the music's low-band (kick) accent on this beat of the bar. How hard the track leans on it, NOT a probability that the dancer counts from it.",
+    )
+
+
 class ProposedCounts(BaseModel):
     """
     A MACHINE PROPOSAL for the count grid, from the clip's audio. OPTIONAL — absent means no proposal was produced (no audio track, silent clip, the beat stage failed, or it was never run), which is a normal outcome and not an error; the learner sets counts by hand, which they can always do anyway.
@@ -211,7 +232,7 @@ class ProposedCounts(BaseModel):
     )
     count_one_s: confloat(ge=0.0) = Field(
         ...,
-        description="Timeline seconds at which the proposal puts count 1. READ THE HONESTY NOTE: this is the first BEAT the tracker found, not a downbeat. librosa's beat_track locates beats, not bar starts — it has no notion of which beat begins an eight. So this is the weakest number in this object and the one a learner will most often need to move. A surface that renders it as a settled fact violates DESIGN.md §7h exactly as an overclaim about an occluded limb would.",
+        description="Timeline seconds at which the proposal puts count 1. READ THE HONESTY NOTE: this is a heuristic guess at where the DANCER's eight starts (the earliest strong beat, i.e. the kick-accented bar downbeat or the beat half a bar from it, after the music starts), fitted to a single owner-labelled clip. It is the weakest number in this object and the one a learner will most often need to move; count_one_alternates carries the other candidates. A surface that renders it as a settled fact violates DESIGN.md §7h exactly as an overclaim about an occluded limb would.",
     )
     seconds_per_count: PositiveFloat = Field(
         ...,
@@ -232,6 +253,11 @@ class ProposedCounts(BaseModel):
     alternates: list[TempoAlternate] = Field(
         ...,
         description='Always present. Empty only if the producer genuinely had no alternate reading to offer.',
+    )
+    count_one_alternates: list[CountOneAlternate] | None = Field(
+        None,
+        description='OPTIONAL (absent on documents written before it existed). Other beats that could be count 1, on the same seconds_per_count, strongest musical accent first: what a "try another 1" control steps through. Which beat a dancer calls 1 is the weakest guess in this object: on the one owner-labelled clip, every music model put the bar downbeat half a bar after the dancer\'s 1.',
+        max_length=3,
     )
     warnings: list[str] = Field(
         ...,

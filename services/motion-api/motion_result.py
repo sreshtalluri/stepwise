@@ -163,6 +163,11 @@ def _proposed_counts(beats: dict | None, sample_times_s: list) -> dict | None:
         return None
     count_one_s = max(0.0, float(beats["count_one_s"]))
     end_s = float(sample_times_s[-1])
+    ones = [
+        {"count_one_s": float(a["count_one_s"]), "shift_counts": int(a["shift_counts"]), "confidence": float(a["confidence"])}
+        for a in beats.get("count_one_alternates", [])
+        if 0 <= float(a["count_one_s"]) <= end_s
+    ][:3]
     return {
         "count_one_s": count_one_s,
         "seconds_per_count": spc,
@@ -174,6 +179,7 @@ def _proposed_counts(beats: dict | None, sample_times_s: list) -> dict | None:
             for a in beats.get("alternates", [])
         ],
         "warnings": list(beats.get("warnings", [])),
+        **({"count_one_alternates": ones} if ones else {}),
     }
 
 
