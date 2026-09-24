@@ -5,7 +5,7 @@ import { OrbitControls, useGLTF } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import * as THREE from "three";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
-import { REGIONS, HAND_JOINTS, FOOT_JOINTS } from "../lib/regions";
+import { REGIONS, HAND_JOINTS, FOOT_JOINTS, lookupJoint } from "../lib/regions";
 import {
   sampleIndexAt,
   regionVisibility,
@@ -135,7 +135,7 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
     const jointByName = new Map(doc.joint_hierarchy.joints.map((j) => [j.name, j]));
     const stubs = new Map<string, THREE.Mesh>();
     for (const region of REGIONS) {
-      const def = jointByName.get(region.bone);
+      const def = lookupJoint(jointByName, region.bone);
       const bone = def && bonesByName.get(def.glb_node_name);
       if (!bone) continue;
       const stub = new THREE.Mesh(
@@ -309,8 +309,9 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
 /** World-space bounds of a named set of joints, padded for the surface around them. */
 function boneBox(bones: Map<string, THREE.Bone>, doc: MotionResult, names: string[], pad: number): THREE.Box3 {
   const box = new THREE.Box3();
+  const byName = new Map(doc.joint_hierarchy.joints.map((j) => [j.name, j]));
   for (const name of names) {
-    const def = doc.joint_hierarchy.joints.find((j) => j.name === name);
+    const def = lookupJoint(byName, name);
     const bone = def && bones.get(def.glb_node_name);
     if (bone) box.expandByPoint(bone.getWorldPosition(new THREE.Vector3()));
   }

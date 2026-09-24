@@ -3,7 +3,7 @@
  * is unit-testable and is tested in motion.test.ts.
  */
 import type { CropRect, MotionResult, Visibility } from "../../../packages/motion-contract/src/ts/generated/motion-result";
-import { REGIONS } from "./regions";
+import { REGIONS, lookupJoint } from "./regions";
 
 export type { CropRect, MotionResult, Visibility };
 
@@ -85,7 +85,7 @@ export function regionVisibility(doc: MotionResult, personIndex: number, sampleI
 
   const out = new Map<string, Visibility>();
   for (const region of REGIONS) {
-    const idx = byName.get(region.bone);
+    const idx = lookupJoint(byName, region.bone);
     out.set(region.id, idx === undefined ? "absent" : resolve(idx));
   }
   return out;

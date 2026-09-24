@@ -344,3 +344,19 @@ test("crop pan puts the dancer at the panel centre when the frame allows it", ()
   assert.ok(Math.abs(w.zoom * (body.x + body.width / 2 - 0.5) + w.tx) < 1e-9, "x centred");
   assert.ok(Math.abs(w.zoom * (body.y + body.height / 2 - 0.5) + w.ty) < 1e-9, "y centred");
 });
+
+test("a real (MHR, 127-joint) document resolves every region, not just the fixtures", async () => {
+  const { MHR_ALIASES, REGIONS, HAND_JOINTS, FOOT_JOINTS } = await import("./regions");
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const mhr = JSON.parse(readFileSync(path.join(here, "../test/mhr-joints.json"), "utf8"));
+  const names = new Set(mhr.joints.map((j: { name: string }) => j.name));
+  for (const canonical of [...REGIONS.flatMap((r) => [r.bone, r.tip]), ...HAND_JOINTS, ...FOOT_JOINTS]) {
+    if (canonical) assert.ok(names.has(MHR_ALIASES[canonical]), `${canonical} -> ${MHR_ALIASES[canonical]} is not an MHR joint`);
+  }
+  // Before the aliases, exactly this rendered an empty stage: all observed, all "absent".
+  const doc = {
+    joint_hierarchy: mhr,
+    persons: [{ samples: [{ joints: mhr.joints.map(() => ({ visibility: "observed" })) }] }],
+  } as unknown as MotionResult;
+  assert.deepEqual(absentNotes(regionVisibility(doc, 0, 0)), []);
+});

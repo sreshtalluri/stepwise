@@ -1,0 +1,768 @@
+{
+"_source": "joint_hierarchy of a real MotionResult (eval clip solo-02, MHR lod3, 127 joints). Names and parents only.",
+"root_joint_index": 1,
+"joints": [
+{
+"index": 0,
+"name": "body_world",
+"parent_index": -1,
+"glb_node_name": "body_world"
+},
+{
+"index": 1,
+"name": "root",
+"parent_index": 0,
+"glb_node_name": "root"
+},
+{
+"index": 2,
+"name": "l_upleg",
+"parent_index": 1,
+"glb_node_name": "l_upleg"
+},
+{
+"index": 3,
+"name": "l_lowleg",
+"parent_index": 2,
+"glb_node_name": "l_lowleg"
+},
+{
+"index": 4,
+"name": "l_foot",
+"parent_index": 3,
+"glb_node_name": "l_foot"
+},
+{
+"index": 5,
+"name": "l_talocrural",
+"parent_index": 4,
+"glb_node_name": "l_talocrural"
+},
+{
+"index": 6,
+"name": "l_subtalar",
+"parent_index": 5,
+"glb_node_name": "l_subtalar"
+},
+{
+"index": 7,
+"name": "l_transversetarsal",
+"parent_index": 6,
+"glb_node_name": "l_transversetarsal"
+},
+{
+"index": 8,
+"name": "l_ball",
+"parent_index": 7,
+"glb_node_name": "l_ball"
+},
+{
+"index": 9,
+"name": "l_lowleg_twist1_proc",
+"parent_index": 3,
+"glb_node_name": "l_lowleg_twist1_proc"
+},
+{
+"index": 10,
+"name": "l_lowleg_twist2_proc",
+"parent_index": 3,
+"glb_node_name": "l_lowleg_twist2_proc"
+},
+{
+"index": 11,
+"name": "l_lowleg_twist3_proc",
+"parent_index": 3,
+"glb_node_name": "l_lowleg_twist3_proc"
+},
+{
+"index": 12,
+"name": "l_lowleg_twist4_proc",
+"parent_index": 3,
+"glb_node_name": "l_lowleg_twist4_proc"
+},
+{
+"index": 13,
+"name": "l_upleg_twist0_proc",
+"parent_index": 2,
+"glb_node_name": "l_upleg_twist0_proc"
+},
+{
+"index": 14,
+"name": "l_upleg_twist1_proc",
+"parent_index": 2,
+"glb_node_name": "l_upleg_twist1_proc"
+},
+{
+"index": 15,
+"name": "l_upleg_twist2_proc",
+"parent_index": 2,
+"glb_node_name": "l_upleg_twist2_proc"
+},
+{
+"index": 16,
+"name": "l_upleg_twist3_proc",
+"parent_index": 2,
+"glb_node_name": "l_upleg_twist3_proc"
+},
+{
+"index": 17,
+"name": "l_upleg_twist4_proc",
+"parent_index": 2,
+"glb_node_name": "l_upleg_twist4_proc"
+},
+{
+"index": 18,
+"name": "r_upleg",
+"parent_index": 1,
+"glb_node_name": "r_upleg"
+},
+{
+"index": 19,
+"name": "r_lowleg",
+"parent_index": 18,
+"glb_node_name": "r_lowleg"
+},
+{
+"index": 20,
+"name": "r_foot",
+"parent_index": 19,
+"glb_node_name": "r_foot"
+},
+{
+"index": 21,
+"name": "r_talocrural",
+"parent_index": 20,
+"glb_node_name": "r_talocrural"
+},
+{
+"index": 22,
+"name": "r_subtalar",
+"parent_index": 21,
+"glb_node_name": "r_subtalar"
+},
+{
+"index": 23,
+"name": "r_transversetarsal",
+"parent_index": 22,
+"glb_node_name": "r_transversetarsal"
+},
+{
+"index": 24,
+"name": "r_ball",
+"parent_index": 23,
+"glb_node_name": "r_ball"
+},
+{
+"index": 25,
+"name": "r_lowleg_twist1_proc",
+"parent_index": 19,
+"glb_node_name": "r_lowleg_twist1_proc"
+},
+{
+"index": 26,
+"name": "r_lowleg_twist2_proc",
+"parent_index": 19,
+"glb_node_name": "r_lowleg_twist2_proc"
+},
+{
+"index": 27,
+"name": "r_lowleg_twist3_proc",
+"parent_index": 19,
+"glb_node_name": "r_lowleg_twist3_proc"
+},
+{
+"index": 28,
+"name": "r_lowleg_twist4_proc",
+"parent_index": 19,
+"glb_node_name": "r_lowleg_twist4_proc"
+},
+{
+"index": 29,
+"name": "r_upleg_twist0_proc",
+"parent_index": 18,
+"glb_node_name": "r_upleg_twist0_proc"
+},
+{
+"index": 30,
+"name": "r_upleg_twist1_proc",
+"parent_index": 18,
+"glb_node_name": "r_upleg_twist1_proc"
+},
+{
+"index": 31,
+"name": "r_upleg_twist2_proc",
+"parent_index": 18,
+"glb_node_name": "r_upleg_twist2_proc"
+},
+{
+"index": 32,
+"name": "r_upleg_twist3_proc",
+"parent_index": 18,
+"glb_node_name": "r_upleg_twist3_proc"
+},
+{
+"index": 33,
+"name": "r_upleg_twist4_proc",
+"parent_index": 18,
+"glb_node_name": "r_upleg_twist4_proc"
+},
+{
+"index": 34,
+"name": "c_spine0",
+"parent_index": 1,
+"glb_node_name": "c_spine0"
+},
+{
+"index": 35,
+"name": "c_spine1",
+"parent_index": 34,
+"glb_node_name": "c_spine1"
+},
+{
+"index": 36,
+"name": "c_spine2",
+"parent_index": 35,
+"glb_node_name": "c_spine2"
+},
+{
+"index": 37,
+"name": "c_spine3",
+"parent_index": 36,
+"glb_node_name": "c_spine3"
+},
+{
+"index": 38,
+"name": "r_clavicle",
+"parent_index": 37,
+"glb_node_name": "r_clavicle"
+},
+{
+"index": 39,
+"name": "r_uparm",
+"parent_index": 38,
+"glb_node_name": "r_uparm"
+},
+{
+"index": 40,
+"name": "r_lowarm",
+"parent_index": 39,
+"glb_node_name": "r_lowarm"
+},
+{
+"index": 41,
+"name": "r_wrist_twist",
+"parent_index": 40,
+"glb_node_name": "r_wrist_twist"
+},
+{
+"index": 42,
+"name": "r_wrist",
+"parent_index": 41,
+"glb_node_name": "r_wrist"
+},
+{
+"index": 43,
+"name": "r_pinky0",
+"parent_index": 42,
+"glb_node_name": "r_pinky0"
+},
+{
+"index": 44,
+"name": "r_pinky1",
+"parent_index": 43,
+"glb_node_name": "r_pinky1"
+},
+{
+"index": 45,
+"name": "r_pinky2",
+"parent_index": 44,
+"glb_node_name": "r_pinky2"
+},
+{
+"index": 46,
+"name": "r_pinky3",
+"parent_index": 45,
+"glb_node_name": "r_pinky3"
+},
+{
+"index": 47,
+"name": "r_pinky_null",
+"parent_index": 46,
+"glb_node_name": "r_pinky_null"
+},
+{
+"index": 48,
+"name": "r_ring1",
+"parent_index": 42,
+"glb_node_name": "r_ring1"
+},
+{
+"index": 49,
+"name": "r_ring2",
+"parent_index": 48,
+"glb_node_name": "r_ring2"
+},
+{
+"index": 50,
+"name": "r_ring3",
+"parent_index": 49,
+"glb_node_name": "r_ring3"
+},
+{
+"index": 51,
+"name": "r_ring_null",
+"parent_index": 50,
+"glb_node_name": "r_ring_null"
+},
+{
+"index": 52,
+"name": "r_middle1",
+"parent_index": 42,
+"glb_node_name": "r_middle1"
+},
+{
+"index": 53,
+"name": "r_middle2",
+"parent_index": 52,
+"glb_node_name": "r_middle2"
+},
+{
+"index": 54,
+"name": "r_middle3",
+"parent_index": 53,
+"glb_node_name": "r_middle3"
+},
+{
+"index": 55,
+"name": "r_middle_null",
+"parent_index": 54,
+"glb_node_name": "r_middle_null"
+},
+{
+"index": 56,
+"name": "r_index1",
+"parent_index": 42,
+"glb_node_name": "r_index1"
+},
+{
+"index": 57,
+"name": "r_index2",
+"parent_index": 56,
+"glb_node_name": "r_index2"
+},
+{
+"index": 58,
+"name": "r_index3",
+"parent_index": 57,
+"glb_node_name": "r_index3"
+},
+{
+"index": 59,
+"name": "r_index_null",
+"parent_index": 58,
+"glb_node_name": "r_index_null"
+},
+{
+"index": 60,
+"name": "r_thumb0",
+"parent_index": 42,
+"glb_node_name": "r_thumb0"
+},
+{
+"index": 61,
+"name": "r_thumb1",
+"parent_index": 60,
+"glb_node_name": "r_thumb1"
+},
+{
+"index": 62,
+"name": "r_thumb2",
+"parent_index": 61,
+"glb_node_name": "r_thumb2"
+},
+{
+"index": 63,
+"name": "r_thumb3",
+"parent_index": 62,
+"glb_node_name": "r_thumb3"
+},
+{
+"index": 64,
+"name": "r_thumb_null",
+"parent_index": 63,
+"glb_node_name": "r_thumb_null"
+},
+{
+"index": 65,
+"name": "r_lowarm_twist1_proc",
+"parent_index": 40,
+"glb_node_name": "r_lowarm_twist1_proc"
+},
+{
+"index": 66,
+"name": "r_lowarm_twist2_proc",
+"parent_index": 40,
+"glb_node_name": "r_lowarm_twist2_proc"
+},
+{
+"index": 67,
+"name": "r_lowarm_twist3_proc",
+"parent_index": 40,
+"glb_node_name": "r_lowarm_twist3_proc"
+},
+{
+"index": 68,
+"name": "r_lowarm_twist4_proc",
+"parent_index": 40,
+"glb_node_name": "r_lowarm_twist4_proc"
+},
+{
+"index": 69,
+"name": "r_uparm_twist0_proc",
+"parent_index": 39,
+"glb_node_name": "r_uparm_twist0_proc"
+},
+{
+"index": 70,
+"name": "r_uparm_twist1_proc",
+"parent_index": 39,
+"glb_node_name": "r_uparm_twist1_proc"
+},
+{
+"index": 71,
+"name": "r_uparm_twist2_proc",
+"parent_index": 39,
+"glb_node_name": "r_uparm_twist2_proc"
+},
+{
+"index": 72,
+"name": "r_uparm_twist3_proc",
+"parent_index": 39,
+"glb_node_name": "r_uparm_twist3_proc"
+},
+{
+"index": 73,
+"name": "r_uparm_twist4_proc",
+"parent_index": 39,
+"glb_node_name": "r_uparm_twist4_proc"
+},
+{
+"index": 74,
+"name": "l_clavicle",
+"parent_index": 37,
+"glb_node_name": "l_clavicle"
+},
+{
+"index": 75,
+"name": "l_uparm",
+"parent_index": 74,
+"glb_node_name": "l_uparm"
+},
+{
+"index": 76,
+"name": "l_lowarm",
+"parent_index": 75,
+"glb_node_name": "l_lowarm"
+},
+{
+"index": 77,
+"name": "l_wrist_twist",
+"parent_index": 76,
+"glb_node_name": "l_wrist_twist"
+},
+{
+"index": 78,
+"name": "l_wrist",
+"parent_index": 77,
+"glb_node_name": "l_wrist"
+},
+{
+"index": 79,
+"name": "l_pinky0",
+"parent_index": 78,
+"glb_node_name": "l_pinky0"
+},
+{
+"index": 80,
+"name": "l_pinky1",
+"parent_index": 79,
+"glb_node_name": "l_pinky1"
+},
+{
+"index": 81,
+"name": "l_pinky2",
+"parent_index": 80,
+"glb_node_name": "l_pinky2"
+},
+{
+"index": 82,
+"name": "l_pinky3",
+"parent_index": 81,
+"glb_node_name": "l_pinky3"
+},
+{
+"index": 83,
+"name": "l_pinky_null",
+"parent_index": 82,
+"glb_node_name": "l_pinky_null"
+},
+{
+"index": 84,
+"name": "l_ring1",
+"parent_index": 78,
+"glb_node_name": "l_ring1"
+},
+{
+"index": 85,
+"name": "l_ring2",
+"parent_index": 84,
+"glb_node_name": "l_ring2"
+},
+{
+"index": 86,
+"name": "l_ring3",
+"parent_index": 85,
+"glb_node_name": "l_ring3"
+},
+{
+"index": 87,
+"name": "l_ring_null",
+"parent_index": 86,
+"glb_node_name": "l_ring_null"
+},
+{
+"index": 88,
+"name": "l_middle1",
+"parent_index": 78,
+"glb_node_name": "l_middle1"
+},
+{
+"index": 89,
+"name": "l_middle2",
+"parent_index": 88,
+"glb_node_name": "l_middle2"
+},
+{
+"index": 90,
+"name": "l_middle3",
+"parent_index": 89,
+"glb_node_name": "l_middle3"
+},
+{
+"index": 91,
+"name": "l_middle_null",
+"parent_index": 90,
+"glb_node_name": "l_middle_null"
+},
+{
+"index": 92,
+"name": "l_index1",
+"parent_index": 78,
+"glb_node_name": "l_index1"
+},
+{
+"index": 93,
+"name": "l_index2",
+"parent_index": 92,
+"glb_node_name": "l_index2"
+},
+{
+"index": 94,
+"name": "l_index3",
+"parent_index": 93,
+"glb_node_name": "l_index3"
+},
+{
+"index": 95,
+"name": "l_index_null",
+"parent_index": 94,
+"glb_node_name": "l_index_null"
+},
+{
+"index": 96,
+"name": "l_thumb0",
+"parent_index": 78,
+"glb_node_name": "l_thumb0"
+},
+{
+"index": 97,
+"name": "l_thumb1",
+"parent_index": 96,
+"glb_node_name": "l_thumb1"
+},
+{
+"index": 98,
+"name": "l_thumb2",
+"parent_index": 97,
+"glb_node_name": "l_thumb2"
+},
+{
+"index": 99,
+"name": "l_thumb3",
+"parent_index": 98,
+"glb_node_name": "l_thumb3"
+},
+{
+"index": 100,
+"name": "l_thumb_null",
+"parent_index": 99,
+"glb_node_name": "l_thumb_null"
+},
+{
+"index": 101,
+"name": "l_lowarm_twist1_proc",
+"parent_index": 76,
+"glb_node_name": "l_lowarm_twist1_proc"
+},
+{
+"index": 102,
+"name": "l_lowarm_twist2_proc",
+"parent_index": 76,
+"glb_node_name": "l_lowarm_twist2_proc"
+},
+{
+"index": 103,
+"name": "l_lowarm_twist3_proc",
+"parent_index": 76,
+"glb_node_name": "l_lowarm_twist3_proc"
+},
+{
+"index": 104,
+"name": "l_lowarm_twist4_proc",
+"parent_index": 76,
+"glb_node_name": "l_lowarm_twist4_proc"
+},
+{
+"index": 105,
+"name": "l_uparm_twist0_proc",
+"parent_index": 75,
+"glb_node_name": "l_uparm_twist0_proc"
+},
+{
+"index": 106,
+"name": "l_uparm_twist1_proc",
+"parent_index": 75,
+"glb_node_name": "l_uparm_twist1_proc"
+},
+{
+"index": 107,
+"name": "l_uparm_twist2_proc",
+"parent_index": 75,
+"glb_node_name": "l_uparm_twist2_proc"
+},
+{
+"index": 108,
+"name": "l_uparm_twist3_proc",
+"parent_index": 75,
+"glb_node_name": "l_uparm_twist3_proc"
+},
+{
+"index": 109,
+"name": "l_uparm_twist4_proc",
+"parent_index": 75,
+"glb_node_name": "l_uparm_twist4_proc"
+},
+{
+"index": 110,
+"name": "c_neck",
+"parent_index": 37,
+"glb_node_name": "c_neck"
+},
+{
+"index": 111,
+"name": "c_neck_twist1_proc",
+"parent_index": 110,
+"glb_node_name": "c_neck_twist1_proc"
+},
+{
+"index": 112,
+"name": "c_neck_twist0_proc",
+"parent_index": 110,
+"glb_node_name": "c_neck_twist0_proc"
+},
+{
+"index": 113,
+"name": "c_head",
+"parent_index": 110,
+"glb_node_name": "c_head"
+},
+{
+"index": 114,
+"name": "c_jaw",
+"parent_index": 113,
+"glb_node_name": "c_jaw"
+},
+{
+"index": 115,
+"name": "c_teeth",
+"parent_index": 114,
+"glb_node_name": "c_teeth"
+},
+{
+"index": 116,
+"name": "c_jaw_null",
+"parent_index": 114,
+"glb_node_name": "c_jaw_null"
+},
+{
+"index": 117,
+"name": "c_tongue0",
+"parent_index": 114,
+"glb_node_name": "c_tongue0"
+},
+{
+"index": 118,
+"name": "c_tongue1",
+"parent_index": 117,
+"glb_node_name": "c_tongue1"
+},
+{
+"index": 119,
+"name": "c_tongue2",
+"parent_index": 118,
+"glb_node_name": "c_tongue2"
+},
+{
+"index": 120,
+"name": "c_tongue3",
+"parent_index": 119,
+"glb_node_name": "c_tongue3"
+},
+{
+"index": 121,
+"name": "c_tongue4",
+"parent_index": 120,
+"glb_node_name": "c_tongue4"
+},
+{
+"index": 122,
+"name": "r_eye",
+"parent_index": 113,
+"glb_node_name": "r_eye"
+},
+{
+"index": 123,
+"name": "r_eye_null",
+"parent_index": 122,
+"glb_node_name": "r_eye_null"
+},
+{
+"index": 124,
+"name": "l_eye",
+"parent_index": 113,
+"glb_node_name": "l_eye"
+},
+{
+"index": 125,
+"name": "l_eye_null",
+"parent_index": 124,
+"glb_node_name": "l_eye_null"
+},
+{
+"index": 126,
+"name": "c_head_null",
+"parent_index": 113,
+"glb_node_name": "c_head_null"
+}
+]
+}
