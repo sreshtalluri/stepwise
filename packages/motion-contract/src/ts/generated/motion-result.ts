@@ -223,7 +223,7 @@ export interface Grounding {
  */
 export interface ProposedCounts {
   /**
-   * Timeline seconds at which the proposal puts count 1. READ THE HONESTY NOTE: this is a heuristic guess at where the DANCER's eight starts (the earliest strong beat, i.e. the kick-accented bar downbeat or the beat half a bar from it, after the music starts), fitted to a single owner-labelled clip. It is the weakest number in this object and the one a learner will most often need to move; count_one_alternates carries the other candidates. A surface that renders it as a settled fact violates DESIGN.md §7h exactly as an overclaim about an occluded limb would.
+   * Timeline seconds at which the proposal puts count 1. READ THE HONESTY NOTE: this is a heuristic guess at where the DANCER's eight starts (the first kick-accented bar downbeat on Beat This!'s beats after the music starts), checked against four owner-labelled clips. It is the weakest number in this object and the one a learner will most often need to move; count_one_alternates carries the other candidates. A surface that renders it as a settled fact violates DESIGN.md §7h exactly as an overclaim about an occluded limb would.
    */
   count_one_s: number;
   /**
@@ -247,7 +247,7 @@ export interface ProposedCounts {
    */
   alternates: TempoAlternate[];
   /**
-   * OPTIONAL (absent on documents written before it existed). Other beats that could be count 1, on the same seconds_per_count, strongest musical accent first: what a "try another 1" control steps through. Which beat a dancer calls 1 is the weakest guess in this object: on the one owner-labelled clip, every music model put the bar downbeat half a bar after the dancer's 1.
+   * OPTIONAL (absent on documents written before it existed). Other beats that could be count 1, on the same seconds_per_count, strongest musical accent first: what a "try another 1" control steps through. Which beat a dancer calls 1 is the weakest guess in this object: the music models disagree with each other about bar phase on 3 of 8 clips.
    *
    * @maxItems 3
    */

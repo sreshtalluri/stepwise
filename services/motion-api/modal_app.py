@@ -850,11 +850,20 @@ BEAT_DETECT_DIR = os.path.join(
 # So: debian_slim + librosa + a pinned static ffmpeg, no GPU. A 20 s clip is seconds of CPU,
 # which at Modal's CPU rate rounds to nothing against the $0.076 the L40S pass
 # costs. It rebuilds on its own and can break nothing else.
+#
+# Beats come from Beat This! (docs/research/downbeat-models.md): CPU-only
+# torch from PyTorch's CPU index (~200 MB wheel; PyPI's Linux wheel drags in
+# GBs of CUDA this image never uses), and the final0 checkpoint (81 MB) baked
+# in at build time so no job ever fetches it from JKU's server. Import + load
+# is ~1 s once per container, then well under a second per clip.
 beat_image = (
     modal.Image.debian_slim(python_version="3.12")
+    .pip_install("torch==2.14.0", "torchaudio==2.11.0", index_url="https://download.pytorch.org/whl/cpu")
     # No apt ffmpeg: bookworm's 5.1 double-trims HE-AAC priming (count 1 115 ms
     # early on solo-02). propose_grid runs imageio-ffmpeg's pinned 7.x build.
-    .pip_install("librosa>=0.10", "numpy>=1.26", "soundfile>=0.12", "imageio-ffmpeg==0.6.0")
+    .pip_install("librosa>=0.10", "numpy>=1.26", "soundfile>=0.12", "imageio-ffmpeg==0.6.0",
+                 "beat-this==1.1.0")
+    .run_commands("python -c \"from beat_this.inference import load_model; load_model('final0')\"")
     .add_local_dir(BEAT_DETECT_DIR, remote_path="/app/beat_detect")
 )
 

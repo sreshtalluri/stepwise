@@ -36,7 +36,7 @@ virtualenv (`uv venv --python 3.12`), mirroring the workflow:
 |---|---|
 | `python (motion-api)` | `uv pip install -r services/motion-api/requirements-api.txt pytest scipy filterpy pygltflib trimesh` (and `ffmpeg` on PATH), then in `services/motion-api`: `python -m pytest -q -rs test_grounding.py test_retention.py test_fingerprint.py test_api_rotations.py test_schema.py test_observability.py test_ratelimit.py test_analytics.py tools/test_region_mask.py` |
 | `python (motion-contract)` | `uv pip install pytest jsonschema pydantic`; in `packages/motion-contract/python`: `python -m pytest -q` |
-| `python (beat-detect)` | `uv pip install pytest librosa numpy soundfile imageio-ffmpeg==0.6.0`; in `packages/beat-detect/python`: `python -m pytest -q` |
+| `python (beat-detect)` | `uv pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio`, then `uv pip install pytest librosa numpy soundfile imageio-ffmpeg==0.6.0 beat-this==1.1.0`; in `packages/beat-detect/python`: `python -m pytest -q` |
 | `python (cv-tools)` | `uv pip install pytest numpy scipy filterpy onnxruntime rtmlib`; **from inside** `services/motion-api/vendor/fast-sam-3d-body/tools`: `python -m pytest -q .` |
 | `postgres schema + job-state backend` | `docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=stepwise postgres:16`, then in `services/motion-api`: `DATABASE_URL=postgresql://postgres:stepwise@localhost:5432/postgres python -m pytest -q test_schema.py test_ratelimit.py test_analytics.py` |
 | `node (packages/motion-contract)` | `npm ci && npm test` in `packages/motion-contract` |

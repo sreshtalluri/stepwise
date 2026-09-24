@@ -82,12 +82,27 @@ jobs:
           uv pip install pytest jsonschema pydantic
           cd packages/motion-contract/python && ../../../.venv/bin/python -m pytest -q
 
+      # Beat This!'s final0 weights (81 MB), for the one test that runs the real
+      # model. Every other beat-detect test replays recorded model output.
+      - name: beat-this checkpoint cache
+        if: matrix.suite == 'beat-detect'
+        id: beat-this-ckpt
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/torch/hub/checkpoints/beat_this-final0.ckpt
+          key: beat-this-1.1.0-final0
+
       - name: beat-detect
         if: matrix.suite == 'beat-detect'
         run: |
           uv venv --python 3.12
-          uv pip install pytest librosa numpy soundfile imageio-ffmpeg==0.6.0
-          cd packages/beat-detect/python && ../../../.venv/bin/python -m pytest -q
+          # CPU torch: PyPI's Linux wheel bundles CUDA (GBs) and nothing here has a GPU.
+          uv pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
+          uv pip install pytest librosa numpy soundfile imageio-ffmpeg==0.6.0 beat-this==1.1.0
+          if [ "${{ steps.beat-this-ckpt.outputs.cache-hit }}" != "true" ]; then
+            .venv/bin/python -c "from beat_this.inference import load_model; load_model('final0')"
+          fi
+          cd packages/beat-detect/python && ../../../.venv/bin/python -m pytest -q -rs
 
       - name: cv tools
         if: matrix.suite == 'cv-tools'

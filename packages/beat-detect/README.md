@@ -16,18 +16,21 @@ always wins** — this is enforced by naming (`propose_grid`, not
 `detect_grid`/`get_grid`) and by shape (confidence + alternates travel
 alongside the grid, never replacing it).
 
-## Library choice: librosa, not madmom, not BeatNet
+## Libraries: Beat This! for beats, librosa for the kick rule
 
-- **BeatNet**: excluded per ground rules (unmaintained, no clear licence).
-- **madmom**: more accurate downbeat tracking (has a real DBN downbeat
-  model), but its licence is murkier — BSD-2-Clause with some
-  GPL-derived internals in older releases, and per-file license
-  auditing would be needed before shipping. Not done here.
-- **librosa** (used): `ISC` licence, confirmed from the installed
-  package's own `METADATA` (`License: ISC`,
-  `License :: OSI Approved :: ISC License (ISCL)`). Clearly licensed, at
-  the cost of accuracy: librosa's `beat_track` finds *beats*, not
-  *downbeats* — see "Known gap" below.
+- **Beat This!** (CPJKU, ISMIR 2024; PyPI `beat-this==1.1.0`, checkpoint
+  `final0`, CPU, no DBN) finds the beats. Code **and** weights are MIT: its
+  README says "The code and the published model weights are released under
+  the MIT license." Needs CPU-only `torch` + `torchaudio`; ~1 s to import and
+  load once per process, then 0.2-0.7 s per 15-50 s clip.
+- **librosa** (ISC) supplies the low-band onset envelope for the kick rule
+  and decodes the WAV.
+- **Not used:** madmom's RNN downbeat weights are CC BY-NC-SA 4.0
+  (non-commercial), so they are out. madmom's *code* is BSD, but we only
+  needed it for Beat This!'s optional DBN, which changed nothing on our clips.
+  BeatNet (CC BY 4.0) scored 1/4 on labelled count 1 and drags in madmom and
+  pyaudio. The comparison is `docs/research/downbeat-models.md` (branch
+  `research/downbeat-models`).
 
 ## Output shape
 
@@ -47,90 +50,53 @@ result.warnings     # e.g. tempo outside the plausible dance-practice band
 `count_total` to report) — same reasoning as `endS` in `core.ts`: the caller
 owns the clip's true end, this module never invents one.
 
-## How the grid is chosen (2026-09-23)
+## How the grid is chosen (2026-09-24)
 
-1. **Tempo.** librosa's `beat_track` reading is only a starting point: its
-   tempo is quantized to whole 512-sample lags (near 115-120 BPM the only
-   values are 112.3 / 117.5 / 123.0 / 129.2), and a 2% error drifts the grid
-   half a beat off within ~25 counts. `_refine_grid` searches +-6% around it
-   for the constant spacing and phase that land on the most onset energy
-   (6 ms envelope, 0.5 ms / 4 ms steps).
+1. **Beats.** Beat This! returns beat and downbeat times. `_fit_grid` fits
+   the least-squares constant grid (`phase + secondsPerCount * n`) through
+   the beats. Each beat's count number steps by its rounded gap, so a beat the
+   model skipped keeps its count. This replaces `librosa.beat_track` +
+   `_refine_grid`, which on the bhangra lesson locked onto the off-beat (the
+   dhol and claps are louder there) and put every count ~300 ms off.
 2. **Count 1.** `_count_one` finds the bar downbeat as the beat-of-the-bar
-   (mod 4) with the strongest low-band (<150 Hz, kick) onsets, then puts
-   count 1 on the EARLIEST strong beat (that downbeat, or the beat half a bar
-   from it) after the music starts. It warns when no phase is >=10% ahead of
-   the runner-up. The other three beats of the bar ride along as
-   `count_one_alternates` (strongest accent first) for "try another 1".
+   (count number mod 4) with the strongest low-band (<150 Hz, kick) onsets at
+   the model's beats. Count 1 is the first such beat from the first beat the
+   model heard. When no beat of the bar is >=10% ahead of the runner-up, the
+   kick rule is a coin toss: the model's majority downbeat decides instead
+   and the "weak guess" warning fires.
+3. **Alternates.** The other three beats of that bar ride along as
+   `count_one_alternates` for "try another 1". When the kick rule and the
+   model disagree, the pick that lost goes first; the rest follow by accent.
 
-   Why not the downbeat itself: on solo-02, the only clip with an owner label,
-   the dancer's 1 is 0.862 s, and Beat This! (with and without DBN), madmom's
-   RNN+DBN and the kick heuristic all put the bar downbeat at 1.88-1.905 s,
-   exactly half a bar late. The earliest-strong-beat rule gets solo-02 right,
-   but it is fitted to ONE label and moves count 1 two beats earlier than the
-   music models on solo-01 (0.44 vs 1.29) and solo-07 (0.43 vs 1.36). Label
-   more clips (below) before trusting either rule.
+Labelled clips (the owner's count 1, labelling page 2026-09-23), pass = within
+70 ms, measured end to end from the mp4 through `propose_grid`:
 
-   Labelling protocol: in the app, open the lesson, scrub to where the dancer
-   counts 1, press "Set count 1 here". The structure is saved in
-   `localStorage["stepwise.lesson-structure.v1.<lessonId>"]`; copy
-   `grid.countOneS` per lesson from the browser console. Score a rule by its
-   error in beats modulo 8 (`((pred - truth) / spc)` rounded, mod 8, folded to
-   -4..+4): 0 is right, +-2 is the half-bar error, +-4 the bar error.
-
-Checked against Beat This! (CPJKU, run offline as a reference, not shipped):
-
-| clip | ref BPM | old BPM / count 1 | new BPM / count 1 | ref first downbeat | new max beat error |
+| clip | label | old (librosa grid + kick) | new count 1 | BPM | worst beat off the grid |
 |---|---|---|---|---|---|
-| solo-02 | 115.07 | 117.45 / 1.300 (prod) | 115.01 / 1.905 | 1.88 | 40 ms (old 257 ms) |
-| solo-01 | 142.11 | 143.55 / 0.070 | 141.05 / 1.292 | 1.28 | 43 ms (old 210 ms) |
-| group-synced-01 | 120.01 | 117.45 / 0.627 | 119.95 / 1.120 | 1.10 | 52 ms (old 245 ms) |
-| solo-07 | 125 -> 129 (speeds up) | 129.20 / 0.070 | 129.02 / 1.358 (warns) | 1.94 | 237 ms (old 462 ms) |
+| solo-01 | 1.292 | 1.292 ✓ | 1.268 ✓ | 141.00 | 28 ms |
+| solo-02 | 1.905 | 1.905 ✓ | 1.888 ✓ | 115.07 | 15 ms |
+| group-synced-01 | 1.120 | 1.120 ✓ | 1.101 ✓ | 120.01 | 18 ms |
+| solo-07 | 1.030 | 1.358 ✗ (drift) | 1.052 ✓ | 126.83 | 86 ms (speeds up 125 -> 129) |
 
-Known gaps: a track that changes tempo (solo-07) cannot fit one constant
-grid; and which of two bars starts the 8-count phrase is not modelled --
-count 1 is the first strong beat. The dancer's joint speed (15 fps
-MotionResult) was tried as a phase cue and did not separate the beats of the
-bar on any clip, so it is not used. "Set count 1" stays the override.
+Beat This!'s own first downbeat alone misses solo-07 by half a bar (0.04 s),
+which is why the kick rule still picks the phase.
 
-## Real-audio test results (2026-09-18, before the refinement above)
+Known gaps: one constant tempo per clip (a drifting track sits up to ~90 ms
+off at its ends; the upgrade is per-beat times in the contract), and which of
+two bars starts the 8-count phrase is not modelled. "Set count 1" stays the
+override.
 
-`evaluation/clips.yaml`'s actual video files live in the Modal Volume
-`stepwise-eval`, not in git. This session had `modal` already authenticated
-and found real clips already cached locally at `~/.stepwise-clips/`
-(`solo-01`, `solo-02`, `solo-07`, `group-synced-01` — fetched by a prior
-session), so testing used those instead of re-fetching or falling back to
-synthetic audio only:
-
-| clip | duration | BPM | seconds/count | countOneS | countTotal | confidence |
-|---|---|---|---|---|---|---|
-| solo-01 | 19.71s | 143.6 | 0.418 | 0.093 | 47 | 0.93 |
-| solo-02 | 32.53s | 117.5 | 0.511 | 0.070 | 64 | 0.91 |
-| solo-07 | 23.58s | 129.2 | 0.464 | 0.070 | 51 | 0.94 |
-| group-synced-01 | 33.08s | 117.5 | 0.511 | 0.627 | 64 | 0.95 |
-
-All four landed inside the 70-180 BPM plausible-dance-tempo band, so no
-half/double warning fired on any of them, and all four report high
-confidence (0.91-0.95) — the beat intervals librosa found were very regular
-(low coefficient of variation) on all four clips. **I could not verify these
-against my own ear** — this session has no audio playback, so "is this
-where I'd actually tap count 1" (the report's requested measure) could not
-be checked subjectively. That's a real gap: high algorithmic regularity
-doesn't rule out a consistent half/double-time lock, only *inconsistent*
-tempo tracking, which none of these four clips exhibited. The synthetic
-click-track test (`tests/python/test_propose.py`) covers the case this
-module is explicitly weakest at self-detecting: it does not independently
-confirm downbeat placement on human-danced (non-metronomic) music.
-
-Additionally ran against a synthesized 120 BPM click track (public-domain,
-generated in-test, no external asset) as the unit test fixture — confirms
-the pipeline (ffmpeg extraction skipped since it's already audio → librosa →
-confidence scoring) end to end on a case with a known, exact answer.
+Labelling protocol: in the app, open the lesson, scrub to where the dancer
+counts 1, press "Set count 1 here". The structure is saved in
+`localStorage["stepwise.lesson-structure.v1.<lessonId>"]`; copy
+`grid.countOneS` per lesson from the browser console.
 
 ## Layout
 
 ```
-python/beat_detect/propose.py    propose_grid(), ProposedGrid, TempoAlternate
-python/tests/test_propose.py     synthesized-click-track self-check
+python/beat_detect/propose.py                 propose_grid(), ProposedGrid, TempoAlternate
+python/tests/test_propose.py                  unit tests on recorded/synthesized model output
+python/tests/fixtures/beat-this-recorded.json Beat This! beats for bhangra-5716 and solo-07 (times only)
 ```
 
 ## Running
