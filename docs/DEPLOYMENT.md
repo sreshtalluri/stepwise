@@ -24,7 +24,7 @@ execution.
 | CI | live | `.github/workflows/test.yml`, push + PR |
 | Database | **blocked** — no Neon project | schema written and tested, §5 |
 | Frontend hosting | **blocked** — no Cloudflare account/domain | `apps/web` builds clean, §5 |
-| Error tracking | **blocked** — no Sentry DSN | §5 |
+| Error tracking | **code wired, not switched on** — needs the `stepwise-sentry` Modal Secret and a deploy | §5.3 |
 
 One app, one `modal deploy`, one set of credentials. `api.py` was already a
 Modal client — it constructs `modal.Volume.from_name(...)` at import and
@@ -331,15 +331,53 @@ are all still to do and all need the Cloudflare account first.
 
 ### 5.3 Sentry
 
-**Blocked on:** DSNs (free tier, $0).
+**Wired; off until its Secret exists.** Modal Starter retains logs for **one
+day**, so without this a user reporting yesterday's failure is already
+undebuggable.
 
-Nothing built. This is the most urgent gap in the whole plan and it is worth
-saying plainly: **Modal Starter retains logs for one day**, so a user reporting
-yesterday's failure is already undebuggable. `run_clip`'s failure path writes
-`{"code": "pipeline_error", "retryable": true}` and re-raises; without Sentry
-the *reason* exists only in a log that is gone tomorrow. Three places, in
-priority order: the GPU worker's `except` branches, the FastAPI ASGI
-integration, the browser.
+What reports, all through `services/motion-api/observability.py` (backend) and
+`apps/web/instrumentation-client.ts` (browser):
+
+| Where | What | Project |
+|---|---|---|
+| `run_clip` | `pipeline_error` and `export_error` as errors, a failed beat stage as a warning, each tagged `clip_id` / `job_id` / `stage` / `retry_count` | `stepwise-backend` |
+| `sweep_expired` | any crash (a dead sweeper is a broken retention promise) | `stepwise-backend` |
+| `web` (FastAPI) | unhandled 500s via the ASGI integration; 10% of requests traced (`SENTRY_TRACES_SAMPLE_RATE`) | `stepwise-backend` |
+| browser | uncaught errors, plus render errors caught by `app/global-error.tsx`; no tracing, no replay | `stepwise-web` |
+
+**Nothing identifying leaves.** Every event, breadcrumb and log is scrubbed as a
+whole before send: URLs with a scheme, schemeless `tiktok.com/…` links,
+yt-dlp's `[youtube] <id>:` shape, `tiktok:<id>` source keys, emails and
+`@handles`. Presigned R2 URLs are caught by the same rule, and they matter as
+much as source links, because each one carries a live signature. Local variables
+are not captured and request bodies are never sent. The browser keeps its own
+page URL (path only, query dropped). `test_observability.py` asserts on the
+serialized envelope from a real FastAPI app, and it goes red if the scrubber is
+unhooked.
+
+**`release` is the deployed commit.** It is read from git on the deploying
+machine at `modal deploy` / `cf:build` time, with `-dirty` appended for an
+uncommitted tree. It rides in as a per-function `modal.Secret.from_dict`, not
+an image layer, so no rebuild per commit. The same field exposes §7.1's
+warm-container trap: if an error after a deploy carries the *previous* sha, it
+came from a container that outlived the deploy. The Sentry GitHub integration is
+deliberately **not** connected, because Sentry would resolve commits against
+the default branch, and that is the abandoned v1.
+
+To switch on, with `SENTRY_DSN_BACKEND` and `SENTRY_DSN_WEB` in
+`~/.stepwise-secrets/sentry.env`. Modal does not mind that the Secret also holds
+the web DSN:
+
+```sh
+modal secret create stepwise-sentry --from-dotenv ~/.stepwise-secrets/sentry.env
+cd services/motion-api && modal deploy modal_app.py
+modal container list   # then `modal container stop` any warm web container (§7.1)
+
+# Browser: the DSN is inlined at build time, so it must be in the build's env.
+cd apps/web && set -a && . ~/.stepwise-secrets/sentry.env && set +a && npm run cf:deploy
+```
+
+The backend also accepts a plain `SENTRY_DSN` if the file uses that name.
 
 ---
 

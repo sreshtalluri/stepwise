@@ -67,6 +67,66 @@ try:
 except Exception:  # noqa: BLE001 -- any lookup failure means "not configured yet"
     HF_SECRET = []
 
+
+def optional_secret(name: str) -> list:
+    """`[Secret]` if it exists in this Environment, `[]` if it does not.
+
+    `modal.Secret.from_name` is lazy -- it returns a handle and only fails when
+    the deploy resolves it -- so the try/except around HF_SECRET above catches
+    nothing, and a missing Secret takes down the whole `modal deploy` including
+    every function that never referenced it. `.hydrate()` forces the lookup
+    here, where it can be answered with "not configured yet" instead of a
+    traceback. This is the difference between "the API cannot be deployed until
+    Neon exists" and "the API is deployed and says in /health that Neon does
+    not exist yet".
+    """
+    try:
+        s = modal.Secret.from_name(name)
+        s.hydrate()
+        return [s]
+    except Exception:  # noqa: BLE001 -- any lookup failure means "not configured yet"
+        print(f"[modal_app] Secret {name!r} not found; continuing without it.")
+        return []
+
+
+# Sentry (observability.py). `SENTRY_DSN_BACKEND` from ~/.stepwise-secrets/sentry.env.
+# Absent -> observability.init() is a no-op and errors stay in Modal's one-day
+# logs, exactly as before this existed.
+SENTRY_SECRET = optional_secret("stepwise-sentry")
+
+
+def _deployed_sha() -> str | None:
+    """The commit being deployed, read from git on the DEPLOYING machine.
+
+    Only meaningful locally: inside a container there is no .git, and the value
+    that matters is the one baked into the function spec at `modal deploy`.
+    `-dirty` is appended when the tree has uncommitted changes, because a
+    release name that claims a commit the code does not match is worse than
+    none -- it sends whoever reads the Sentry event to the wrong diff.
+    """
+    if not modal.is_local():
+        return None
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=here, text=True,
+                                      stderr=subprocess.DEVNULL).strip()
+        dirty = subprocess.check_output(["git", "status", "--porcelain"], cwd=here, text=True,
+                                        stderr=subprocess.DEVNULL).strip()
+    except Exception:  # noqa: BLE001 -- no git, not a checkout: deploy without a release
+        return None
+    return f"{sha}-dirty" if dirty else sha
+
+
+# A per-function env var, not an image layer: an `.env()` on the image would
+# rebuild a layer on every commit, and a Secret is attached to the function
+# spec at deploy with no build at all. It is also how DEPLOYMENT.md §7.1's
+# warm-container trap shows up in Sentry: an error whose release is the
+# PREVIOUS sha, after a deploy, came from a container that outlived it.
+_SHA = _deployed_sha()
+OBS_SECRETS = SENTRY_SECRET + ([modal.Secret.from_dict({"STEPWISE_GIT_SHA": _SHA})] if _SHA else [])
+OBSERVABILITY_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "observability.py")
+
 # Light image for stages 1-3: just enough to prove CUDA and pull weights.
 # The heavy CV stack lands in a separate image once this much is known good.
 base_image = (
@@ -203,9 +263,12 @@ cv_image = (
         "'git+https://github.com/facebookresearch/detectron2.git@a1ce2f9' "
         "--no-build-isolation --no-deps",
     )
+    # Last build step on purpose: a new layer here rebuilds nothing above it.
+    .pip_install("sentry-sdk>=2.35")
     # Mounted at container start, not baked into the image layer -- editing
     # the adapter doesn't force a rebuild of everything above it.
     .add_local_dir(VENDOR_DIR, remote_path="/app/fast-sam-3d-body")
+    .add_local_file(OBSERVABILITY_PY, remote_path="/app/observability.py")
     # W9: the static MHR skeleton (parent indices + joint names) that
     # tools/smoothing.py needs to work in parent-local space. Same file api.py
     # reads; generated once by dump_joint_hierarchy below.
@@ -295,6 +358,7 @@ GPU_HOURLY_USD = {"L40S": 1.95, "A10G": 1.10, "T4": 0.59}
     image=cv_image,
     gpu=GPU_TIER,
     volumes={WEIGHTS_DIR: weights, CLIPS_DIR: eval_clips, UPLOADS_DIR: uploads, RESULTS_DIR: results},
+    secrets=OBS_SECRETS,
     timeout=3600,
 )
 def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1,
@@ -321,8 +385,11 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
 
     sys.path.insert(0, "/app/fast-sam-3d-body")
     from tools.process_clip import process_clip, save_clip_result
+    sys.path.insert(0, "/app")
+    import observability
 
     job_id = job_id or f"job_{clip_id}_{int(time.time())}"
+    tags = {"clip_id": clip_id, "job_id": job_id, "retry_count": retry_count}
     status_path = f"{RESULTS_DIR}/{job_id}.job-status.json"
 
     def write_status(state: str, stage_message: str, progress, error=None):
@@ -384,6 +451,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
             None,
             error={"code": "pipeline_error", "message": str(e), "retryable": True},
         )
+        observability.capture(e, "run_clip", stage="reconstruct", **tags)
         raise
     wall_s = time.time() - t0
 
@@ -433,6 +501,10 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         beats = beats_call.get()
     except Exception as e:  # noqa: BLE001 -- a beat failure is never a job failure
         print(f"[beats] {clip_id}: proposal stage failed ({type(e).__name__}: {e})")
+        # Warning, not error: the lesson still ships, just without proposed
+        # counts. Reported anyway -- a beat stage that fails on every clip
+        # would otherwise look exactly like clips with no audio.
+        observability.capture(e, "run_clip", level="warning", stage="beats", **tags)
         beats = None
     if beats:
         with open(f"{RESULTS_DIR}/{clip_id}.beats.json", "w") as f:
@@ -464,6 +536,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
             "failed", "", None,
             error={"code": "export_error", "message": str(e), "retryable": True},
         )
+        observability.capture(e, "run_clip", stage="export", **tags)
         raise
 
     write_status("succeeded", "", 1.0)
@@ -774,33 +847,13 @@ def propose_counts(clip_id: str) -> dict | None:
 # (docs/research/rights-and-privacy.md §1).
 sweeper_image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("boto3")
+    .pip_install("boto3", "sentry-sdk>=2.35")
     .add_local_file(os.path.join(os.path.dirname(__file__), "retention.py"),
                     "/app/retention.py")
     .add_local_file(os.path.join(os.path.dirname(__file__), "storage.py"),
                     "/app/storage.py")
+    .add_local_file(OBSERVABILITY_PY, "/app/observability.py")
 )
-
-def optional_secret(name: str) -> list:
-    """`[Secret]` if it exists in this Environment, `[]` if it does not.
-
-    `modal.Secret.from_name` is lazy -- it returns a handle and only fails when
-    the deploy resolves it -- so the try/except around HF_SECRET above catches
-    nothing, and a missing Secret takes down the whole `modal deploy` including
-    every function that never referenced it. `.hydrate()` forces the lookup
-    here, where it can be answered with "not configured yet" instead of a
-    traceback. This is the difference between "the API cannot be deployed until
-    Neon exists" and "the API is deployed and says in /health that Neon does
-    not exist yet".
-    """
-    try:
-        s = modal.Secret.from_name(name)
-        s.hydrate()
-        return [s]
-    except Exception:  # noqa: BLE001 -- any lookup failure means "not configured yet"
-        print(f"[modal_app] Secret {name!r} not found; continuing without it.")
-        return []
-
 
 # R2 credentials. Absent -> every caller keeps its Volume path and says so
 # (storage.enabled()), rather than the app failing to load.
@@ -1587,8 +1640,24 @@ def _publish_to_r2(clip_id: str, glb_paths: list[str], materialised: bool) -> li
 # resolves them for this container. All access below goes through the client
 # API, not the mount.
 @app.function(image=sweeper_image, schedule=modal.Period(days=1), timeout=1800,
-              volumes={RESULTS_DIR: results, UPLOADS_DIR: uploads}, secrets=R2_SECRET)
+              volumes={RESULTS_DIR: results, UPLOADS_DIR: uploads}, secrets=R2_SECRET + OBS_SECRETS)
 def sweep_expired(dry_run: bool = False):
+    """Runs `_sweep_expired` and reports it to Sentry if it dies.
+
+    A sweeper that crashes every night is a retention promise with nothing
+    behind it, and nobody reads a one-day log for a job that "just runs".
+    """
+    import sys
+    sys.path.insert(0, "/app")
+    import observability
+    try:
+        return _sweep_expired(dry_run)
+    except Exception as e:  # noqa: BLE001 -- reported, then re-raised so Modal marks the run failed
+        observability.capture(e, "sweep_expired", dry_run=dry_run)
+        raise
+
+
+def _sweep_expired(dry_run: bool):
     """Retention, on a clock. Two jobs, both of which only ever delete.
 
     **1. Reap superseded npz files.** A clip whose `.motion-result.json.gz`
@@ -1746,7 +1815,7 @@ api_image = (
 
 @app.function(
     image=api_image,
-    secrets=R2_SECRET + DB_SECRET,
+    secrets=R2_SECRET + DB_SECRET + OBS_SECRETS,
     # Scale to zero. A cold start is a few seconds on the upload endpoint,
     # where it is invisible, and on the first two-second job poll, where it is
     # also invisible. min_containers=1 pins ~$45/month of always-on container
@@ -1764,6 +1833,10 @@ api_image = (
 def web():
     import sys
     sys.path.insert(0, "/app/services/motion-api")
+    # Before the api import, not after: the FastAPI/Starlette integrations
+    # patch the class at init, so an app built first is never instrumented.
+    import observability
+    observability.init("web")
     from api import app as fastapi_app
     return fastapi_app
 

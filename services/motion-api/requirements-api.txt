@@ -55,3 +55,8 @@ jsonschema>=4.23
 pydantic>=2.9
 boto3>=1.35
 psycopg[binary,pool]>=3.2
+# sentry-sdk: error tracking for the ASGI app (observability.py). Optional at
+# runtime -- no SENTRY_DSN means it is never initialised -- but listed so the
+# Modal image and a laptop get the same thing. 2.35 is the first release with
+# `enable_logs` / `before_send_log` as stable options rather than _experiments.
+sentry-sdk>=2.35

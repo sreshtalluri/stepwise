@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,9 +37,34 @@ import { fileURLToPath } from "node:url";
 const MOTION_API = process.env.MOTION_API_URL ?? "http://127.0.0.1:8811";
 const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * The commit being built, for Sentry's `release`. Same rule as
+ * services/motion-api/modal_app.py: `-dirty` when the tree has uncommitted
+ * changes, nothing at all when there is no git, never a guess.
+ */
+function gitSha() {
+  try {
+    const run = (cmd) => execSync(cmd, { cwd: APP_DIR, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+    const sha = run("git rev-parse HEAD");
+    return run("git status --porcelain") ? `${sha}-dirty` : sha;
+  } catch {
+    return "";
+  }
+}
+
 export default {
   reactStrictMode: true,
   turbopack: { root: path.resolve(APP_DIR, "..", "..") },
+
+  /**
+   * 5. Browser Sentry (instrumentation-client.ts). Inlined at build time, so
+   * these have to be in the environment of `npm run cf:build`, e.g. with
+   * ~/.stepwise-secrets/sentry.env sourced. No DSN -> Sentry stays off.
+   */
+  env: {
+    NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN ?? process.env.SENTRY_DSN_WEB ?? "",
+    NEXT_PUBLIC_STEPWISE_GIT_SHA: gitSha(),
+  },
 
   /**
    * 3. `outputFileTracingRoot` is deliberately NOT set here. Do not add it.

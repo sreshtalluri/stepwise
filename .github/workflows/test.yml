@@ -68,7 +68,8 @@ jobs:
           # suite that passed.
           ../../.venv/bin/python -m pytest -q -rs \
             test_grounding.py test_retention.py test_fingerprint.py \
-            test_api_rotations.py test_schema.py tools/test_region_mask.py
+            test_api_rotations.py test_schema.py test_observability.py \
+            tools/test_region_mask.py
 
       - name: motion-contract (python)
         if: matrix.suite == 'motion-contract'
