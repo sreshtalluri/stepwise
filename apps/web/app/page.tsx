@@ -1,29 +1,26 @@
 import Link from "next/link";
-import DemoStage, { type DemoClip } from "../components/DemoStage";
+import CountingStage from "../components/CountingStage";
+import PasteHero from "../components/PasteHero";
 import StageFigure from "../components/StageFigure";
 import { marketing, PRODUCT_NAME } from "../lib/copy";
 
 /**
- * The marketing site — docs/DESIGN.md §7d, §7e.
+ * The marketing site: docs/DESIGN.md §7d, §7e, and the flow redesign.
  *
- * Loud: 60px+ display type, the accent used boldly, a dark full-bleed proof
- * band, and a live demo lesson in the hero. Loudness is allowed at the front
- * door and forbidden in the room (§7e) — nothing here sets the register for
- * /lesson/*.
+ * The hero is direction A's: the paste box IS the primary action, so a link
+ * becomes a running job in one step. Beside it, direction B's count strip
+ * ticks over a body, teaching the 8-count the lesson is built on before
+ * anyone uploads. Loud at the front door, calm in the room (§7e).
  *
- * Sections, in order: hero with demo → proof band → three steps as an
- * asymmetric list (never three equal cards) → closing call to action.
- */
-
-/**
  * No cleared demo clip exists yet. `evaluation/clips.yaml`'s `demo-public`
  * slot is `needs-permission` and empty; the private testing clips are
- * `rights: untested` and must never appear on a public page. Until a dancer
- * gives explicit permission this stays null and the hero shows the
- * placeholder body, which claims nothing about any real person.
+ * `rights: untested` and must never appear on a public page. So the hero's
+ * stage is an abstract figure that claims nothing about any real person
+ * (components/CountingStage.tsx), and says so.
+ *
+ * Below the fold, in order: proof band, three steps as an asymmetric list
+ * (never three equal cards), closing call to action.
  */
-const DEMO_CLIP: DemoClip | null = null;
-
 export default function MarketingPage() {
   return (
     <main>
@@ -38,7 +35,7 @@ export default function MarketingPage() {
         </div>
       </nav>
 
-      <section className="wrap hero">
+      <section className="wrap hero" id="top">
         <div>
           <h1 className="display">
             {marketing.hero.headlineLead}
@@ -46,20 +43,10 @@ export default function MarketingPage() {
             <em>{marketing.hero.headlineAccent}</em>
           </h1>
           <p className="lede">{marketing.hero.lede}</p>
-          <div className="hero-cta">
-            <Link href="/upload" className="btn btn-lg">
-              {marketing.hero.primary}
-            </Link>
-            <Link href="#steps" className="btn btn-lg btn-ghost">
-              {marketing.hero.secondary}
-            </Link>
-          </div>
-          <p className="meta" style={{ marginTop: 12 }}>
-            {marketing.hero.noAccount}
-          </p>
+          <PasteHero />
         </div>
 
-        <DemoStage clip={DEMO_CLIP} height={380} />
+        <CountingStage />
       </section>
 
       <section className="wrap" id="proof">
@@ -102,7 +89,7 @@ export default function MarketingPage() {
           <p className="muted" style={{ margin: "10px 0 20px" }}>
             {marketing.close.body}
           </p>
-          <Link href="/upload" className="btn btn-lg">
+          <Link href="#top" className="btn btn-lg">
             {marketing.close.primary}
           </Link>
           <p className="meta" style={{ marginTop: 12 }}>
