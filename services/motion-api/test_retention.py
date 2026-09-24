@@ -23,6 +23,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# The starlette Request the dispatch handlers read the client IP from. These
+# tests run the Volume backend, where the rate limiter allows without looking.
+NO_REQUEST = types.SimpleNamespace(headers={}, client=None)
+
 
 class FakeVolume:
     """Enough of modal.Volume for these handlers: the parts that move bytes."""
@@ -270,7 +274,7 @@ def test_reuploading_a_reencode_starts_no_gpu_job(api, tmp_path):
         async def read(self, n):
             return self._f.read(n)
 
-    first = asyncio.run(api.upload_clip(_Upload(original)))
+    first = asyncio.run(api.upload_clip(NO_REQUEST, _Upload(original)))
     assert first.deduplicated is False
     assert len(api._spawned) == 1, "the first upload must actually run the pipeline"
 
@@ -280,7 +284,7 @@ def test_reuploading_a_reencode_starts_no_gpu_job(api, tmp_path):
         "stage_message": "", "progress": 1.0, "error": None, "retry_count": 0,
     }).encode()
 
-    second = asyncio.run(api.upload_clip(_Upload(reencoded)))
+    second = asyncio.run(api.upload_clip(NO_REQUEST, _Upload(reencoded)))
     assert second.deduplicated is True, "a re-encode must not be reconstructed again"
     assert second.clip_id == first.clip_id and second.job_id == first.job_id
     assert len(api._spawned) == 1, "no second GPU job may be dispatched"

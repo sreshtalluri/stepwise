@@ -92,7 +92,16 @@ export default function UploadPage() {
       // W7 built it against the fixture. Found while wiring the link door.
       body.append("file", file);
       const res = await fetch("/api/clips", { method: "POST", body });
-      if (!res.ok) throw new Error(String(res.status));
+      if (!res.ok) {
+        // Same rule as the link door: when the service explains the failure
+        // (a 429 says when to come back), show its words, not ours.
+        const failed = (await res.json().catch(() => null)) as {
+          detail?: { error?: { message?: string } };
+        } | null;
+        setBusy(false);
+        setError(failed?.detail?.error?.message ?? copy.errors.uploadFailed);
+        return;
+      }
       const { job_id: jobId } = (await res.json()) as { job_id: string };
       // Not revoked: the processing screen plays this immediately, so there is
       // no dead time while the job runs (DESIGN.md §7c).
@@ -100,7 +109,7 @@ export default function UploadPage() {
       router.push(`/job/${jobId}`);
     } catch {
       setBusy(false);
-      setError("The upload did not go through. Check your connection and try again.");
+      setError(copy.errors.uploadFailed);
     }
   }
 

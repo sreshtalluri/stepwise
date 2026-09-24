@@ -30,7 +30,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_retention import FakeVolume  # noqa: E402 -- same harness, same volumes
+from test_retention import NO_REQUEST, FakeVolume  # noqa: E402 -- same harness, same volumes
 
 TIKTOK_SHORT = "https://www.tiktok.com/t/ZP83Enx4b/"
 TIKTOK_FULL = "https://www.tiktok.com/@jonraydybuco/video/7672198121417444628"
@@ -93,7 +93,7 @@ def fake_ytdlp(api, monkeypatch):
 
 
 def _paste(api, url=TIKTOK_SHORT, code="let-me-in"):
-    return api.ingest_clip_link(api.LinkRequest(url=url), x_invite_code=code)
+    return api.ingest_clip_link(api.LinkRequest(url=url), NO_REQUEST, x_invite_code=code)
 
 
 def _succeed(api, resp):
@@ -161,7 +161,7 @@ def test_upload_then_link_lands_on_one_clip_id(api, fake_ytdlp, tmp_path):
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(fake_ytdlp.video)
     fp = fingerprint.fingerprint(str(clip))
-    uploaded = api._store_and_dispatch(str(clip), "deadbeef" * 4, fp)
+    uploaded = api._store_and_dispatch(str(clip), "deadbeef" * 4, fp, NO_REQUEST)
     _succeed(api, uploaded)
 
     pasted = _paste(api)
@@ -362,7 +362,7 @@ def test_file_upload_is_not_gated(api, monkeypatch, tmp_path):
             self._sent = True
             return self._data
 
-    resp = asyncio.run(api.upload_clip(_Upload(clip)))
+    resp = asyncio.run(api.upload_clip(NO_REQUEST, _Upload(clip)))
     assert resp.clip_id and not resp.deduplicated
     assert len(api._spawned) == 1
     assert fingerprint  # silence the unused import; the real one ran above

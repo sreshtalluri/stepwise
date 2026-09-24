@@ -167,6 +167,7 @@ export const upload = {
     tooLong:
       "That clip is longer than 60 seconds. Trim it to the part you want to learn and try again.",
     wrongType: "That file is not a video. Pick an mp4, mov, or webm.",
+    uploadFailed: "The upload did not go through. Check your connection and try again.",
   },
 };
 
