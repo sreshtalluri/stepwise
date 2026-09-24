@@ -76,6 +76,8 @@ def clip_artifact_paths(results_listing: list[str], clip_id: str, job_id: str | 
         # The beat proposal. Derived from the audio of a person's video, so it
         # goes with everything else -- D7's promise is kept by this list.
         f"/{clip_id}.beats.json",
+        # The detector's 2D keypoints of the person in the clip (milestones.py).
+        f"/{clip_id}.detections.json",
         f"/{clip_id}.last-access.json",
     ]
     # Every dancer's GLB. `{clip_id}_track{n}.glb` per modal_app.export_clip_gltf.

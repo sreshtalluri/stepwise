@@ -160,6 +160,25 @@ test("job-status: a minimal queued job is valid", () => {
   assert.equal(result.valid, true);
 });
 
+test("job-status: optional milestones validate, unknown keys do not", () => {
+  const base = {
+    schema_version: "1.0.0",
+    job_id: "job_abc",
+    state: "processing",
+    stage_message: "Building the body, frame 11 of 120",
+    progress: 0.31,
+    error: null,
+    retry_count: 0,
+  };
+  const counts = { bpm: 117, count_one_s: 0.51, seconds_per_count: 0.513, confidence: 0.8 };
+  const ok = validateJobStatus({
+    ...base,
+    milestones: { counts, dancers: 1, frames_done: 11, frames_total: 120 },
+  });
+  assert.deepEqual(ok.errors, []);
+  assert.equal(validateJobStatus({ ...base, milestones: { eights_built: 3 } }).valid, false);
+});
+
 test("job-status: rejects an unknown state", () => {
   const result = validateJobStatus({
     schema_version: "1.0.0",

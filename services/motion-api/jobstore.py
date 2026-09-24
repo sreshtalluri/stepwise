@@ -173,7 +173,9 @@ def read_status(volume, job_id: str, clip_id_for) -> Optional[dict]:
     doc = retention.read_json(volume, f"/{job_id}.job-status.json")
     if doc is None or (row is not None and doc.get("retry_count", 0) < row["retry_count"]):
         return row
-    if doc != row:
+    # `milestones` is display-only and has no column: compare without it, or
+    # every poll of a job that carries one would rewrite an unchanged row.
+    if {k: v for k, v in doc.items() if k != "milestones"} != row:
         try:
             _pg_write(job_id, clip_id_for(job_id), doc)
         except Exception as e:  # noqa: BLE001

@@ -77,6 +77,7 @@ from pydantic import BaseModel
 import fingerprint
 import ingest
 import jobstore
+import milestones
 import motion_result
 import ratelimit
 import retention
@@ -119,6 +120,22 @@ def _run_clip_fn():
     # Looked up per-call, not cached at import time: an app redeploy (new
     # code) should be picked up without restarting this service.
     return modal.Function.from_name(APP_NAME, "run_clip")
+
+
+def _spawn_counts(clip_id: str) -> str | None:
+    """Start the beat proposal now, beside run_clip rather than inside it.
+
+    It is CPU-only and needs nothing but the uploaded bytes, so spawned here it
+    lands ~20 s after upload -- while run_clip is still waiting for a GPU --
+    and the processing screen can teach the 8-counts during the wait. run_clip
+    gets the call id and only collects it, so the proposal runs once.
+    Best-effort: without it the job still runs and run_clip spawns its own.
+    """
+    try:
+        return modal.Function.from_name(APP_NAME, "propose_counts").spawn(clip_id=clip_id).object_id
+    except Exception as e:  # noqa: BLE001
+        print(f"[dispatch] could not spawn propose_counts for {clip_id}: {e}")
+        return None
 
 
 def _volume_read_json(volume: modal.Volume, path: str) -> Optional[dict]:
@@ -326,7 +343,7 @@ def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict, http: Request,
         print(f"[dispatch] {job_id} is already running -- adopting it, not spawning again")
         return DispatchResponse(clip_id=clip_id, job_id=job_id, deduplicated=True)
 
-    _run_clip_fn().spawn(clip_id=clip_id, job_id=job_id)
+    _run_clip_fn().spawn(clip_id=clip_id, job_id=job_id, beats_call_id=_spawn_counts(clip_id))
     return DispatchResponse(clip_id=clip_id, job_id=job_id)
 
 
@@ -543,6 +560,28 @@ def _refuse_if_removed(clip_id: str) -> None:
         raise HTTPException(410, "This lesson was removed and is not coming back.")
 
 
+def _with_early_counts(doc: dict, job_id: str) -> dict:
+    """Fold the beat proposal into a live job's `milestones.counts`.
+
+    propose_counts is spawned at dispatch and writes `{clip_id}.beats.json`
+    long before run_clip gets a GPU, so during the queue the worker has
+    written nothing that could carry it. Once run_clip has picked the counts
+    up itself (its documents then carry them), this costs nothing: the extra
+    Volume read only happens while a live job's document lacks them.
+
+    ponytail: a clip with no audio never gets counts, so its polls pay two
+    small reads (job-meta, beats) for the whole run. Record "no proposal" in
+    the worker's milestones if that ever shows up in latency.
+    """
+    if doc["state"] not in ("queued", "processing") or (doc.get("milestones") or {}).get("counts"):
+        return doc
+    counts = milestones.counts_milestone(
+        _volume_read_json(results_volume, f"/{_clip_id_for(job_id)}.beats.json"))
+    if counts is None:
+        return doc
+    return dict(doc, milestones=dict(doc.get("milestones") or {}, counts=counts))
+
+
 @app.get("/jobs/{job_id}")
 def get_job_status(job_id: str) -> dict:
     doc = jobstore.read_status(results_volume, job_id, _clip_id_for)
@@ -565,15 +604,8 @@ def get_job_status(job_id: str) -> dict:
         # forever.
         if _volume_read_json(results_volume, f"/{job_id}.job-meta.json") is None:
             raise HTTPException(404, "No lesson at this link.")
-        return {
-            "schema_version": "1.0.0",
-            "job_id": job_id,
-            "state": "queued",
-            "stage_message": "",
-            "progress": None,
-            "error": None,
-            "retry_count": 0,
-        }
+        doc = jobstore.queued_doc(job_id)
+    doc = _with_early_counts(doc, job_id)
     result = validate_job_status(doc)
     if not result.valid:
         # Fail loudly, not silently -- serving a contract-invalid document is
@@ -793,6 +825,21 @@ def get_job_video(job_id: str) -> Response:
     behaviour are the same code and cannot drift apart.
     """
     return get_asset(f"video:{_clip_id_for(job_id)}")
+
+
+@app.get("/jobs/{job_id}/detections")
+def get_job_detections(job_id: str) -> Response:
+    """The detector's 2D pass (milestones.build_detections), for the skeleton
+    the processing screen draws over the clip while the 3D is built. 404 until
+    run_clip's detection pass has written it; the screen only asks once
+    `milestones.dancers` says it exists. Same tombstone rule as everything
+    else derived from the person's video."""
+    clip_id = _clip_id_for(job_id)
+    _refuse_if_removed(clip_id)
+    body = _volume_read_bytes(results_volume, f"/{clip_id}.detections.json")
+    if body is None:
+        raise HTTPException(404, "No detections for this job yet.")
+    return Response(content=body, media_type="application/json")
 
 
 @app.get("/assets/{asset_id:path}")

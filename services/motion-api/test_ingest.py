@@ -48,9 +48,12 @@ def api(monkeypatch):
     fake_modal = types.ModuleType("modal")
     fake_modal.Volume = types.SimpleNamespace(from_name=lambda *a, **k: FakeVolume(a[0]))
     spawned: list[dict] = []
+    # `spawned` records GPU runs only; the CPU beat proposal spawned beside
+    # each one hands back a call id for run_clip to collect.
     fake_modal.Function = types.SimpleNamespace(
-        from_name=lambda *a, **k: types.SimpleNamespace(
-            spawn=lambda **kw: spawned.append(kw)))
+        from_name=lambda app, name, **k: types.SimpleNamespace(
+            spawn=lambda **kw: spawned.append(kw) if name == "run_clip"
+            else types.SimpleNamespace(object_id=f"fc-{name}")))
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
     for mod in ("api", "retention", "motion_result", "fingerprint", "ingest"):
         sys.modules.pop(mod, None)

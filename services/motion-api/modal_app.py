@@ -275,6 +275,9 @@ cv_image = (
     # the adapter doesn't force a rebuild of everything above it.
     .add_local_dir(VENDOR_DIR, remote_path="/app/fast-sam-3d-body")
     .add_local_file(OBSERVABILITY_PY, remote_path="/app/observability.py")
+    # The processing screen's early results (detections sidecar, counts milestone).
+    .add_local_file(os.path.join(os.path.dirname(__file__), "milestones.py"),
+                    remote_path="/app/milestones.py")
     # W9: the static MHR skeleton (parent indices + joint names) that
     # tools/smoothing.py needs to work in parent-local space. Same file api.py
     # reads; generated once by dump_joint_hierarchy below.
@@ -368,7 +371,7 @@ GPU_HOURLY_USD = {"L40S": 1.95, "A10G": 1.10, "T4": 0.59}
     timeout=3600,
 )
 def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1,
-             job_id: str | None = None, retry_count: int = 0):
+             job_id: str | None = None, retry_count: int = 0, beats_call_id: str | None = None):
     """Stage 5: the week-one deliverable. One real clip -- a real user upload
     (services/motion-api/api.py writes it to the `stepwise-uploads` Volume) or
     an evaluation/clips.yaml clip (the `stepwise-eval` Volume, checked as a
@@ -383,22 +386,59 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     succeeds -- so the whole run_clip -> export_clip_gltf order (spec item 2)
     happens inside one spawned worker, and "succeeded" is only written once a
     GLB actually exists for every dancer, not right after reconstruction.
+
+    Flow redesign: `beats_call_id` is the propose_counts call api.py spawned at
+    dispatch. This worker only collects it (never re-proposes), and carries
+    what it has learned so far in the status document's optional `milestones`
+    -- counts, dancer count, frames built -- plus a `{clip_id}.detections.json`
+    sidecar after the detection pass, so the processing screen can show real
+    intermediate results instead of a spinner.
     """
     import json
     import os
     import sys
     import time
 
+    import modal as _modal
+
     sys.path.insert(0, "/app/fast-sam-3d-body")
     from tools.process_clip import process_clip, save_clip_result
     sys.path.insert(0, "/app")
     import observability
+    from milestones import build_detections, counts_milestone
 
     job_id = job_id or f"job_{clip_id}_{int(time.time())}"
     tags = {"clip_id": clip_id, "job_id": job_id, "retry_count": retry_count}
     status_path = f"{RESULTS_DIR}/{job_id}.job-status.json"
+    beats_path = f"{RESULTS_DIR}/{clip_id}.beats.json"
+
+    # Beats are CPU-only and independent of reconstruction. api.py spawns them
+    # at dispatch so they land while the GPU cold-starts; this worker collects
+    # that call. A retry reuses the file an earlier attempt's call wrote, and a
+    # direct invocation (evaluation/*.py, `modal run`) spawns its own -- in
+    # every case exactly one propose_counts runs per clip.
+    beats_call = None
+    milestones: dict = {}
+    if os.path.exists(beats_path):
+        milestones["counts"] = counts_milestone(json.load(open(beats_path)))
+    elif beats_call_id:
+        beats_call = _modal.FunctionCall.from_id(beats_call_id)
+    else:
+        beats_call = propose_counts.spawn(clip_id)
+
+    def poll_beats() -> None:
+        """Non-blocking: fold the counts into milestones the moment they exist."""
+        if beats_call is None or "counts" in milestones:
+            return
+        try:
+            milestones["counts"] = counts_milestone(beats_call.get(timeout=0))
+        except (_modal.exception.TimeoutError, TimeoutError):
+            pass  # still listening
+        except Exception:  # noqa: BLE001 -- collected (and reported) before export
+            milestones["counts"] = None
 
     def write_status(state: str, stage_message: str, progress, error=None):
+        poll_beats()
         doc = {
             "schema_version": "1.0.0",
             "job_id": job_id,
@@ -408,13 +448,29 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
             "error": error,
             "retry_count": retry_count,
         }
+        shown = {k: v for k, v in milestones.items() if v is not None}
+        if shown and state in ("queued", "processing"):
+            doc["milestones"] = shown
         with open(status_path, "w") as f:
             json.dump(doc, f)
         results.commit()
         print(f"[job-status] {state} {progress if progress is not None else '-'}  {stage_message}")
 
-    def on_progress(stage: str, message: str, progress) -> None:
+    def on_progress(stage: str, message: str, progress, frames_done=None, frames_total=None) -> None:
+        if frames_done is not None:
+            milestones["frames_done"], milestones["frames_total"] = frames_done, frames_total
         write_status("refused" if stage == "refused" else "processing", message, progress)
+
+    def on_detections(d: dict) -> None:
+        # Best-effort: a sidecar that fails to write costs the overlay, never the job.
+        try:
+            doc = build_detections(d["sample_times_s"], d["raw_detections"],
+                                   d["confident_track_ids"], d["frame_width"], d["frame_height"])
+            with open(f"{RESULTS_DIR}/{clip_id}.detections.json", "w") as f:
+                json.dump(doc, f, separators=(",", ":"))
+            milestones["dancers"] = len(d["confident_track_ids"])
+        except Exception as e:  # noqa: BLE001
+            print(f"[detections] {clip_id}: sidecar not written ({type(e).__name__}: {e})")
 
     write_status("queued", "", None)
 
@@ -433,12 +489,6 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     checkpoint_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/model.ckpt"
     mhr_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
 
-    # Beats are CPU-only and independent of reconstruction, so they run beside
-    # it rather than after it: spawned here, collected below, and the whole cost
-    # disappears inside the ~90 s the GPU is busy. Sequenced instead, a cold CPU
-    # container start would be pure added wall time on every job.
-    beats_call = propose_counts.spawn(clip_id)
-
     t0 = time.time()
     try:
         result = process_clip(
@@ -450,6 +500,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
             max_seconds=max_seconds,
             bbox_thr=bbox_thr,
             on_progress=on_progress,
+            on_detections=on_detections,
         )
     except Exception as e:  # noqa: BLE001 -- surface as a job-status failure, not a bare crash
         write_status(
@@ -498,23 +549,20 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     with open(f"{RESULTS_DIR}/{clip_id}.performance.json", "w") as f:
         json.dump(perf, f)
 
-    # Same hand-off pattern as performance.json above: this stage has the video,
-    # the export stage has the timeline, and a small JSON in the results Volume
-    # is how they already talk. Absent file == no proposal, which the reader
-    # treats as normal. Listed in retention.clip_artifact_paths so a removal
-    # request takes it with everything else.
-    try:
-        beats = beats_call.get()
-    except Exception as e:  # noqa: BLE001 -- a beat failure is never a job failure
-        print(f"[beats] {clip_id}: proposal stage failed ({type(e).__name__}: {e})")
-        # Warning, not error: the lesson still ships, just without proposed
-        # counts. Reported anyway -- a beat stage that fails on every clip
-        # would otherwise look exactly like clips with no audio.
-        observability.capture(e, "run_clip", level="warning", stage="beats", **tags)
-        beats = None
-    if beats:
-        with open(f"{RESULTS_DIR}/{clip_id}.beats.json", "w") as f:
-            json.dump(beats, f)
+    # Collected, not written: propose_counts writes and commits
+    # `{clip_id}.beats.json` itself (same hand-off pattern as performance.json:
+    # this stage has the video, the export stage has the timeline). Waiting on
+    # the call here is what guarantees the file is committed before
+    # export_clip_gltf reloads the Volume and reads it.
+    if beats_call is not None:
+        try:
+            beats_call.get()
+        except Exception as e:  # noqa: BLE001 -- a beat failure is never a job failure
+            print(f"[beats] {clip_id}: proposal stage failed ({type(e).__name__}: {e})")
+            # Warning, not error: the lesson still ships, just without proposed
+            # counts. Reported anyway -- a beat stage that fails on every clip
+            # would otherwise look exactly like clips with no audio.
+            observability.capture(e, "run_clip", level="warning", stage="beats", **tags)
 
     print(
         f"\nSAVED {out_path}\n"
@@ -807,7 +855,8 @@ beat_image = (
 )
 
 
-@app.function(image=beat_image, volumes={CLIPS_DIR: eval_clips, UPLOADS_DIR: uploads}, timeout=600)
+@app.function(image=beat_image, volumes={CLIPS_DIR: eval_clips, UPLOADS_DIR: uploads, RESULTS_DIR: results},
+              timeout=600)
 def propose_counts(clip_id: str) -> dict | None:
     """Propose a count grid from the clip's audio. A PROPOSAL, never a decision.
 
@@ -820,7 +869,15 @@ def propose_counts(clip_id: str) -> dict | None:
     `count_total` is deliberately NOT computed here even though the duration is
     to hand: the contract's grid is sized against `sample_times_s`, which only
     exists after reconstruction. motion_result._proposed_counts does it.
+
+    The one writer of `{clip_id}.beats.json`. api.py spawns this at dispatch,
+    beside run_clip rather than inside it, so the counts land ~20 s after
+    upload -- while the GPU is still cold-starting -- and the processing screen
+    can teach the 8-counts during the wait (GET /jobs merges them in as
+    `milestones.counts`). run_clip only collects the call before export, so the
+    file is committed before anything reads it and nothing computes it twice.
     """
+    import json
     import os
     import sys
     from dataclasses import asdict
@@ -849,6 +906,11 @@ def propose_counts(clip_id: str) -> dict | None:
     print(f"[beats] {clip_id}: {grid['bpm']:.1f} BPM, {grid['seconds_per_count']:.4f} s/count, "
           f"count 1 at {grid['count_one_s']:.3f}s, confidence {grid['confidence']:.2f}"
           + (f", warnings: {grid['warnings']}" if grid["warnings"] else ""))
+    # Absent file == no proposal, which every reader treats as normal. Listed
+    # in retention.clip_artifact_paths so a removal takes it with the rest.
+    with open(f"{RESULTS_DIR}/{clip_id}.beats.json", "w") as f:
+        json.dump(grid, f)
+    results.commit()
     return grid
 
 
