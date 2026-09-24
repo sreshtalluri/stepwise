@@ -57,6 +57,9 @@ test("the handoff round-trips speed and loop, and drops anything it does not kno
   assert.deepEqual(parseHandoff("?loop=41-48", speeds, 42), { speed: null, loop: { startCount: 41, endCount: 42 } });
   assert.deepEqual(parseHandoff("?speed=3&loop=9-2", speeds, 40), { speed: null, loop: null });
   assert.deepEqual(parseHandoff("?loop=50-56", speeds, 42), { speed: null, loop: null });
+  assert.deepEqual(parseHandoff("?loop=3.5-6", speeds, 40).loop, { startCount: 3.5, endCount: 6 }, "an and");
+  assert.equal(handoffHref("j", 1, { startCount: 3.5, endCount: 6 }), "/lesson/j?loop=3.5-6");
+  assert.equal(parseHandoff("?loop=3.25-6", speeds, 40).loop, null, "only counts and ands");
 });
 
 test("detections are looked up by time and end where the sampling ended", () => {
