@@ -22,7 +22,7 @@ import {
 } from "../../lib/motion";
 import { accentForPerson, countLabel, eightStartCount, timeOfCount } from "../../../../packages/navigation/src/core";
 import { footContact, type FootContact } from "../../lib/footContact";
-import { dancerBox, firstWellObserved, markerPoint, sideWord } from "../../lib/dancers";
+import { dancerBox, firstWellObserved, markerPoint, sideWord, stillCrop } from "../../lib/dancers";
 import { chipLoop, spanLabel, type Eight } from "../../lib/lessonEngine";
 import { lesson as copy } from "../../lib/copy";
 import { prefersReducedMotion } from "../../lib/reveal";
@@ -601,6 +601,7 @@ export function DancerPicker({ l, shots }: { l: Lesson; shots: DancerShots }) {
                 onClick={() => setChoice(k)}
               >
                 <span className="ls-pick-img" style={shots.urls[k] ? { backgroundImage: `url(${shots.urls[k]})` } : undefined}>
+                  {shots.urls[k] === null && <LiveStill l={l} t={shots.times[k]} box={shots.boxes[k]} />}
                   <span className="ls-ring">{k + 1}</span>
                 </span>
                 <span className="ls-pick-name">
@@ -629,8 +630,38 @@ export function DancerPicker({ l, shots }: { l: Lesson; shots: DancerShots }) {
 
 /** One still per dancer from this clip, shared by the picker and the "who" chip. */
 export interface DancerShots {
-  urls: (string | null)[];
+  /** undefined = still coming, null = could not capture (the live fallback shows). */
+  urls: (string | null | undefined)[];
   boxes: ReturnType<typeof dancerBox>[];
+  times: number[];
+}
+
+/**
+ * The fallback when a still cannot be captured: the clip itself, paused on that
+ * dancer's frame and cropped by CSS to the same `stillCrop` window. Displaying a
+ * cross-origin video needs no CORS, so this works where the canvas could not.
+ */
+function LiveStill({ l, t, box }: { l: Lesson; t: number; box: ReturnType<typeof dancerBox> }) {
+  const r = stillCrop(box, l.doc.source_video.width_px, l.doc.source_video.height_px);
+  return (
+    <video
+      className="ls-live-still"
+      // #t= puts the first painted frame there even before the seek below lands (iOS).
+      src={`${l.videoUrl}#t=${t.toFixed(3)}`}
+      muted
+      playsInline
+      preload="auto"
+      aria-hidden="true"
+      tabIndex={-1}
+      onLoadedMetadata={(e) => (e.currentTarget.currentTime = Math.max(0.001, t))}
+      style={{
+        width: `${100 / r.width}%`,
+        height: `${100 / r.height}%`,
+        left: `${(-r.x / r.width) * 100}%`,
+        top: `${(-r.y / r.height) * 100}%`,
+      }}
+    />
+  );
 }
 export function useDancerShots(l: Lesson): DancerShots {
   const { doc } = l;
@@ -643,7 +674,7 @@ export function useDancerShots(l: Lesson): DancerShots {
     [doc],
   );
   const urls = useFrameGrabs(l.videoUrl, requests, l.multi);
-  return { urls, boxes: requests.map((r) => r.box) };
+  return { urls, boxes: requests.map((r) => r.box), times: requests.map((r) => r.t) };
 }
 
 export function WhoChip({ l, shots, withName = true }: { l: Lesson; shots: DancerShots; withName?: boolean }) {

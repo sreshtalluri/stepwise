@@ -13,7 +13,7 @@ import {
   type Rect,
   type Vec3,
 } from "../../lib/motion";
-import { dancerBox } from "../../lib/dancers";
+import { dancerBox, stillCrop } from "../../lib/dancers";
 import { countAtTime, type CountGrid } from "../../../../packages/navigation/src/core";
 
 /**
@@ -256,61 +256,72 @@ export function useWakeLock(on: boolean) {
 }
 
 /**
- * Stills from THIS clip, for the dancer picker: one frame per request, cropped to a
- * box, as a data URL. A second, muted, never-shown `<video>` on the same URL does the
- * seeking, so the lesson's own clock is never touched. Requests run one at a time.
+ * Stills from THIS clip, for the dancer picker: one frame per request, cropped to
+ * `stillCrop(box)`, as a JPEG data URL. A second, muted, never-shown `<video>` on the
+ * same URL does the seeking, so the lesson's own clock is never touched. Requests run
+ * one at a time.
+ *
+ * `crossOrigin = "anonymous"` is set BEFORE `src`, and it is load-bearing: a job's
+ * video URL redirects to a presigned R2 URL on another origin, and without a CORS
+ * request that frame taints the canvas, so `toDataURL` throws and every still came
+ * back empty — a black card in production (job_b0d0bb64…). With it, R2's ACAO:*
+ * keeps the canvas readable.
+ *
+ * Each entry is `undefined` while pending, a data URL once captured, and `null` when
+ * it cannot be (load error, CORS refused, a seek that never lands, a tainted
+ * canvas) — the picker then shows the live video paused there instead.
  */
 export function useFrameGrabs(
   videoUrl: string,
   requests: { t: number; box: Rect | null }[],
   enabled: boolean,
-): (string | null)[] {
-  const [urls, setUrls] = useState<(string | null)[]>(() => requests.map(() => null));
+): (string | null | undefined)[] {
+  const [urls, setUrls] = useState<(string | null | undefined)[]>(() => requests.map(() => undefined));
   const key = JSON.stringify(requests);
   useEffect(() => {
     if (!enabled || !requests.length) return;
     let cancelled = false;
     const v = document.createElement("video");
+    v.crossOrigin = "anonymous";
     v.muted = true;
     v.playsInline = true;
     v.preload = "auto";
     v.src = videoUrl;
-    const grab = (t: number) =>
-      new Promise<void>((resolve) => {
-        const done = () => resolve();
-        v.addEventListener("seeked", done, { once: true });
-        v.currentTime = Math.max(0.001, t);
+    const set = (i: number, url: string | null) => setUrls((prev) => prev.map((u, k) => (k === i ? url : u)));
+    const failAll = () => setUrls((prev) => prev.map((u) => (u === undefined ? null : u)));
+    const waitFor = (ev: string, ms: number) =>
+      new Promise<boolean>((resolve) => {
+        const t = window.setTimeout(() => resolve(false), ms);
+        v.addEventListener(ev, () => (clearTimeout(t), resolve(true)), { once: true });
+        v.addEventListener("error", () => (clearTimeout(t), resolve(false)), { once: true });
       });
     (async () => {
-      await new Promise<void>((resolve, reject) => {
-        if (v.readyState >= 1) resolve();
-        v.addEventListener("loadeddata", () => resolve(), { once: true });
-        v.addEventListener("error", () => reject(), { once: true });
-      }).catch(() => (cancelled = true));
+      if (v.readyState < 2 && !(await waitFor("loadeddata", 15000))) return void (cancelled || failAll());
       for (let i = 0; i < requests.length && !cancelled; i++) {
         const { t, box } = requests[i];
-        await grab(t);
-        if (cancelled) break;
+        const seeked = waitFor("seeked", 6000);
+        v.currentTime = Math.max(0.001, t);
+        if (!(await seeked) || cancelled || v.readyState < 2) {
+          if (!cancelled) set(i, null);
+          continue;
+        }
         const vw = v.videoWidth, vh = v.videoHeight;
-        if (!vw || !vh) continue;
-        const b = box ?? { x: 0, y: 0, width: 1, height: 1 };
-        // Portrait card, centred on the box, grown to 3:4 without leaving the frame.
-        let w = b.width * vw, h = b.height * vh;
-        if (w / h < 0.75) w = h * 0.75; else h = w / 0.75;
-        w = Math.min(w, vw); h = Math.min(h, vh);
-        const cx = (b.x + b.width / 2) * vw, cy = (b.y + b.height / 2) * vh;
-        const sx = Math.min(Math.max(cx - w / 2, 0), vw - w), sy = Math.min(Math.max(cy - h / 2, 0), vh - h);
+        if (!vw || !vh) {
+          set(i, null);
+          continue;
+        }
+        const r = stillCrop(box, vw, vh);
         const c = document.createElement("canvas");
         c.width = 240;
         c.height = 320;
-        c.getContext("2d")?.drawImage(v, sx, sy, w, h, 0, 0, 240, 320);
         let url: string | null = null;
         try {
+          c.getContext("2d")?.drawImage(v, r.x * vw, r.y * vh, r.width * vw, r.height * vh, 0, 0, 240, 320);
           url = c.toDataURL("image/jpeg", 0.8);
         } catch {
-          url = null; // a cross-origin video taints the canvas; the picker falls back to numbers
+          url = null; // tainted after all: fall back to the live video
         }
-        setUrls((prev) => prev.map((u, k) => (k === i ? url : u)));
+        set(i, url);
       }
       v.removeAttribute("src");
       v.load();
