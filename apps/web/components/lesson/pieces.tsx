@@ -523,8 +523,7 @@ export function Timeline({ l }: { l: Lesson }) {
     [grid, total, endS],
   );
 
-  const spanFor = (x: number, free: boolean): LoopSpan | null => {
-    const d = g.current!;
+  const spanFor = (d: NonNullable<typeof g.current>, x: number, free: boolean): LoopSpan | null => {
     const c = countAtX(x);
     if (d.kind === "new") return edgeLoop(d.from, c, total, free);
     const lp = l.loop!;
@@ -543,7 +542,7 @@ export function Timeline({ l }: { l: Lesson }) {
     if (!d) return;
     if (!d.moved && Math.abs(e.clientX - d.x0) < 6) return;
     d.moved = true;
-    setPreview(spanFor(e.clientX, e.altKey));
+    setPreview(spanFor(d, e.clientX, e.altKey));
   };
   const onUp = (e: React.PointerEvent) => {
     const d = g.current;
@@ -551,7 +550,7 @@ export function Timeline({ l }: { l: Lesson }) {
     setPreview(null);
     if (!d) return;
     if (!d.moved) return l.seek(timeAtX(e.clientX));
-    const s = spanFor(e.clientX, e.altKey);
+    const s = spanFor(d, e.clientX, e.altKey);
     if (s) l.setLoop(s, { play: l.playing, keep: d.kind !== "new" });
   };
   const nudge = (edge: "start" | "end", d: number) => l.loop && l.setLoop(nudgeEdge(l.loop, edge, d, total), { play: l.playing, keep: true });

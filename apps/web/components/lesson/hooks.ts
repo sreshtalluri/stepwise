@@ -219,7 +219,8 @@ export function useMetronome(
         if (when < last + gap) continue; // already booked on an earlier tick
         blip(when, c.label);
         last = when;
-        (window as any).__metronomeLog?.push({ when, at: c.at, label: c.label, rate });
+        // `perf`: when it sounds on the page's performance.now() clock, to check against the video.
+        (window as any).__metronomeLog?.push({ when, at: c.at, label: c.label, rate, perf: performance.now() + c.in * 1000 });
       }
       booked = booked.filter((b) => b.when > now - 1);
     };
