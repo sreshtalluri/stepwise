@@ -457,14 +457,20 @@ export function Timeline({ l }: { l: Lesson }) {
     return Math.min(Math.max((x - r.left) / r.width, 0), 1) * endS;
   };
   const countAtX = (x: number) => countAtTime(grid, timeAtX(x));
+  // "And"s are implied, not marked — unless the click is counting them too.
+  const ands = l.clickOn && l.clickMode === "ands";
   const ticks = useMemo(
     () =>
-      Array.from({ length: total }, (_, i) => i + 1).map((c) => (
-        <span key={c} className={countLabel(c) === 1 ? "ls-tl-tick ls-one" : "ls-tl-tick"} style={{ left: pct(timeOfCount(grid, c)) }} />
-      )),
+      Array.from({ length: total }, (_, i) => i + 1).flatMap((c) => [
+        <span key={c} className="ls-tl-tick" style={{ left: pct(timeOfCount(grid, c)) }} />,
+        ...(ands && c < total ? [<span key={`${c}&`} className="ls-tl-tick ls-and-tick" style={{ left: pct(timeOfCount(grid, c + 0.5)) }} />] : []),
+      ]),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pct is over endS
-    [grid, total, endS],
+    [grid, total, endS, ands],
   );
+  /** The section marker whose tooltip is open on a touch screen (first tap shows it, the tooltip loops). */
+  const [secOpen, setSecOpen] = useState<string | null>(null);
+  const touchTap = useRef(false);
 
   const spanFor = (d: NonNullable<typeof g.current>, x: number, free: boolean): LoopSpan | null => {
     const c = countAtX(x);
@@ -477,6 +483,7 @@ export function Timeline({ l }: { l: Lesson }) {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     e.stopPropagation();
     e.preventDefault();
+    setSecOpen(null);
     try {
       bar.current!.setPointerCapture(e.pointerId);
     } catch {
@@ -556,23 +563,35 @@ export function Timeline({ l }: { l: Lesson }) {
         onPointerCancel={() => ((g.current = null), setPreview(null))}
       >
         <div className="ls-tl-track">{ticks}</div>
-        {/* Where each part starts (an eight until the learner edits them): a "1", and a tap loops that section. */}
+        {/*
+          Where each part starts (an eight until the learner edits them): a taller accent
+          tick with a dot cap, no text. Hover shows "Section start · Loop this section"
+          and a click loops it; on touch the first tap shows that tooltip and the
+          tooltip is what loops.
+        */}
         {l.eights.map((e) => {
           const on = sameSpan(l.loop, e);
+          const loopIt = () => {
+            setSecOpen(null);
+            l.setLoop(on ? null : { startCount: e.startCount, endCount: e.endCount }, { play: l.playing });
+          };
           return (
-            <button
-              key={e.id}
-              type="button"
-              className={`ls-tl-sec${on ? " ls-on" : ""}${spanDone(l.done, e) ? " ls-done" : ""}`}
-              style={{ left: pct(timeOfCount(grid, e.startCount)) }}
-              aria-pressed={on}
-              aria-label={copy.timeline.section(e.label)}
-              title={copy.timeline.section(e.label)}
-              onPointerDown={(ev) => ev.stopPropagation()}
-              onClick={() => l.setLoop(on ? null : { startCount: e.startCount, endCount: e.endCount }, { play: l.playing })}
-            >
-              {countLabel(e.startCount)}
-            </button>
+            <span key={e.id} className={`ls-tl-sec${on ? " ls-on" : ""}${secOpen === e.id ? " ls-open" : ""}`} style={{ left: pct(timeOfCount(grid, e.startCount)) }}>
+              <button
+                type="button"
+                className={`ls-tl-mark${spanDone(l.done, e) ? " ls-done" : ""}`}
+                aria-pressed={on}
+                aria-label={copy.timeline.section}
+                onPointerDown={(ev) => {
+                  ev.stopPropagation();
+                  touchTap.current = ev.pointerType === "touch";
+                }}
+                onClick={() => (touchTap.current && secOpen !== e.id ? setSecOpen(e.id) : loopIt())}
+              />
+              <button type="button" className="ls-tl-tip" tabIndex={-1} onPointerDown={(ev) => ev.stopPropagation()} onClick={loopIt}>
+                {copy.timeline.section}
+              </button>
+            </span>
           );
         })}
         {shown && <div className={`ls-tl-loop${preview ? " ls-preview" : ""}`} style={{ left: pct(a), width: `calc(${pct(b)} - ${pct(a)})` }} />}

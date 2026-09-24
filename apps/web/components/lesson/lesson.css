@@ -717,20 +717,11 @@ a.ls-chip {
   background: var(--line);
   pointer-events: none;
 }
-.ls-tl-tick.ls-one {
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  margin-left: -0.5px;
-  background: var(--ink-faint);
-}
-.ls-tl-tick b {
-  position: absolute;
-  top: -14px;
-  left: 1px;
-  transform: translateX(-50%);
-  font: 600 0.6875rem/1 var(--font-ui);
-  color: var(--ink-faint);
+/* "And"s, marked only while the click counts them: shorter and fainter than a beat. */
+.ls-tl-tick.ls-and-tick {
+  top: 11px;
+  bottom: 11px;
+  opacity: 0.6;
 }
 .ls-tl-loop {
   position: absolute;
@@ -1167,29 +1158,86 @@ a.ls-chip {
 .ls-panel-sm {
   width: min(320px, calc(100vw - 32px));
 }
-/* Where each part starts on the timeline: a small "1"; tap = loop that section. */
+/* Where each part starts on the timeline: a taller accent tick with a dot cap, no text.
+   Hover (or a first tap on touch) shows "Section start · Loop this section". */
 .ls-tl-sec {
   position: absolute;
   top: 0;
+  bottom: 0;
   z-index: 1;
-  min-width: 22px;
-  height: 18px;
-  padding: 0 4px;
+  width: 0;
+}
+/* Only the cap is the target, so a drag to loop can still start right on a section's tick. */
+.ls-tl-mark {
+  position: absolute;
+  top: 0;
+  left: -14px;
+  width: 28px;
+  height: 16px;
+  padding: 0;
+  touch-action: none;
+}
+.ls-tl-mark::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  height: 34px;
+  pointer-events: none;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.ls-tl-mark::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+/* Looped at full speed, every count of it: the cap gets a quiet ring (§7g). */
+.ls-tl-mark.ls-done::after {
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--ink-faint);
+}
+.ls-tl-sec.ls-on .ls-tl-mark::after {
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  top: 2px;
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--ink);
+}
+.ls-tl-tip {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 0;
+  z-index: 5;
+  display: none;
   transform: translateX(-50%);
-  border-radius: 6px;
-  font: 600 0.6875rem/18px var(--font-ui);
-  color: var(--ink-faint);
-}
-.ls-tl-sec:hover {
-  background: var(--paper-sunk);
-  color: var(--ink);
-}
-.ls-tl-sec.ls-done {
-  color: var(--accent);
-}
-.ls-tl-sec.ls-on {
+  padding: 6px 10px;
+  border-radius: 8px;
   background: var(--ink);
   color: var(--paper);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgb(28 25 23 / 0.25);
+}
+/* The first section sits at the page edge: its tooltip opens rightward. */
+.ls-tl-sec:first-of-type .ls-tl-tip {
+  transform: translateX(-14px);
+}
+@media (hover: hover) {
+  .ls-tl-sec:hover .ls-tl-tip {
+    display: block;
+  }
+}
+.ls-tl-sec.ls-open .ls-tl-tip {
+  display: block;
 }
 
 /* ---- phone: the same three rows, a main panel and an inset */

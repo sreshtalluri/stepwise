@@ -331,7 +331,7 @@ export const lesson = {
     hint: "Drag across the timeline to loop any counts",
     hintFree: "Hold Alt to drag without snapping to the counts",
     clear: "Stop looping",
-    section: (label: string) => `Loop ${label.replace(/^Counts/, "counts")}`,
+    section: "Section start · Loop this section",
     start: "Loop start",
     end: "Loop end",
     earlier: (edge: string) => `${edge}: half a count earlier`,
