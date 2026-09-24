@@ -25,7 +25,7 @@ export interface JobStatus {
    */
   state: "queued" | "processing" | "succeeded" | "failed";
   /**
-   * Plain-language current stage for display, per DESIGN.md §7c — e.g. "Building the body — count 9 of 32". Never a bare percentage or an internal stage enum. Empty string when state is "queued".
+   * Plain-language current stage for display, per DESIGN.md §7c — e.g. "Building the body, count 9 of 32". Never a bare percentage or an internal stage enum. Empty string when state is "queued".
    */
   stage_message: string;
   /**
@@ -53,4 +53,30 @@ export interface JobStatus {
    * Number of times this job has been retried. 0 for a job's first attempt.
    */
   retry_count: number;
+  /**
+   * OPTIONAL. Real intermediate results a live job already has, so the processing screen can show them instead of a spinner (DESIGN.md §7c). Every key is independently optional and appears only once it is true; a consumer detects each by checking for it. Only meaningful while state is "queued" or "processing" — the finished job's MotionResult supersedes all of it. Additive and optional, so schema_version stays 1.0.0 (see README, "When to bump").
+   */
+  milestones?: {
+    /**
+     * The beat proposal from the clip's audio, on the source video's own timeline — the same PROPOSAL that later becomes MotionResult.proposed_counts, never a decision. Can land while state is still "queued": it is computed on CPU from the upload itself.
+     */
+    counts?: {
+      bpm: number;
+      /**
+       * Seconds from the start of the video to count 1. May be negative when the music starts before the video.
+       */
+      count_one_s: number;
+      seconds_per_count: number;
+      confidence: number;
+    };
+    /**
+     * Confidently-tracked dancers found by the detection pass. Its presence also means the detector's 2D keypoints are fetchable at GET /jobs/{job_id}/detections.
+     */
+    dancers?: number;
+    /**
+     * Sampled frames the 3D body has been built for so far. Always sent with frames_total.
+     */
+    frames_done?: number;
+    frames_total?: number;
+  };
 }

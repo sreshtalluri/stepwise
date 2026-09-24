@@ -102,7 +102,7 @@ class FakeVolume:
 
 def _status(job_id, **over):
     doc = {"schema_version": "1.0.0", "job_id": job_id, "state": "processing",
-           "stage_message": "Building the body — frame 11 of 120", "progress": 0.31,
+           "stage_message": "Building the body, frame 11 of 120", "progress": 0.31,
            "error": None, "retry_count": 0}
     doc.update(over)
     return doc

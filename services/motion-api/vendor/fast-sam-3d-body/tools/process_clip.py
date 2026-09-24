@@ -45,16 +45,19 @@ MAX_DANCERS = 6
 # positives near the cap turn out to matter in practice.
 CONFIDENT_MIN_FRAMES = 5
 
-StageCallback = Optional[Callable[[str, str, Optional[float]], None]]
-"""(stage, plain_language_message, progress_fraction_or_None) -> None.
+StageCallback = Optional[Callable[..., None]]
+"""(stage, plain_language_message, progress_fraction_or_None, **milestones) -> None.
+`milestones` is only passed by the reconstruction loop (frames_done,
+frames_total), so a caller that shows only the message can ignore it.
 Matches the plain-language, no-internal-jargon rule for job-status
 stage_message (DESIGN.md §7c / job-status.schema.json) -- callers wire this to
 whatever actually emits JobStatus documents (see modal_app.py::run_clip)."""
 
 
-def _emit(on_progress: StageCallback, stage: str, message: str, progress: Optional[float]) -> None:
+def _emit(on_progress: StageCallback, stage: str, message: str, progress: Optional[float],
+          **milestones) -> None:
     if on_progress is not None:
-        on_progress(stage, message, progress)
+        on_progress(stage, message, progress, **milestones)
 
 
 def select_confident_tracks(track_frame_counts: Counter, min_frames: int = CONFIDENT_MIN_FRAMES) -> set[int]:
@@ -106,6 +109,7 @@ def process_clip(
     max_seconds: float = 60.0,
     bbox_thr: float = 0.1,
     on_progress: StageCallback = None,
+    on_detections: Optional[Callable[[dict], None]] = None,
 ) -> dict:
     """Run the full detect+track+estimate pipeline over one clip.
 
@@ -192,7 +196,7 @@ def process_clip(
         if i % 20 == 0:
             _emit(
                 on_progress, "detecting",
-                f"Finding the dancers in the clip — frame {i + 1} of {len(frame_files)}",
+                f"Finding the dancers in the clip, frame {i + 1} of {len(frame_files)}",
                 0.1 + 0.15 * (i + 1) / max(1, len(frame_files)),
             )
 
@@ -220,6 +224,18 @@ def process_clip(
             "frame_width": frame_width,
             "frame_height": frame_height,
         }
+
+    # Pass 1's answer, handed out before the long pass starts, so the processing
+    # screen can draw the detector's skeleton and say how many dancers it found.
+    # A hook, not a return value: the caller decides where it goes.
+    if on_detections is not None:
+        on_detections({
+            "sample_times_s": sample_times_s,
+            "raw_detections": raw_detections,
+            "confident_track_ids": sorted(confident_track_ids),
+            "frame_width": frame_width,
+            "frame_height": frame_height,
+        })
 
     # ---- Pass 2: full reconstruction, confidently-tracked dancers only ----
     per_frame = []
@@ -263,8 +279,9 @@ def process_clip(
                   f"dancers={len(boxes)}  vram_peak={peak_vram_bytes / 1e9:.2f}GB")
             _emit(
                 on_progress, "reconstructing",
-                f"Building the body — frame {i + 1} of {len(frame_files)}",
+                f"Building the body, frame {i + 1} of {len(frame_files)}",
                 0.25 + 0.7 * (i + 1) / max(1, len(frame_files)),
+                frames_done=i + 1, frames_total=len(frame_files),
             )
 
     elapsed_s = time.time() - t_start

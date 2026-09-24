@@ -104,7 +104,11 @@ DATABASE_URL=… python3 -m pytest test_schema.py -q      # 12 tests
 Endpoints: `POST /clips` (multipart upload -> dispatches, returns `job_id`
 immediately), `POST /clips/link` (paste a TikTok/YouTube URL -- see below),
 `GET /jobs/{job_id}` (poll -- the real job-status.schema.json
-document, unmodified), `GET /jobs/{job_id}/result` (once succeeded -- the
+document; while it is live, the beat proposal is folded in as
+`milestones.counts` as soon as `propose_counts`, spawned at dispatch beside
+`run_clip`, has written `{clip_id}.beats.json`), `GET /jobs/{job_id}/detections`
+(the detector's 2D keypoints, ~5 fps, normalised, once `milestones.dancers`
+exists -- see milestones.py), `GET /jobs/{job_id}/result` (once succeeded -- the
 assembled, schema-validated `MotionResult`), `POST /jobs/{job_id}/retry`
 (only for `retryable: true` failures), `GET /assets/{asset_id}` (resolves a
 `source_video.asset_id` / `AnimationRef.glb_asset_id` to bytes),

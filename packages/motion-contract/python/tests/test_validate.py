@@ -187,3 +187,24 @@ def test_per_side_crop_tracks_are_optional_and_length_checked(good_lesson):
     result = validate_motion_result(doc)
     assert result.valid is False
     assert any("crop_rects.right_foot length" in e for e in result.errors)
+
+
+def _processing(**over):
+    doc = {"schema_version": "1.0.0", "job_id": "job_abc", "state": "processing",
+           "stage_message": "Building the body, frame 11 of 120", "progress": 0.31,
+           "error": None, "retry_count": 0}
+    doc.update(over)
+    return doc
+
+
+def test_job_status_milestones_are_optional_and_additive():
+    counts = {"bpm": 117.0, "count_one_s": 0.51, "seconds_per_count": 0.513, "confidence": 0.8}
+    ok = validate_job_status(_processing(milestones={
+        "counts": counts, "dancers": 1, "frames_done": 11, "frames_total": 120}))
+    assert ok.errors == [] and ok.valid is True
+    assert validate_job_status(_processing(milestones={})).valid is True
+
+
+def test_job_status_milestones_stay_closed():
+    assert validate_job_status(_processing(milestones={"eights_built": 3})).valid is False
+    assert validate_job_status(_processing(milestones={"counts": {"bpm": 117.0}})).valid is False

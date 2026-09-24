@@ -44,10 +44,19 @@ it could read perfectly well.
 **Consumers detect an optional field by checking for the field**, never by
 comparing versions.
 
-Two changes have landed under this rule and both correctly stayed at `1.0.0`:
+Three changes have landed under this rule and all correctly stayed at `1.0.0`:
 `shape_params.vector` relaxed from required to optional (`caching-retention`),
-and `proposed_counts` added as optional (`lesson-structure`). The rule is written
-down here because the second one had to guess what the first one had decided.
+`proposed_counts` added as optional (`lesson-structure`), and JobStatus's
+optional `milestones` (the processing-screen redesign: early counts, dancer
+count, frames built). The rule is written down here because the second one had
+to guess what the first one had decided.
+
+The third was briefed as "bump job-status to 1.1" and deliberately was not.
+`additionalProperties: false` does mean a validator built from the *old* schema
+rejects a document carrying `milestones` -- but the only validator of JobStatus
+is `services/motion-api`, which ships with the schema, and the web client never
+validates it. A bump would only tell consumers that follow the rule above to
+refuse documents they can read perfectly well.
 
 ## Regenerating types
 

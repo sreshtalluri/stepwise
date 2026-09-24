@@ -82,9 +82,12 @@ def api(monkeypatch):
     fake_modal = types.ModuleType("modal")
     fake_modal.Volume = types.SimpleNamespace(from_name=lambda *a, **k: FakeVolume(a[0]))
     spawned: list[dict] = []
+    # `spawned` records GPU runs only; the CPU beat proposal spawned beside
+    # each one hands back a call id for run_clip to collect.
     fake_modal.Function = types.SimpleNamespace(
-        from_name=lambda *a, **k: types.SimpleNamespace(
-            spawn=lambda **kw: spawned.append(kw)))
+        from_name=lambda app, name, **k: types.SimpleNamespace(
+            spawn=lambda **kw: spawned.append(kw) if name == "run_clip"
+            else types.SimpleNamespace(object_id=f"fc-{name}")))
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
     for mod in ("api", "retention", "motion_result", "fingerprint"):
         sys.modules.pop(mod, None)
@@ -220,8 +223,8 @@ def test_expiry_and_takedown_delete_the_same_set(api):
     assert "/other_track1.glb" not in flat, "must not delete another lesson's dancer"
     for expected in ("/abc.mp4", "/abc.npz", "/abc_track1.glb", "/abc_track2.glb",
                      "/abc.motion-result.json.gz", "/abc.export-manifest.json",
-                     "/abc.performance.json", "/abc.beats.json", "/abc.last-access.json",
-                     "/job_abc.job-status.json", "/job_abc.job-meta.json"):
+                     "/abc.performance.json", "/abc.beats.json", "/abc.detections.json",
+                     "/abc.last-access.json", "/job_abc.job-status.json", "/job_abc.job-meta.json"):
         assert expected in flat, f"{expected} would survive deletion"
 
 
