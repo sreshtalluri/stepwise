@@ -421,11 +421,13 @@ export const lesson = {
 
   dancers: {
     title: "Who are you learning?",
-    lead: "Each body takes its dancer's colour. The counts stay the same when you switch.",
+    lead: "Only the dancer you pick is drawn in 3D. The counts stay the same when you switch.",
     name: (n: number) => `Dancer ${n}`,
     side: { left: "on the left", middle: "in the middle", right: "on the right" },
     start: "Start",
     change: "Change dancer",
+    /** A toggle (aria-pressed): the other dancers, faint and grey, for the formation. */
+    everyone: "Show everyone",
   },
 
   help: {
