@@ -256,6 +256,37 @@ export function setCountOne(structure: LessonStructure, t: number, endS: number)
 }
 
 /**
+ * "−1 / +1 count": move count 1 by whole counts, keeping the spacing — the fix for
+ * a beat tracker that found the beats but started the eight on the wrong one.
+ *
+ * Built on `setCountOne`, so it is the same edit as "Set count 1 here", only
+ * stepped. Parts keep their count numbers, so every loop window moves with count 1.
+ * Count 1 may not go before the clip: one count earlier is the same place in the
+ * eight as seven counts later, so it wraps forward by an eight instead.
+ */
+export function nudgeCountOne(structure: LessonStructure, deltaCounts: number, endS: number): LessonStructure {
+  const { countOneS, secondsPerCount: spc } = structure.grid;
+  let t = countOneS + Math.round(deltaCounts) * spc;
+  if (t < -0.02) t += Math.ceil(-t / (8 * spc)) * 8 * spc;
+  return setCountOne(structure, t, endS);
+}
+
+/**
+ * "Tap on 1": the learner taps while the music plays, on a beat they hear as a 1.
+ *
+ * The tap snaps to the nearest beat of the existing grid (a tap is late by a human
+ * reaction time; the tempo is not what is wrong), and that beat becomes a 1 of the
+ * eight NEAREST the current count 1 — so the correction is at most four counts either
+ * way and the dance is not renumbered because someone tapped in its third eight.
+ * A tap that lands on a beat already numbered 1 changes nothing but confirms it.
+ */
+export function tapOnOne(structure: LessonStructure, tapS: number, endS: number): LessonStructure {
+  const { countOneS, secondsPerCount: spc } = structure.grid;
+  const beats = Math.round((tapS - countOneS) / spc);
+  return nudgeCountOne(structure, beats - 8 * Math.round(beats / 8), endS);
+}
+
+/**
  * Half / double, re-anchored so every existing part boundary stays at the same
  * moment in time. Doubling maps count n to 2n-1; halving maps it to (n+1)/2 and
  * snaps boundaries that fall between counts onto the coarser grid.

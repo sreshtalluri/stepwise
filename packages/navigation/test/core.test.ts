@@ -21,6 +21,8 @@ import {
   retempo,
   sampleIndexAt,
   setCountOne,
+  nudgeCountOne,
+  tapOnOne,
   splitPartAt,
   startingStructure,
   timeOfCount,
@@ -195,6 +197,38 @@ test("tap-in needs two taps and averages the gaps", () => {
   const tapped = gridFromTaps(base, [1.0, 1.55, 2.0, 2.5], endS)!;
   assert.equal(tapped.grid.countOneS, 1.0);
   assert.ok(Math.abs(tapped.grid.secondsPerCount - 0.5) < 1e-9, "(2.5 - 1.0) / 3");
+});
+
+test("−1 / +1 count moves count 1 by one spacing and keeps the parts on their counts", () => {
+  const one = setCountOne(base, 2.0, endS);
+  const spc = one.grid.secondsPerCount;
+  const later = nudgeCountOne(one, 1, endS);
+  assert.ok(Math.abs(later.grid.countOneS - (2.0 + spc)) < 1e-9);
+  assert.equal(later.grid.secondsPerCount, spc);
+  assert.deepEqual(later.parts.map((p) => p.startCount), one.parts.map((p) => p.startCount).filter((c) => c <= later.grid.countTotal));
+  const earlier = nudgeCountOne(one, -1, endS);
+  assert.ok(Math.abs(earlier.grid.countOneS - (2.0 - spc)) < 1e-9);
+});
+
+test("count 1 never goes before the clip — one count earlier wraps to seven later", () => {
+  const atStart = setCountOne(base, 0.1, endS);
+  const spc = atStart.grid.secondsPerCount;
+  const nudged = nudgeCountOne(atStart, -1, endS);
+  assert.ok(Math.abs(nudged.grid.countOneS - (0.1 + 7 * spc)) < 1e-9);
+});
+
+test("tap on 1 snaps to the nearest beat and moves count 1 at most four counts", () => {
+  const one = setCountOne(base, 1.0, endS);
+  const spc = one.grid.secondsPerCount;
+  // A late tap near the beat two counts after the old count 1 of the third eight.
+  const tapped = tapOnOne(one, 1.0 + (16 + 2) * spc + 0.12, endS);
+  assert.ok(Math.abs(tapped.grid.countOneS - (1.0 + 2 * spc)) < 1e-9, `got ${tapped.grid.countOneS}`);
+  // Three counts before a 1 is the same as "the 1 is three counts earlier".
+  const early = tapOnOne(one, 1.0 + (24 - 3) * spc, endS);
+  assert.ok(Math.abs(early.grid.countOneS - (1.0 + 5 * spc)) < 1e-9, "wrapped forward, not before the clip");
+  // Tapping on a beat that is already a 1 changes nothing.
+  const same = tapOnOne(one, 1.0 + 8 * spc - 0.05, endS);
+  assert.ok(Math.abs(same.grid.countOneS - 1.0) < 1e-9);
 });
 
 // ------------------------------------------------------------------- playback
