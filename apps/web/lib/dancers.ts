@@ -121,3 +121,15 @@ export function markerPoint(doc: MotionResult, personIndex: number, sampleIndex:
   const up = doc.grounding.status === "none" ? [0, 1, 0] : doc.grounding.floor_plane?.normal ?? [0, 1, 0];
   return projectToFrameNorm(doc, [p[0] + up[0] * 0.28, p[1] + up[1] * 0.28, p[2] + up[2] * 0.28]);
 }
+
+/**
+ * How each dancer's mesh is drawn. Only the one being learned by default, so a group
+ * clip is not a crowd of bodies to tell apart; "Show everyone" brings the rest back
+ * faint (grey, see-through, no shadow) for when the formation matters.
+ */
+export type DancerLook = "solo" | "faint" | "hidden";
+
+export function dancerLook(personIndex: number, selectedIndex: number, showEveryone: boolean): DancerLook {
+  if (personIndex === selectedIndex) return "solo";
+  return showEveryone ? "faint" : "hidden";
+}

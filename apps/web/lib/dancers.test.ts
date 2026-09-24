@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { dancerBox, firstWellObserved, markerPoint, sideWord, stillCrop } from "./dancers";
+import { dancerBox, dancerLook, firstWellObserved, markerPoint, sideWord, stillCrop } from "./dancers";
 import { rootPlacementObserved, type MotionResult } from "./motion";
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public", "fixtures");
@@ -54,4 +54,12 @@ test("an unplaced dancer gets no marker and a crop-rect box instead", () => {
   const b = dancerBox(doc, k, firstWellObserved(doc, k));
   // Either the crop rects gave a box, or there is honestly none; never a projected guess.
   if (b) assert.ok(b.width > 0 && b.height > 0);
+});
+
+test("mesh: only the selected dancer renders unless Show everyone, which brings the rest back faint", () => {
+  const looks = (sel: number, all: boolean) => [0, 1, 2].map((i) => dancerLook(i, sel, all));
+  assert.deepEqual(looks(1, false), ["hidden", "solo", "hidden"]);
+  assert.deepEqual(looks(2, false), ["hidden", "hidden", "solo"], "switching swaps which mesh renders");
+  assert.deepEqual(looks(0, true), ["solo", "faint", "faint"]);
+  assert.equal(dancerLook(0, 0, true), "solo", "a single dancer is unchanged either way");
 });

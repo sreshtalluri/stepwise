@@ -111,6 +111,7 @@ export function AnglePane({ l, angle, focus }: { l: Lesson; angle: ViewId; focus
         follow={l.follow}
         focusRef={focus ? l.focusRef : undefined}
         glbUrls={l.glbUrls}
+        showEveryone={l.showEveryone}
       />
       <span className="ls-tag ls-corner" title={viewLabel(angle, l.mirrored)}>
         {angle}
@@ -154,7 +155,7 @@ export function MainStage({
       {view === "overlay" && (
         // Mirrored by CSS with the video, never on the mesh, so the two flip together.
         <div className="ls-overlay" style={mirrored ? { transform: "scaleX(-1)" } : undefined}>
-          <Stage doc={l.doc} selectedIndex={l.selected} view="overlay" mirrored={false} timeRef={l.timeRef} glbUrls={l.glbUrls} onAbsent={l.setAbsent} overlay />
+          <Stage doc={l.doc} selectedIndex={l.selected} view="overlay" mirrored={false} timeRef={l.timeRef} glbUrls={l.glbUrls} onAbsent={l.setAbsent} showEveryone={l.showEveryone} overlay />
         </div>
       )}
       {view === "overlay" && l.multi && <DancerMarkers l={l} />}
@@ -1018,6 +1019,9 @@ export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }
           <div className="ls-group-row">
             <button type="button" className="ls-chip" onClick={() => l.setPickerOpen(true)}>
               {copy.dancers.change}
+            </button>
+            <button type="button" className="ls-chip" aria-pressed={l.showEveryone} onClick={() => l.setShowEveryone(!l.showEveryone)}>
+              {copy.dancers.everyone}
             </button>
           </div>
         </div>

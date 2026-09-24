@@ -84,6 +84,7 @@ export function togglePanel(panels: readonly PanelId[], id: PanelId, max: number
 }
 
 const DANCER_KEY = (id: string) => `stepwise.lesson-dancer.v1.${id}`;
+const EVERYONE_KEY = (id: string) => `stepwise.lesson-everyone.v1.${id}`;
 
 export default function LessonViewer(props: LessonViewerProps) {
   const phone = useMedia(PHONE_QUERY);
@@ -171,6 +172,26 @@ function useLesson(
       }
     },
     [doc, lessonId],
+  );
+  // The other dancers' meshes, faint. Off by default so the 3D is one body to copy.
+  const [showEveryone, setShowEveryoneState] = useState(false);
+  useEffect(() => {
+    try {
+      setShowEveryoneState(multi && window.localStorage.getItem(EVERYONE_KEY(lessonId)) === "1");
+    } catch {
+      setShowEveryoneState(false);
+    }
+  }, [multi, lessonId]);
+  const setShowEveryone = useCallback(
+    (on: boolean) => {
+      setShowEveryoneState(on);
+      try {
+        window.localStorage.setItem(EVERYONE_KEY(lessonId), on ? "1" : "0");
+      } catch {
+        /* private mode: this visit only */
+      }
+    },
+    [lessonId],
   );
 
   // ---- the source frame's shape: a 9:16 short and a 16:9 YouTube clip lay out differently.
@@ -385,7 +406,7 @@ function useLesson(
     eights, loop, setLoop, loopEight, here, hereCount, stepLoop, loopLen, setLoopLen, next, done, sameSpan,
     speed, speedPick, setSpeed, cycleSpeed, buildUp, setBuildUp, passes, setHoldSlow,
     clickOn, setClickOn, clickMode, setClickMode, clickVol, setClickVol, musicVol, setMusicVol,
-    multi, selected, chooseDancer, pickerOpen, setPickerOpen,
+    multi, selected, chooseDancer, pickerOpen, setPickerOpen, showEveryone, setShowEveryone,
     panels, toggleView, mirrored, setMirrored, follow, setFollow,
     absent, setAbsent, focusRef, crop,
     onRemoveFromMyLessons, onReportOrRemove,
