@@ -134,11 +134,10 @@ export const upload = {
     // not.
     //
     // So this says what actually happens, and claims nothing about
-    // permission. It used to add "Anyone in the clip can ask us to take it
-    // down, and we will." POST /lessons/{id}/removal exists, but nothing on the
-    // site lets anyone ask, so that half was a promise with no door (owner
-    // rule, 2026-09-23: only what the product does today). Put it back in the
-    // same commit as a removal link or contact route.
+    // permission. The second sentence is true because every lesson's More
+    // menu has "Report or remove this video" (components/RemoveLessonDialog,
+    // POST /jobs/{id}/removal), which deletes it for everyone at once, and
+    // /privacy has the same form for anyone holding only the link.
     //
     // It does not say "we check", "we verify" or "we have permission" (§7h bans all three, and §12.13 lists them), and it
     // does not ask for a tick — docs/research/rights-and-privacy.md §7a found
@@ -146,7 +145,7 @@ export const upload = {
     // consent that matters is the dancer's and the person pasting cannot give
     // it.
     rights:
-      "We fetch the video from the link and build a lesson from it.",
+      "We fetch the video from the link and build a lesson from it. Anyone in the clip can remove the lesson from its page, straight away.",
   },
 
   // Failures on the link path, in the vocabulary the service actually returns

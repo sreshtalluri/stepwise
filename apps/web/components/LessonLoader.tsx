@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import LessonViewer from "./LessonViewer";
+import RemoveLessonDialog from "./RemoveLessonDialog";
 import { LESSONS, lessonSource } from "../lib/lessons";
 import { captureThumb, forgetLesson, hasThumb, recordOpened } from "../lib/myLessons";
 import { lesson as lessonCopy } from "../lib/copy";
@@ -21,6 +23,11 @@ type Load =
 export default function LessonLoader({ lessonId }: { lessonId: string }) {
   const source = lessonSource(lessonId);
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  const [reporting, setReporting] = useState(false);
+  const router = useRouter();
+  // Built-in examples are static files: nothing on the server to remove, and
+  // they are listed as examples rather than in My lessons.
+  const isExample = Object.hasOwn(LESSONS, lessonId);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,13 +67,23 @@ export default function LessonLoader({ lessonId }: { lessonId: string }) {
 
   if (load.kind === "ok") {
     return (
+      <>
       <LessonViewer
         doc={load.doc}
         lessonId={lessonId}
         title={source.title ?? lessonCopy.load.jobTitle}
         videoUrl={source.videoUrl}
         glbUrls={source.glbUrls(load.doc)}
+        onRemoveFromMyLessons={isExample ? undefined : () => {
+          forgetLesson(lessonId);
+          router.push("/lessons");
+        }}
+        onReportOrRemove={isExample ? undefined : () => setReporting(true)}
       />
+      {isExample ? null : (
+        <RemoveLessonDialog jobId={lessonId} open={reporting} onClose={() => setReporting(false)} />
+      )}
+      </>
     );
   }
 

@@ -156,11 +156,9 @@ test("the link rights line is not the upload one — docs/research/link-ingestio
     !/right to (use|post|share)/i.test(link),
     `the link rights line borrows the upload claim: ${link}`,
   );
-  // No takedown promise while nothing on the site lets anyone ask for one:
-  // POST /lessons/{id}/removal exists, a way to reach it does not. When a
-  // removal link ships, D8's sentence ("Anyone in the clip can ask us to take
-  // it down, and we will.") comes back with it and this flips.
-  assert.doesNotMatch(link, /take it down|remove|delete/i);
+  // The takedown promise is back because its door exists: "Report or remove
+  // this video" on every lesson, and the form on /privacy.
+  assert.match(link, /remove/i);
   // And it must say plainly that we do the fetching, rather than leaving the
   // visitor to assume the link is just a reference.
   assert.match(link, /\bfetch\b/i);
