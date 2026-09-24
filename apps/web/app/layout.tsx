@@ -3,10 +3,13 @@ import Link from "next/link";
 import { privacy } from "../lib/copy";
 import "./globals.css";
 
+// Every clause is true today (DESIGN.md §7h): clips up to 60 s, one to six
+// dancers, loops of any length under Counts and parts, 0.5x to 1x, mirror, and
+// a 3D body drawn on the video. No "upload" (links work too) and no "the dancer".
 export const metadata: Metadata = {
-  title: "stepwise — every angle, from the one video you have",
+  title: "stepwise: learn any dance, step by step",
   description:
-    "Upload a dance clip filmed on one camera. Get the dancer back as a 3D body you can spin, slow down, and take one count at a time.",
+    "Add a dance video up to 60 seconds long, with one to six dancers. Loop any part, slow it down, mirror it, and see each dancer as a 3D body on the video.",
   // Added to the home screen from the lesson page (no service worker, no offline).
   appleWebApp: { capable: true, title: "stepwise", statusBarStyle: "black-translucent" },
 };
@@ -23,13 +26,20 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {/* Cabinet Grotesk + Switzer, Indian Type Foundry via Fontshare —
-            free for commercial use, which matters for a public repo.
-            DESIGN.md §5. */}
+        {/* Bricolage Grotesque (display and counts; Google Fonts, SIL OFL) and
+            Switzer (body; Indian Type Foundry via Fontshare). Both free for
+            commercial use, which matters for a public repo. DESIGN.md §5.
+            /privacy names both hosts: change it if either moves. */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link rel="preconnect" href="https://api.fontshare.com" />
         <link
           rel="stylesheet"
-          href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@700,800,900&f[]=switzer@400,500,600&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&display=swap"
+        />
+        <link
+          rel="stylesheet"
+          href="https://api.fontshare.com/v2/css?f[]=switzer@400,500,600,700&display=swap"
         />
       </head>
       <body>

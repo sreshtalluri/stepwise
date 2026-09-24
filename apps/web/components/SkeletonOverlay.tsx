@@ -62,7 +62,7 @@ export default function SkeletonOverlay({
     const count = (d: Detections["dancers"][number]) => d.points.filter(Boolean).length;
     const lead = det.dancers.reduce((a, b) => (count(b) > count(a) ? b : a), det.dancers[0]);
     const styles = getComputedStyle(cv);
-    const accent = styles.getPropertyValue("--accent").trim() || "#e8952f";
+    const accent = styles.getPropertyValue("--accent").trim() || "#f2891d";
     const muted = styles.getPropertyValue("--ink-faint").trim() || "#9a9188";
 
     let raf = 0;

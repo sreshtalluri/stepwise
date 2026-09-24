@@ -15,14 +15,25 @@
   /* Fallback dancer colours (DESIGN.md §3). The per-lesson accent is sampled
      from the clip and arrives on MotionResult.accent_color.hex; surfaces that
      have a clip override --accent inline. --dancer-1 is the fallback. */
-  --dancer-1: #e8952f;
+  --dancer-1: #f2891d; /* A2 "Count off": was #e8952f */
   --dancer-2: #1e7a6f;
   --dancer-3: #c2417e;
   --dancer-4: #3f51b5;
   --accent: var(--dancer-1);
 
-  --font-display: "Cabinet Grotesk", "Switzer", system-ui, sans-serif;
+  /* Bricolage Grotesque (Google Fonts, OFL) for display and count numerals;
+     Switzer (Fontshare) for everything else. DESIGN.md §5. */
+  --font-display: "Bricolage Grotesque", "Switzer", system-ui, sans-serif;
   --font-ui: "Switzer", system-ui, sans-serif;
+
+  /* Spacing and gutter, DESIGN.md §6 (tightened for A2). */
+  --gut: clamp(16px, 4vw, 56px);
+  --s1: 8px;
+  --s2: 12px;
+  --s3: 20px;
+  --s4: 32px;
+  --s5: clamp(48px, 7vw, 96px);
+  --r: 16px;
 
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --t: 160ms var(--ease);
@@ -61,7 +72,7 @@ button {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2.5px solid var(--ink);
   outline-offset: 3px;
 }
 
@@ -507,7 +518,7 @@ button {
   color: var(--ink);
 }
 .invite input:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2.5px solid var(--ink);
   outline-offset: 1px;
 }
 .invite .meta {

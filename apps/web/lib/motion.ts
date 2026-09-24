@@ -187,7 +187,7 @@ export function absentNotes(vis: Map<string, Visibility>): string[] {
 /* ------------------------------------------------------------------- dancers */
 
 /** DESIGN.md §3 — differ in both hue and lightness, so they survive CVD and sunlight. */
-export const DANCER_COLORS = ["#E8952F", "#1E7A6F", "#C2417E", "#3F51B5"];
+export const DANCER_COLORS = ["#F2891D", "#1E7A6F", "#C2417E", "#3F51B5"];
 
 /**
  * The colour a dancer renders in. One accent on screen at a time (DESIGN.md §3):
