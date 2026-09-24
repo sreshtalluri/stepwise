@@ -117,10 +117,11 @@ def test_migration_creates_every_table_and_is_idempotent(db):
     names = {r[0] for r in db.execute(
         "SELECT tablename FROM pg_tables WHERE schemaname = 'public'")}
     assert names == {"users", "creator_tokens", "sessions", "clips", "jobs",
-                     "lessons", "assets", "events", "schema_migrations"}
+                     "lessons", "assets", "events", "schema_migrations",
+                     "analytics_salts", "event_daily"}
     assert migrate.main([]) == 0  # re-running must be a no-op, not an error
     (n,) = db.execute("SELECT count(*) FROM schema_migrations").fetchone()
-    assert n == 1
+    assert n == 2
 
 
 def test_no_neon_specific_syntax_in_any_migration():

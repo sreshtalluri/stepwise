@@ -921,9 +921,14 @@ def propose_counts(clip_id: str) -> dict | None:
 # (docs/research/rights-and-privacy.md §1).
 sweeper_image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("boto3", "sentry-sdk>=2.35")
+    # psycopg + analytics.py (and the two modules it imports): the 13-month
+    # roll-up of analytics events runs in the same daily sweep.
+    .pip_install("boto3", "sentry-sdk>=2.35", "psycopg[binary]>=3.2")
     .add_local_file(os.path.join(os.path.dirname(__file__), "retention.py"),
                     "/app/retention.py")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "analytics.py"), "/app/analytics.py")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "jobstore.py"), "/app/jobstore.py")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "ratelimit.py"), "/app/ratelimit.py")
     .add_local_file(os.path.join(os.path.dirname(__file__), "storage.py"),
                     "/app/storage.py")
     .add_local_file(OBSERVABILITY_PY, "/app/observability.py")
@@ -943,6 +948,10 @@ DB_SECRET = optional_secret("stepwise-db")
 # trusts the learner IP that Worker forwards (ratelimit.origin_key_ok). Absent
 # -> the API is open to anyone, as before, and per-IP limits use the socket.
 ORIGIN_SECRET = optional_secret("stepwise-origin")
+
+# STEPWISE_ADMIN_KEY: the only key to GET /metrics (analytics.admin_ok).
+# Absent -> /metrics answers 404 to everyone.
+ADMIN_SECRET = optional_secret("stepwise-admin")
 
 
 # glTF sampler interpolation, fixed up after pymomentum writes the file.
@@ -1719,7 +1728,8 @@ def _publish_to_r2(clip_id: str, glb_paths: list[str], materialised: bool) -> li
 # resolves them for this container. All access below goes through the client
 # API, not the mount.
 @app.function(image=sweeper_image, schedule=modal.Period(days=1), timeout=1800,
-              volumes={RESULTS_DIR: results, UPLOADS_DIR: uploads}, secrets=R2_SECRET + OBS_SECRETS)
+              volumes={RESULTS_DIR: results, UPLOADS_DIR: uploads},
+              secrets=R2_SECRET + DB_SECRET + OBS_SECRETS)
 def sweep_expired(dry_run: bool = False):
     """Runs `_sweep_expired` and reports it to Sentry if it dies.
 
@@ -1799,8 +1809,9 @@ def _sweep_expired(dry_run: bool):
     for clip_id, age in expired.items():
         print(f"  expired {clip_id}  ({age}d since last open)")
 
+    events = _rollup_events(dry_run)
     if dry_run:
-        return {"dry_run": True, "would_reap_npz": reap_npz,
+        return {"dry_run": True, "would_reap_npz": reap_npz, "events": events,
                 "would_expire": sorted(expired), "kept": len(live) - len(expired)}
 
     for clip_id in reap_npz:
@@ -1814,8 +1825,28 @@ def _sweep_expired(dry_run: bool):
         retention.delete_clip(uploads, results, clip_id, f"job_{clip_id}", "expired")
     # No commit(): every delete above went through the client API and is
     # already durable. See retention.delete_clip.
-    return {"dry_run": False, "reaped_npz": reap_npz,
+    return {"dry_run": False, "reaped_npz": reap_npz, "events": events,
             "expired": sorted(expired), "kept": len(live) - len(expired)}
+
+
+def _rollup_events(dry_run: bool) -> dict:
+    """Analytics retention (analytics.rollup): rows older than 13 months become
+    daily counts, and past days' salts are deleted. No database -> nothing to do.
+    Its own failure is reported, not raised: lesson expiry must still run."""
+    import analytics
+    import observability
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        return {"skipped": "no DATABASE_URL"}
+    try:
+        import psycopg
+        with psycopg.connect(url, autocommit=True) as conn:
+            out = analytics.rollup(conn, dry_run)
+        print(f"sweep: analytics {out}")
+        return out
+    except Exception as e:  # noqa: BLE001
+        observability.capture(e, "sweep_expired", stage="analytics_rollup")
+        return {"error": type(e).__name__}
 
 
 # ---------------------------------------------------------------------------
@@ -1898,7 +1929,7 @@ api_image = (
 
 @app.function(
     image=api_image,
-    secrets=R2_SECRET + DB_SECRET + ORIGIN_SECRET + OBS_SECRETS,
+    secrets=R2_SECRET + DB_SECRET + ORIGIN_SECRET + ADMIN_SECRET + OBS_SECRETS,
     # Scale to zero. A cold start is a few seconds on the upload endpoint,
     # where it is invisible, and on the first two-second job poll, where it is
     # also invisible. min_containers=1 pins ~$45/month of always-on container
