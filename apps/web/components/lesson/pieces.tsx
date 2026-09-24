@@ -651,17 +651,22 @@ const CLOSE_BAR: { id: PanelId; label: string }[] = [
  */
 /**
  * "Original by @creator on TikTok", linking to the video a link lesson was made
- * from (docs/legal/legal-public-learning.md §6(a)2). Nothing for an upload.
+ * from (docs/legal/legal-public-learning.md §6(a)2), and under it the choreo and
+ * sound the post names ("Choreo @x · ♪ Track · Artist"). Nothing for an upload.
  * Pointer events stop here so a tap on it over the phone stage is not a pause.
  */
 export function CreditLine({ l, className = "" }: { l: Lesson; className?: string }) {
   if (!l.credit) return null;
   const stop = (e: React.PointerEvent) => e.stopPropagation();
+  const post = copy.postCredit(l.credit);
+  const original = copy.credit(l.credit.host, l.credit.creator);
   return (
-    <a className={`ls-credit ${className}`} href={l.credit.url} target="_blank" rel="noopener noreferrer"
-      onPointerDown={stop} onPointerUp={stop}>
-      {copy.credit(l.credit.host, l.credit.creator)}
-    </a>
+    <div className={`ls-credit ${className}`} onPointerDown={stop} onPointerUp={stop}>
+      <a href={l.credit.url} target="_blank" rel="noopener noreferrer" title={original}>
+        {original}
+      </a>
+      {post && <span className="ls-credit-post" title={copy.postCreditTitle(post)}>{post}</span>}
+    </div>
   );
 }
 
