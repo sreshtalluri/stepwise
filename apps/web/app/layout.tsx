@@ -7,9 +7,13 @@ export const metadata: Metadata = {
   title: "stepwise — every angle, from the one video you have",
   description:
     "Upload a dance clip filmed on one camera. Get the dancer back as a 3D body you can spin, slow down, and take one count at a time.",
+  // Added to the home screen from the lesson page (no service worker, no offline).
+  appleWebApp: { capable: true, title: "stepwise", statusBarStyle: "black-translucent" },
 };
 
-export const viewport: Viewport = { width: "device-width", initialScale: 1 };
+// viewport-fit=cover lets the phone lesson run under the notch; it pads itself with
+// the safe-area insets. theme_color matches the stage, which is what fills a phone.
+export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#1C1917" };
 
 export default function RootLayout({
   children,
