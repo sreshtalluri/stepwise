@@ -562,10 +562,16 @@ def _stamp_source_key(clip_id: str, key: str) -> None:
 def _stamp_credit(job_id: str, credit: dict) -> None:
     """Credit a lesson reached by link that has none yet: one made before
     credits were stored, or an uploaded file that turned out to be this link's
-    video. Best-effort, like _stamp_source_key; an existing credit is kept."""
+    video. Best-effort, like _stamp_source_key. A credit for another post (a
+    re-upload that matched by content) is kept; one for this same post is
+    refreshed, so a lesson credited before the caption and music fields
+    existed gains them when its link is pasted again."""
     path = f"/{job_id}.job-meta.json"
     meta = _volume_read_json(results_volume, path)
-    if meta is not None and "credit" not in meta:
+    if meta is None:
+        return
+    old = meta.get("credit")
+    if old is None or (ingest.clean_url(old.get("url") or "") == credit["url"] and old != credit):
         retention.write_json(results_volume, path, dict(meta, credit=credit))
 
 

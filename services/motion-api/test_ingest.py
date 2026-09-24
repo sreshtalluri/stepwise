@@ -217,6 +217,111 @@ def test_link_lesson_serves_its_credit_and_upload_does_not(api, fake_ytdlp, tmp_
         api.get_job_source(pasted.job_id)
 
 
+# ---------------------------------------------------------------------------
+# music and choreography credit (caption parsing is offline and exact)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("caption,expected", [
+    ("new dance!! choreo by @jonraydybuco 💃 #fyp #dance", "@jonraydybuco"),
+    ("Choreography: @kyle.hanagami", "@kyle.hanagami"),
+    ("choreo - @a_b & @c.d #kpop", "@a_b, @c.d"),
+    ("learned this!! dc: @jonraydybuco", "@jonraydybuco"),
+    ("dance credits @someone_123 🔥", "@someone_123"),
+    ("cr: @mikey.dance", "@mikey.dance"),
+    ("choreographed by @mia and @leo", "@mia, @leo"),
+    ("CHOREO @one @two x @three + @four", "@one, @two, @three"),  # capped at three
+    ("🎥 @filmguy choreo @dancer", "@dancer"),                    # camera is not choreo
+    ("🎥 cr @filmguy", None),
+    ("song cr: @artist", None),
+    ("tried the trend with @bestie #choreo #dc", None),           # hashtags, no lead
+    ("my choreo!! #fyp", None),
+    ("choreo by me 😅", None),
+    ("choreo by Jane Doe #dance", "Jane Doe"),
+    ("", None),
+    ("dc @Same, @same", "@Same"),
+])
+def test_choreo_credit_reads_only_what_the_caption_says(caption, expected):
+    import ingest
+    assert ingest.choreo_credit(caption) == expected
+
+
+def test_choreo_credit_strips_controls_and_caps():
+    import ingest
+    long = "choreo @" + "a" * 60
+    assert ingest.choreo_credit(long) == "@" + "a" * 30
+    assert ingest.choreo_credit("choreo by Jane‮ Doe") == "Jane"
+
+
+def test_music_credit():
+    import ingest
+    assert ingest.music_credit({"track": "APT.", "artists": ["ROSÉ", "Bruno Mars"]}) == {
+        "track": "APT.", "artist": "ROSÉ, Bruno Mars"}
+    # TikTok's own-sound placeholder names whose sound it is: kept, artist folded in.
+    assert ingest.music_credit({"track": "original sound - jonraydybuco",
+                                "artist": "jonraydybuco"}) == {"track": "original sound - jonraydybuco"}
+    assert ingest.music_credit({"track": "Song\x00\n Name", "artist": "x" * 200})["track"] == "Song Name"
+    assert len(ingest.music_credit({"artist": "x" * 200})["artist"]) == 80
+    assert ingest.music_credit({}) == {}
+
+
+def test_clean_url_drops_tracking_but_keeps_the_video():
+    import ingest
+    assert ingest.clean_url(TIKTOK_FULL + "?_r=1&_t=ZP-8xYz&is_from_webapp=1#x") == TIKTOK_FULL
+    assert ingest.clean_url("https://www.youtube.com/watch?v=aqz-KE-bpKQ&si=abc&t=3") == \
+        "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+    assert ingest.clean_url("https://youtu.be/aqz-KE-bpKQ?si=abc") == "https://youtu.be/aqz-KE-bpKQ"
+
+
+def test_credit_carries_caption_and_music_fields_only_when_found():
+    import ingest
+    info = dict(_info(), description="choreo by @kyle.hanagami #fyp " + "blah " * 100,
+                track="APT.", artist="ROSÉ")
+    c = ingest.credit(info, TIKTOK_SHORT + "?_r=1&_t=abc")
+    assert c == {"url": TIKTOK_FULL, "host": "TikTok", "creator": "@jonraydybuco",
+                 "choreo": "@kyle.hanagami", "track": "APT.", "artist": "ROSÉ"}
+    # The pasted URL is cleaned too when it is the one used.
+    bare = {"extractor": "TikTok", "title": "no credit here"}
+    assert ingest.credit(bare, TIKTOK_SHORT + "?_r=1") == {
+        "url": TIKTOK_SHORT, "host": "TikTok", "creator": None}
+
+
+def test_repasting_a_link_adds_the_new_credit_fields(api, fake_ytdlp):
+    first = _paste(api)
+    # A lesson credited before these fields existed, with a tracking-param URL.
+    path = f"/{first.job_id}.job-meta.json"
+    meta = json.loads(api.results_volume.files[path])
+    meta["credit"] = {"url": TIKTOK_FULL + "?_r=1", "host": "TikTok", "creator": "@jonraydybuco"}
+    api.results_volume.files[path] = json.dumps(meta).encode()
+
+    fake_ytdlp.info = dict(_info(), description="dc @kyle.hanagami", track="APT.")
+    _paste(api)
+    assert api.get_job_source(first.job_id) == {
+        "url": TIKTOK_FULL, "host": "TikTok", "creator": "@jonraydybuco",
+        "choreo": "@kyle.hanagami", "track": "APT."}
+
+
+def test_a_different_posts_credit_does_not_overwrite(api):
+    api.results_volume.files["/job_a.job-meta.json"] = json.dumps(
+        {"credit": {"url": TIKTOK_FULL, "host": "TikTok", "creator": "@original"}}).encode()
+    api._stamp_credit("job_a", {"url": "https://www.tiktok.com/@reuploader/video/1",
+                                "host": "TikTok", "creator": "@reuploader"})
+    assert api.get_job_source("job_a")["creator"] == "@original"
+
+
+def test_youtube_bot_check_is_host_blocked_not_login():
+    import ingest
+    e = ingest.classify_fetch_error(
+        "ERROR: [youtube] aqz-KE-bpKQ: Sign in to confirm you’re not a bot. Use "
+        "--cookies-from-browser or --cookies for the authentication. See ...")
+    assert (e.code, e.retryable) == ("host_blocked", False)
+    assert "upload" in e.message and "login" not in e.message
+    # An age gate is a real login wall and stays one.
+    age = ingest.classify_fetch_error(
+        "ERROR: [youtube] x: Sign in to confirm your age. This video may be "
+        "inappropriate for some users. Use --cookies ...")
+    assert age.code == "login_required"
+
+
 def test_simultaneous_pastes_cannot_produce_two_lessons(api, fake_ytdlp):
     """The known race: two people paste one link inside the download window.
 
