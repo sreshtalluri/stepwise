@@ -110,6 +110,14 @@ assembled, schema-validated `MotionResult`), `POST /jobs/{job_id}/retry`
 `source_video.asset_id` / `AnimationRef.glb_asset_id` to bytes),
 `POST /lessons/{clip_id}/removal` (the takedown path -- see below).
 
+Both `POST /clips` doors answer **429** with `Retry-After` and
+`{"detail": {"error": {"code", "message", "retryable": true}}}` when a request
+that would start a GPU run is over its limit: 5/hour and 20/day per client IP,
+200/day overall (`STEPWISE_LIMIT_IP_HOUR`, `_IP_DAY`, `_GLOBAL_DAY`). A dedupe
+hit is never charged. Counted in Postgres `events`, IPs hashed with a daily salt
+(`STEPWISE_IP_SALT`, else `DATABASE_URL`); on the Volume backend the limits are
+off and the log says so. See ratelimit.py.
+
 ## The floor solve (`grounding.py`)
 
 Pure numpy, no GPU, no Modal. `api.py` calls it once per clip to fill

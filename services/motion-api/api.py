@@ -69,7 +69,7 @@ from pathlib import Path
 from typing import Optional
 
 import modal
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 
@@ -77,6 +77,7 @@ import fingerprint
 import ingest
 import jobstore
 import motion_result
+import ratelimit
 import retention
 import storage
 
@@ -226,7 +227,7 @@ def _find_by_source(key: str) -> dict | None:
     return None
 
 
-def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict,
+def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict, http: Request,
                         source_key: str | None = None) -> DispatchResponse:
     """The single path from "we have the bytes" to "a job is running".
 
@@ -236,6 +237,17 @@ def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict,
     clip_id no matter which door it came through, so removing it removes it.
     """
     job_id = f"job_{clip_id}"  # resumable: DESIGN.md §7c's copyable link is just this job_id
+    # Charged here and nowhere earlier: both dedupe layers have already said
+    # "no existing lesson", so this request really will spend a GPU run. And
+    # before any byte is stored, so a 429 leaves no half-made lesson behind.
+    try:
+        ratelimit.charge(ratelimit.client_ip(http.headers, http.client and http.client.host),
+                         job_id, clip_id)
+    except ratelimit.Limited as e:
+        # Same {"error": {...}} shape as the invite gate's 403, which the
+        # upload screen already renders verbatim.
+        raise HTTPException(429, headers={"Retry-After": str(e.retry_after)}, detail={"error": {
+            "code": e.code, "message": e.message, "retryable": True}}) from None
     with uploads_volume.batch_upload(force=True) as batch:
         batch.put_file(tmp_path, f"/{clip_id}.mp4")
     # The video goes to R2 here rather than at export time, because these
@@ -298,7 +310,7 @@ def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict,
 
 
 @app.post("/clips", response_model=DispatchResponse)
-async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
+async def upload_clip(http: Request, file: UploadFile = File(...)) -> DispatchResponse:
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
         total = 0
         while chunk := await file.read(1024 * 1024):
@@ -323,7 +335,7 @@ async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
             return DispatchResponse(clip_id=existing["clip_id"],
                                     job_id=existing["job_id"], deduplicated=True)
 
-        return _store_and_dispatch(tmp_path, uuid.uuid4().hex, fp)
+        return _store_and_dispatch(tmp_path, uuid.uuid4().hex, fp, http)
     finally:
         os.unlink(tmp_path)
 
@@ -392,7 +404,7 @@ def _clip_id_for_source(key: str) -> str:
 
 
 @app.post("/clips/link", response_model=DispatchResponse)
-def ingest_clip_link(request: LinkRequest,
+def ingest_clip_link(request: LinkRequest, http: Request,
                      x_invite_code: str | None = Header(default=None)) -> DispatchResponse:
     if not ingest.invite_code_ok(x_invite_code):
         # Not 404-disguised: someone who was given a code and typed it wrong
@@ -465,7 +477,7 @@ def ingest_clip_link(request: LinkRequest,
             # delete. A fresh random clip_id makes that true here too -- the
             # tombstone keeps its own id and its own 410 forever.
             clip_id = uuid.uuid4().hex
-        return _store_and_dispatch(tmp_path, clip_id, fp, source_key=key)
+        return _store_and_dispatch(tmp_path, clip_id, fp, http, source_key=key)
     finally:
         os.unlink(tmp_path)
 
