@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import CountStrip from "./CountStrip";
 import SkeletonOverlay from "./SkeletonOverlay";
@@ -214,12 +214,16 @@ function Practice({
   const duration = video?.duration && Number.isFinite(video.duration) ? video.duration : 0;
 
   // The loop, on the raw video: wrap at the end of the eight, count-exact.
+  // Trailing edge only, like the lesson's clock: snapping a playhead that is
+  // BEFORE the loop re-seeks every frame, and where a seek cannot land (the
+  // service's byte-proxy fallback answers no Range requests) that froze the
+  // clip at 0. Found with the stub; running into the loop from before is fine.
   useEffect(() => {
     if (!video || !grid || !loopN) return;
     const [a, b] = eightTimes(grid, loopN, video.duration || Infinity);
     let raf = 0;
     const tick = () => {
-      if (video.currentTime >= b - 0.02 || video.currentTime < a - 0.25) video.currentTime = a;
+      if (video.currentTime >= b - 0.02) video.currentTime = a;
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -262,8 +266,11 @@ function Practice({
   }, [grid, loopN, eight, setLoop, togglePlay]);
 
   const counts = milestones.counts;
-  const title = done ? copy.readyTitle : grid ? copy.countsTitle : copy.title;
-  const sub = done ? copy.readySubtitle : grid ? copy.countsSubtitle : copy.subtitle;
+  // Done without counts (a finished job opened fresh, or a clip with no beat):
+  // no count area and no 8-count tools, rather than "listening" for nothing.
+  const countless = done && !grid;
+  const title = countless ? copy.readyPlain : done ? copy.readyTitle : grid ? copy.countsTitle : copy.title;
+  const sub = countless ? "" : done ? copy.readySubtitle : grid ? copy.countsSubtitle : copy.subtitle;
   const span = grid ? eightSpan(grid, shown) : null;
 
   return (
@@ -297,45 +304,51 @@ function Practice({
 
       <div className="proc-panel">
         <h1 className="proc-title">{title}</h1>
-        <p className="proc-sub">{sub}</p>
+        {sub && <p className="proc-sub">{sub}</p>}
 
-        <div className="proc-counts">
-          <div className="proc-part">
-            <b>{span ? copy.part(span.startCount, span.endCount) : copy.part(1, 8)}</b>
-            {counts && (
-              <span className="meta">
-                {counts.confidence < 0.5 ? copy.tempoWeak(perMinute(counts)) : copy.tempo(perMinute(counts))}
-              </span>
+        {!countless && (
+          <div className="proc-counts">
+            <div className="proc-part">
+              <b>{span ? copy.part(span.startCount, span.endCount) : copy.part(1, 8)}</b>
+              {counts && (
+                <span className="meta">
+                  {counts.confidence < 0.5 ? copy.tempoWeak(perMinute(counts)) : copy.tempo(perMinute(counts))}
+                </span>
+              )}
+            </div>
+            {grid ? (
+              <div className="appear">
+                <CountStrip grid={grid} time={time} still={reduced} />
+              </div>
+            ) : (
+              <div className="listening">
+                <i />
+                {copy.listening}
+              </div>
             )}
           </div>
-          {grid ? (
-            <div className="appear">
-              <CountStrip grid={grid} time={time} still={reduced} />
-            </div>
-          ) : (
-            <div className="listening">
-              <i />
-              {copy.listening}
-            </div>
-          )}
-        </div>
+        )}
 
         <div className="tools proc-tools">
-          <button type="button" className="tool" disabled={!grid} onClick={() => setLoop(Math.max(1, shown - 1))}>
-            {copy.earlier}
-          </button>
-          <button
-            type="button"
-            className="tool"
-            disabled={!grid}
-            aria-pressed={loopN > 0}
-            onClick={() => setLoop(loopN ? 0 : eight)}
-          >
-            {loopN && span ? copy.loopEight(span.startCount, span.endCount) : copy.loopOff}
-          </button>
-          <button type="button" className="tool" disabled={!grid} onClick={() => setLoop(Math.min(total, shown + 1))}>
-            {copy.next}
-          </button>
+          {!countless && (
+            <>
+              <button type="button" className="tool" disabled={!grid} onClick={() => setLoop(Math.max(1, shown - 1))}>
+                {copy.earlier}
+              </button>
+              <button
+                type="button"
+                className="tool"
+                disabled={!grid}
+                aria-pressed={loopN > 0}
+                onClick={() => setLoop(loopN ? 0 : eight)}
+              >
+                {loopN && span ? copy.loopEight(span.startCount, span.endCount) : copy.loopOff}
+              </button>
+              <button type="button" className="tool" disabled={!grid} onClick={() => setLoop(Math.min(total, shown + 1))}>
+                {copy.next}
+              </button>
+            </>
+          )}
           <button type="button" className="tool" onClick={nextSpeed}>
             {copy.speed(speed)}
           </button>

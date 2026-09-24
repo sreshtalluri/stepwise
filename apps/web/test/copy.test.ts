@@ -133,7 +133,8 @@ test("upload constraints match the multi-dancer revision — PRD §5", () => {
     !/\bone dancer\b(?!\s+or)/i.test(all),
     `upload copy caps the clip at one dancer: ${all}`,
   );
-  assert.match(all, /several|or a few/i);
+  // "One to six" is the exact cap (process_clip.MAX_DANCERS = 6).
+  assert.match(all, /several|or a few|one to six/i);
   // The constraints that ARE real (PRD §3 ingest row, §5) must still be stated.
   assert.match(all, /60 seconds/i);
   assert.match(all, /cuts/i);
@@ -155,10 +156,11 @@ test("the link rights line is not the upload one — docs/research/link-ingestio
     !/right to (use|post|share)/i.test(link),
     `the link rights line borrows the upload claim: ${link}`,
   );
-  // It must name the person D8 found missing from the upload screen, and
-  // commit to the mechanism that actually exists (POST /lessons/{id}/removal).
-  assert.match(link, /anyone in the clip/i);
-  assert.match(link, /take it down/i);
+  // No takedown promise while nothing on the site lets anyone ask for one:
+  // POST /lessons/{id}/removal exists, a way to reach it does not. When a
+  // removal link ships, D8's sentence ("Anyone in the clip can ask us to take
+  // it down, and we will.") comes back with it and this flips.
+  assert.doesNotMatch(link, /take it down|remove|delete/i);
   // And it must say plainly that we do the fetching, rather than leaving the
   // visitor to assume the link is just a reference.
   assert.match(link, /\bfetch\b/i);
