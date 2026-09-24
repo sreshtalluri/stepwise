@@ -559,7 +559,9 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                  "license_flags": ["itar-military-use-prohibited", "citation-required-for-research-publication"]},
                 {"name": "mhr", "version": "v1.0.1", "license": "Apache-2.0", "license_flags": ["body-model-asset-license-see-zip"]},
             ],
-            "measured_performance": perf,
+            # performance.json also carries operator-only records (track_hygiene);
+            # the contract object is closed, so only its three fields go out.
+            "measured_performance": perf and {k: perf[k] for k in ("fps", "peak_vram_mb", "cost_usd")},
         },
     }
     # Optional by contract: omitted, never null, when there is no proposal.

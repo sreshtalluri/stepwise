@@ -325,3 +325,13 @@ def test_per_side_crops_are_built_from_the_npz_detections():
     for region in ("left_hand", "right_hand", "left_foot", "right_foot"):
         assert len(crops[region]) == n, region
     assert any(r is not None for r in crops["left_hand"]), "synthetic wrists are confident"
+
+
+def test_operator_only_performance_fields_stay_out_of_the_motion_result():
+    """performance.json also carries track_hygiene's stitched/dropped log; the
+    contract's measured_performance is a closed object and learners never see it."""
+    npz_bytes, manifest, _ = _synth_npz()
+    perf = {"fps": 12.5, "peak_vram_mb": 900.0, "cost_usd": 0.08,
+            "track_hygiene": [{"track": 7, "action": "dropped", "reason": "too_brief"}]}
+    doc = mr.build_motion_result("job_synth", "synth", npz_bytes, manifest, perf)
+    assert doc["model_report"]["measured_performance"] == {"fps": 12.5, "peak_vram_mb": 900.0, "cost_usd": 0.08}

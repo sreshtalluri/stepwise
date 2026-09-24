@@ -545,6 +545,10 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         "fps": round(result["n_frames_total"] / result["elapsed_s"], 3) if result["elapsed_s"] > 0 else 0.0,
         "peak_vram_mb": round(result["peak_vram_bytes"] / 1e6, 1),
         "cost_usd": round(cost, 4),
+        # Which ByteTrack ids were stitched together or dropped as junk, and
+        # why (tools/track_hygiene.py). Operator-only: motion_result.py passes
+        # just the three numbers above into the MotionResult.
+        "track_hygiene": result.get("track_hygiene", []),
     }
     with open(f"{RESULTS_DIR}/{clip_id}.performance.json", "w") as f:
         json.dump(perf, f)
