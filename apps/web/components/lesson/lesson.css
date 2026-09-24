@@ -1179,7 +1179,7 @@
 .ls-views {
   display: flex;
   gap: 12px;
-  height: clamp(320px, calc(100dvh - 260px), 720px);
+  height: clamp(300px, calc(100dvh - 300px), 720px);
   min-width: 0;
 }
 .ls-views > .ls-stage,

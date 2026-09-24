@@ -682,8 +682,14 @@ function ViewRig({
       // OrbitControls caches the rotation from `camera.up` to +Y at construction and
       // orbits (and clamps polar angle, i.e. "never under the floor") in that frame.
       camera.up.set(...basis.up);
-      controls._quat.setFromUnitVectors(camera.up, UP);
-      controls._quatInverse.copy(controls._quat).invert();
+      // drei's OrbitControls is three-stdlib's, which keeps this rotation in a closure
+      // (no `_quat`), so it cannot be re-levelled here; only three's own exposes it.
+      // ponytail: guarded so it stops throwing every view change; re-level stdlib by
+      // remounting OrbitControls with camera.up already set if the tilt shows.
+      if (controls._quat) {
+        controls._quat.setFromUnitVectors(camera.up, UP);
+        controls._quatInverse.copy(controls._quat).invert();
+      }
       controls.target.copy(subject.current);
       controls.update();
       return;
