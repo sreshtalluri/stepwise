@@ -65,9 +65,13 @@ demo scripts).
 - `tools/process_clip.py`: two-pass structure (detect-only pass to count
   confidently-tracked dancers and decide refusal, then a reconstruction pass
   for confidently-tracked track ids only, capped at `MAX_DANCERS = 6`), an
-  `on_progress` callback for job-status wiring, and `select_confident_tracks`/
-  `refusal_reason_for` as pure, independently-testable decision logic (see
-  `test_process_clip.py`).
+  `on_progress` callback for job-status wiring, and `refusal_reason_for` as
+  pure, independently-testable decision logic (see `test_process_clip.py`).
+- `tools/track_hygiene.py`: new file, not upstream. Decides which ByteTrack ids
+  are dancers after the detect-only pass (stitches one body's fragments and
+  duplicate boxes into one id, drops blips and reflections); replaced the old
+  `select_confident_tracks` frame-count threshold. Pure numpy;
+  `test_track_hygiene.py` is its self-check.
 
 ## Bone constraints (branch `bone-constraints`)
 
