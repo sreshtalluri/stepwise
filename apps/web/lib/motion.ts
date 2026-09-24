@@ -134,6 +134,33 @@ export function projectToFrame(doc: MotionResult, p: readonly [number, number, n
 }
 
 /**
+ * The source camera as a GL projection matrix (row-major, for `Matrix4.set`), for a
+ * canvas of `elW` x `elH` CSS px laid exactly over a `<video>` with
+ * `object-fit: contain`. A world point then lands on the same element pixel as
+ * `projectToFrame` puts it in the picture — the overlay view's whole contract.
+ *
+ * Built from fx/fy/cx/cy directly rather than a fov, so an off-centre principal
+ * point and the contain letterbox are both honoured instead of assumed away.
+ */
+export function sourceProjection(doc: MotionResult, elW: number, elH: number, near = 0.05, far = 100): number[] {
+  const { fx, fy, cx, cy, reference_width_px: W, reference_height_px: H } = doc.camera.intrinsics;
+  const s = Math.min(elW / W, elH / H); // contain: reference px -> element px
+  const offX = (elW - W * s) / 2;
+  const offY = (elH - H * s) / 2;
+  // ndc = scale * (X / depth) + shift, and depth = -Z, so the shift goes in with -Z.
+  const ax = (2 * s * fx) / elW;
+  const bx = (2 * (offX + s * cx)) / elW - 1;
+  const ay = (2 * s * fy) / elH;
+  const by = 1 - (2 * (offY + s * cy)) / elH;
+  return [
+    ax, 0, -bx, 0,
+    0, ay, -by, 0,
+    0, 0, -(far + near) / (far - near), (-2 * far * near) / (far - near),
+    0, 0, -1, 0,
+  ];
+}
+
+/**
  * `projectToFrame` in [0,1] frame coordinates, origin top-left — the same space
  * `CropRect` is expressed in, so a projected rectangle and a contract crop rectangle
  * are directly comparable.
@@ -562,7 +589,7 @@ export function cropTransform(body: Rect | null): CropWindow {
 
 /* -------------------------------------------------------------- view presets */
 
-export type ViewId = "camera" | "front" | "back" | "side" | "top" | "hands" | "feet";
+export type ViewId = "camera" | "front" | "back" | "side" | "top" | "hands" | "feet" | "overlay";
 
 export interface ViewPreset {
   id: ViewId;
@@ -584,6 +611,9 @@ export const VIEW_PRESETS: ViewPreset[] = [
   { id: "top", label: "top", azimuth: 0, elevation: 1.32, distance: 1.05, focus: "body" },
   { id: "hands", label: "hands", azimuth: 0, elevation: 0.05, distance: 1.6, focus: "hands" },
   { id: "feet", label: "feet", azimuth: 0.35, elevation: 0.42, distance: 1.7, focus: "feet" },
+  // Not an orbit angle: the body drawn over the video from the source camera itself
+  // (`sourceProjection`). The numbers are unused; the 3D pane shows "camera" meanwhile.
+  { id: "overlay", label: "on video", azimuth: 0, elevation: 0.14, distance: 1, focus: "body" },
 ];
 
 /**
@@ -594,7 +624,7 @@ export const VIEW_PRESETS: ViewPreset[] = [
  */
 export function viewLabel(view: ViewId, mirrored: boolean): string {
   const preset = VIEW_PRESETS.find((p) => p.id === view)!;
-  const kind = view === "camera" ? "camera view" : "estimated view";
+  const kind = view === "camera" || view === "overlay" ? "camera view" : "estimated view";
   return mirrored ? `${preset.label} · mirrored · ${kind}` : `${preset.label} · ${kind}`;
 }
 
