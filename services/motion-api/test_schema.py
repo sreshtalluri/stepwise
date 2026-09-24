@@ -121,7 +121,10 @@ def test_migration_creates_every_table_and_is_idempotent(db):
                      "analytics_salts", "event_daily"}
     assert migrate.main([]) == 0  # re-running must be a no-op, not an error
     (n,) = db.execute("SELECT count(*) FROM schema_migrations").fetchone()
-    assert n == 2
+    assert n == 3
+    # 003 retired the Grafana read path.
+    assert not db.execute("SELECT 1 FROM pg_views WHERE viewname LIKE 'report%'").fetchall()
+    assert not db.execute("SELECT 1 FROM pg_roles WHERE rolname = 'stepwise_reader'").fetchall()
 
 
 def test_no_neon_specific_syntax_in_any_migration():

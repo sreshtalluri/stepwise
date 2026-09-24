@@ -44,6 +44,6 @@ Every action item from both docs. **R&P** = `rights-and-privacy.md`, **LPL** =
 | 24 | Revenue share, or at least traffic back to the creator | LPL §6(c)4 | before library | needs owner decision | Item 4 sends traffic back today |
 | 25 | Right of publicity review before any paid tier or marketing use | R&P §8.4; LPL §5 | before library | todo | |
 
-**A note on item 3.** `robots.txt` disallows only `/admin` and `/api/`. Lesson and job pages are
+**A note on item 3.** `robots.txt` disallows only `/api/`. Lesson and job pages are
 left crawlable so crawlers can see their `noindex`; blocking them in `robots.txt` would hide the
 `noindex` and still let a linked URL appear in search as a bare link.

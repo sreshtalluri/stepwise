@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 
 /**
- * The owner's dashboard and the API proxy are never crawled. /lesson and /job
+ * The API proxy is never crawled. /lesson and /job
  * are NOT disallowed here on purpose: they send noindex (next.config.mjs
  * headers and their layouts' metadata), and a crawler blocked by robots.txt
  * never fetches the page, never sees the noindex, and can still list the bare
@@ -9,6 +9,6 @@ import type { MetadataRoute } from "next";
  */
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: { userAgent: "*", allow: "/", disallow: ["/admin", "/api/"] },
+    rules: { userAgent: "*", allow: "/", disallow: ["/api/"] },
   };
 }

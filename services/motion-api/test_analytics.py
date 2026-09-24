@@ -1,16 +1,14 @@
-"""analytics.py: the allowlist and day_hash (always run), and the event log,
-metrics and 13-month roll-up against real Postgres (skipped without
+"""analytics.py: the allowlist and day_hash (always run), and the event log
+and 13-month roll-up against real Postgres (skipped without
 DATABASE_URL, like test_schema.py)."""
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import os
 import types
 
 import pytest
-from fastapi import HTTPException
 
 import analytics
 from test_retention import api  # noqa: F401 -- fixture
@@ -73,23 +71,6 @@ def test_database_errors_are_dropped_not_raised(monkeypatch):
 def test_garbage_bodies_are_zero_not_errors():
     for body in [b"", b"{", b'{"name":"tap_on_one"}', b"x" * (analytics.MAX_BODY + 1)]:
         assert analytics.ingest(body, UA, None) == 0
-
-
-def test_admin_key_by_header_or_basic_auth(monkeypatch):
-    monkeypatch.delenv("STEPWISE_ADMIN_KEY", raising=False)
-    assert not analytics.admin_ok({"x-stepwise-admin-key": ""}), "unset means nobody"
-    monkeypatch.setenv("STEPWISE_ADMIN_KEY", "k3y")
-    assert analytics.admin_ok({"x-stepwise-admin-key": "k3y"})
-    assert not analytics.admin_ok({"x-stepwise-admin-key": "nope"})
-    basic = "Basic " + base64.b64encode(b"owner:k3y").decode()
-    assert analytics.admin_ok({"authorization": basic})
-
-
-def test_metrics_endpoint_is_404_without_the_key(api, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("STEPWISE_ADMIN_KEY", "k3y")
-    with pytest.raises(HTTPException) as e:
-        api.get_metrics(types.SimpleNamespace(headers={}))
-    assert e.value.status_code == 404
 
 
 def test_events_endpoint_answers_without_a_database(api, monkeypatch):  # noqa: F811
@@ -213,52 +194,6 @@ def test_job_created_on_upload(api, pg, tmp_path):  # noqa: F811
 
 
 @needs_pg
-def test_metrics(pg):
-    def ev(name, props=None, job=None, who=b"v1"):
-        pg.execute("INSERT INTO events (name, job_id, day_hash, props) VALUES (%s, %s, %s, %s)",
-                   (name, job, who, json.dumps(props or {})))
-    ev("lesson_opened", {"ref": ""}, "j1")
-    ev("lesson_opened", {"ref": "tiktok.com"}, "j2", b"v2")
-    ev("count_one_nudged", {"by": 1}, "j1")
-    for s in (30, 30, 10):
-        ev("play_seconds", {"seconds": s}, "j1")
-    ev("play_seconds", {"seconds": 20}, "j2", b"v2")
-    ev("loop_created", {"counts": 4, "snapped": True, "via": "drag"}, "j1")
-    ev("job_created", {"source": "file", "deduplicated": False}, "j1", None)
-    ev("job_finished", {"state": "succeeded"}, "j1", None)
-    ev("job_finished", {"state": "failed", "error_code": "too_many_dancers"}, "j3", None)
-    ev("dispatch", None, "j1", b"ratelimit-hash")  # not a visitor
-
-    m = analytics.metrics(pg, 30)
-    assert m["daily"][0]["visitors"] == 2 and m["daily"][0]["uploads"] == 1
-    assert m["completion_rate"] == 0.5
-    assert m["top_failures"] == [{"code": "too_many_dancers", "n": 1}]
-    assert m["count_one_correction_rate"] == 0.5
-    assert m["median_play_seconds"] == 45  # (70, 20)
-    assert {"host": "tiktok.com", "n": 1} in m["referrers"]
-    assert m["loops"] == [{"via": "drag", "snapped": True, "n": 1}]
-    assert m["loop_lengths"] == [{"counts": 4.0, "n": 1}]
-
-
-@needs_pg
-def test_reader_role_sees_the_report_views_and_nothing_else(pg):
-    import psycopg
-    pg.execute("INSERT INTO events (name, job_id, day_hash) VALUES ('lesson_opened', 'j1', 'h')")
-    with pg.transaction():
-        pg.execute("SET LOCAL ROLE stepwise_reader")
-        for view in ("report_daily", "report_events", "report_failures", "report_loops",
-                     "report_lesson_visits", "report_referrers"):
-            pg.execute(f"SELECT * FROM {view}").fetchall()
-        cols = [d.name for d in pg.execute("SELECT * FROM report_lesson_visits").description]
-        assert "day_hash" not in cols
-    for table in ("events", "analytics_salts", "event_daily", "jobs", "lessons"):
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            with pg.transaction():
-                pg.execute("SET LOCAL ROLE stepwise_reader")
-                pg.execute(f"SELECT * FROM {table}")
-
-
-@needs_pg
 def test_rollup_folds_old_days_and_keeps_recent_rows(pg):
     old = "now() - interval '14 months'"
     for who in (b"a", b"a", b"b"):
@@ -275,12 +210,8 @@ def test_rollup_folds_old_days_and_keeps_recent_rows(pg):
     daily = {(r[0], r[1]): r[2:] for r in pg.execute("SELECT name, detail, n, visitors, seconds FROM event_daily")}
     assert daily[("play_seconds", "")] == (3, 2, 90)
     assert daily[("job_finished", "failed:export_error")][0] == 1
+    assert daily[("_visitors", "")][1] == 2
     assert analytics.rollup(pg)["rolled_up_rows"] == 0  # idempotent
-    # The report views still answer for the rolled-up day.
-    (visitors, finished) = pg.execute(
-        "SELECT visitors, finished FROM report_daily WHERE day < current_date - 300").fetchone()
-    assert (visitors, finished) == (2, 1)
-    assert pg.execute("SELECT error_code, jobs FROM report_failures").fetchall() == [("export_error", 1)]
 
 
 @needs_pg
