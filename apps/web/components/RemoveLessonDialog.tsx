@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { privacy as privacyCopy, removal as copy } from "../lib/copy";
 import { LESSONS, lessonIdFromLink } from "../lib/lessons";
 import { forgetLesson } from "../lib/myLessons";
+import { StateFigure, StateNote } from "./StateScreen";
 import s from "./RemoveLessonDialog.module.css";
 
 /**
@@ -20,7 +21,7 @@ import s from "./RemoveLessonDialog.module.css";
 
 type Relationship = keyof typeof copy.relationships;
 type State =
-  | { kind: "form"; error?: string }
+  | { kind: "form"; error?: string; limit?: boolean }
   | { kind: "sending" }
   | { kind: "done" };
 
@@ -70,7 +71,7 @@ export default function RemoveLessonDialog({
       if (!res.ok) {
         // 429 carries a sentence in the service's voice; anything else gets ours.
         const body = (await res.json().catch(() => null)) as { detail?: { error?: { message?: string } } } | null;
-        return setState({ kind: "form", error: body?.detail?.error?.message ?? copy.failed });
+        return setState({ kind: "form", error: body?.detail?.error?.message ?? copy.failed, limit: res.status === 429 });
       }
       forgetLesson(jobId);
       setState({ kind: "done" });
@@ -89,10 +90,11 @@ export default function RemoveLessonDialog({
       onClose={handleClose}
     >
       {state.kind === "done" ? (
-        <div className={s.body}>
+        <div className={s.body} style={{ justifyItems: "center", textAlign: "center" }}>
+          <StateFigure pose="wave" size="mid" />
           <h2 id={`${id}-t`} className={s.title}>{copy.doneTitle}</h2>
           <p id={`${id}-d`} role="status">{copy.done}</p>
-          <form method="dialog" className={s.actions}>
+          <form method="dialog" className={s.actions} style={{ justifyContent: "center" }}>
             <button className="btn" autoFocus>{copy.close}</button>
           </form>
         </div>
@@ -129,7 +131,11 @@ export default function RemoveLessonDialog({
           />
 
           {state.kind === "form" && state.error && (
-            <p className="form-error" role="alert">{state.error}</p>
+            state.error === copy.pickOne ? (
+              <p className="form-error" role="alert">{state.error}</p>
+            ) : (
+              <StateNote pose={state.limit ? "breathe" : "look"} message={state.error} />
+            )
           )}
 
           <div className={s.actions}>

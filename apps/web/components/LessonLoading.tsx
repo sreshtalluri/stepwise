@@ -44,10 +44,8 @@ export default function LessonLoading() {
       ctx.clearRect(0, 0, FIG_W, FIG_H);
       drawFigure(ctx, FIG_W / 2, FIG_H - 4, FIG_H * 0.9, n, reduced ? 1 : beat - a, {
         color: ink,
-        width: 1.6,
         flip: false,
         soft: true,
-        joints: false,
       });
       if (!reduced) raf = requestAnimationFrame(frame);
     };

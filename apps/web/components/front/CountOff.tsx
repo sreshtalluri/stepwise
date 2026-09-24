@@ -76,7 +76,7 @@ export default function CountOff() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
       const fh = Math.min(h * 0.92, w * 1.5);
-      drawFigure(ctx, w / 2, h * 0.98, fh, n, reduced ? 1 : beat - a, { color: ink, width: 3.2, flip: t.mirror });
+      drawFigure(ctx, w / 2, h * 0.98, fh, n, reduced ? 1 : beat - a, { color: ink, flip: t.mirror });
       // Off screen: one frame drawn, then nothing runs until it scrolls back.
       if (visible) raf = requestAnimationFrame(frame);
     };

@@ -99,11 +99,13 @@ export type JobFeed =
  * ones would be a lie — so the checklist on screen is exactly what the service
  * actually reported while we were watching.
  */
-export function useJobStatus(jobId: string, intervalMs = 2000): JobFeed {
+export function useJobStatus(jobId: string, intervalMs = 2000, epoch = 0): JobFeed {
   const [feed, setFeed] = useState<JobFeed>({ kind: "loading" });
 
   useEffect(() => {
     let cancelled = false;
+    // A new epoch (after POST /retry) starts watching afresh.
+    setFeed({ kind: "loading" });
     const startedAt = Date.now();
     let history: string[] = [];
 
@@ -142,7 +144,7 @@ export function useJobStatus(jobId: string, intervalMs = 2000): JobFeed {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [jobId, intervalMs]);
+  }, [jobId, intervalMs, epoch]);
 
   return feed;
 }

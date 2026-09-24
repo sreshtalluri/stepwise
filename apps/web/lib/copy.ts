@@ -169,6 +169,19 @@ export const upload = {
       "That clip is longer than 60 seconds. Trim it to the part you want to learn and try again.",
     wrongType: "That file is not a video. Pick an mp4, mov, or webm.",
     uploadFailed: "The upload did not go through. Check your connection and try again.",
+    // A 413. The service's own detail is a bare "Clip is too large.", and a
+    // file can also be stopped by the host in front of it before the service
+    // sees it, so this names no byte count (MAX_UPLOAD_BYTES is 200 MB, but
+    // the edge may stop a file sooner).
+    tooLarge: "That file is too large to upload. Export it at a smaller size and try again.",
+  },
+
+  // The one action beside each failure (components/StateScreen.tsx StateNote).
+  actions: {
+    myLessons: "Open My lessons",
+    addFile: "Add a video file",
+    chooseFile: "Choose another file",
+    tryAgain: "Try again",
   },
 };
 
@@ -213,7 +226,9 @@ export const processing = {
     waiting: "Waiting",
   },
   waiting: "Waiting in the queue",
-  unreachable: "We cannot reach the job right now. It keeps running, and this page will catch up.",
+  // Only what the page itself does: it keeps polling (lib/jobStatus.ts). It
+  // cannot see the job while it cannot reach it, so it says nothing about it.
+  unreachable: "We cannot reach the job right now. This page keeps checking.",
 
   // DESIGN.md §7c: honest about it being a queue, not a session.
   closeable: "You can close this. The link keeps working.",
@@ -231,8 +246,18 @@ export const processing = {
   mirrorOn: "Mirror on",
   mirrorOff: "Mirror off",
 
-  failedTitle: "This clip did not make it through",
+  failedTitle: "This clip did not make it through.",
+  // A retryable failure (pipeline_error, export_error) carries the raw
+  // exception text as its message. That goes to Sentry, never to the page:
+  // this line is what the learner reads instead. "May": the API only says a
+  // retry could plausibly succeed.
+  failedRetryable: "Building the lesson stopped with an error partway through. Trying again may work.",
+  // POST /jobs/{id}/retry. The API allows two, then answers retries_exhausted
+  // with its own sentence, which is shown as-is.
   retry: "Try again",
+  retrying: "Trying again",
+  retryFailed: "That did not go through. Check your connection and try again.",
+  addDifferent: "Add a different clip",
 };
 
 export const lesson = {
@@ -245,11 +270,20 @@ export const lesson = {
     loading: "Getting your lesson ready",
     jobTitle: "Your lesson",
     notReady: "This lesson is not ready yet.",
+    notReadyBody: "Its processing page shows how it is going.",
     notReadyLink: "See how it is going",
-    removed: "This lesson was removed and is not coming back.",
-    notFound: "There is no lesson at this link. Check the link, or add a clip to make one.",
+    // 410 is written by a removal request and by the sweeper
+    // (retention.TTL_DAYS = 180 since last opened) alike, so it names both.
+    removed: "This lesson was removed.",
+    removedBody: "Lessons are deleted when someone asks, or after six months unopened. This one is not coming back.",
+    removedLink: "Go to the home page",
+    notFound: "There is no lesson at this link.",
+    notFoundBody: "Check the link, or add a clip to make one.",
     notFoundLink: "Add a clip",
-    failed: "The lesson did not load. Reload the page to try again.",
+    // Also offline: there is no service worker, so offline is a failed fetch.
+    failed: "The lesson did not load.",
+    failedBody: "Reload the page to try again. If this device is offline, reconnect first.",
+    failedLink: "Reload the page",
   },
 
   /**
@@ -477,7 +511,8 @@ export const lesson = {
 export const myLessons = {
   title: "My lessons",
   subtitle: "Saved on this device. Lessons you open here are listed here, and nowhere else.",
-  empty: "No lessons on this device yet. Add a clip to make one, or open a lesson link.",
+  emptyTitle: "No lessons on this device yet.",
+  emptyBody: "Add a clip to make one, or open a lesson link.",
   emptyLink: "Add a clip",
   remove: "Remove from my lessons",
   removeNote: "This only takes it off this list. The lesson itself stays up.",
@@ -514,6 +549,25 @@ export const removal = {
   failed: "The removal did not go through. Check your connection and try again.",
   doneTitle: "Removed",
   done: "The video and the 3D lesson are deleted. Anyone opening the link now sees that it was removed.",
+};
+
+/**
+ * The site's own state screens: app/not-found.tsx and app/global-error.tsx.
+ * global-error wraps every route, so it never says "lesson".
+ */
+export const site = {
+  notFound: {
+    title: "There is no page here.",
+    body: "Check the address, or start from the home page.",
+    action: "Go to the home page",
+  },
+  crashed: {
+    title: "This page stopped working.",
+    // A render crash is in this tab only: nothing on the service or in this
+    // browser's storage is touched by it.
+    body: "Reload to try again. Your lessons and clips are not affected.",
+    action: "Reload the page",
+  },
 };
 
 /**

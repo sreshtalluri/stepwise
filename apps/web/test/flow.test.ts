@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { detectionIndex, flowSteps, handoffHref, parseHandoff, type Detections } from "../lib/flow";
+import { detectionIndex, failedBody, flowSteps, handoffHref, parseHandoff, type Detections } from "../lib/flow";
 import type { JobStatus } from "../lib/jobStatus";
+import { processing, upload } from "../lib/copy";
+import { failureFrom } from "../lib/submit";
 
 const COUNTS = { bpm: 120, count_one_s: 0.5, seconds_per_count: 0.5, confidence: 0.9 };
 
@@ -68,4 +70,33 @@ test("detections are looked up by time and end where the sampling ended", () => 
   assert.equal(detectionIndex(d, 0.29), 1);
   assert.equal(detectionIndex(d, 0.45), 2);
   assert.equal(detectionIndex(d, 5), -1);
+});
+
+test("a retryable failure never shows the raw exception text; a refusal shows the service's sentence", () => {
+  const raw = "RuntimeError: CUDA out of memory. Tried to allocate 2.00 GiB";
+  assert.equal(failedBody({ message: raw, retryable: true }), processing.failedRetryable);
+  const refusal = "This clip has 7 dancers tracked confidently enough to reconstruct, more than the 6 we can currently handle in one clip.";
+  assert.equal(failedBody({ message: refusal, retryable: false }), refusal);
+});
+
+test("a 413 names the size problem, not the connection; service sentences pass through verbatim", async () => {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  // services/motion-api api.py: HTTPException(413, "Clip is too large.") -- a bare-string detail.
+  assert.deepEqual(await failureFrom(json(413, { detail: "Clip is too large." }), upload.errors.uploadFailed),
+    { error: upload.errors.tooLarge, kind: "file" });
+  // The host in front of the service can answer 413 with an HTML page.
+  assert.deepEqual(await failureFrom(new Response("<html>413</html>", { status: 413 }), upload.errors.uploadFailed),
+    { error: upload.errors.tooLarge, kind: "file" });
+  const limit = "You have started 5 lessons this hour, which is the limit. Try again in about an hour.";
+  assert.deepEqual(await failureFrom(json(429, { detail: { error: { message: limit } } }), upload.errors.uploadFailed),
+    { error: limit, kind: "limit" });
+  const invite = "Links are open to invited testers right now. You can still add a video file.";
+  assert.deepEqual(await failureFrom(json(403, { detail: { error: { message: invite } } }), upload.linkErrors.unreachable),
+    { error: invite, kind: "invite" });
+  assert.deepEqual(await failureFrom(json(422, { detail: { error: { message: "That video is behind a login, so we cannot open it." } } }), ""),
+    { error: "That video is behind a login, so we cannot open it.", kind: "refused" });
+  // No sentence from the service: ours.
+  assert.deepEqual(await failureFrom(new Response("bad gateway", { status: 502 }), upload.errors.uploadFailed),
+    { error: upload.errors.uploadFailed, kind: "unreachable" });
 });
