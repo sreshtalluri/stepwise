@@ -677,7 +677,7 @@ export const CROP_TARGET_HEIGHT = 0.72;
 export interface CropWindow {
   /** Uniform magnification of the video element, >= 1. */
   zoom: number;
-  /** Pan, as a fraction of the un-scaled element box, applied before the scale. */
+  /** Pan, as a fraction of the un-scaled ELEMENT box (letterbox included), applied before the scale. */
   tx: number;
   ty: number;
   /** True when the dancer's projected box is not wholly inside the source frame. */
@@ -687,37 +687,69 @@ export interface CropWindow {
 export const NO_CROP: CropWindow = { zoom: 1, tx: 0, ty: 0, clipped: false };
 
 /**
+ * The source frame's width / height. From the intrinsics' reference size, the same
+ * numbers `sourceProjection` letterboxes with, so a layout sized from this matches
+ * the overlay; `source_video` only if those are missing.
+ */
+export function sourceAspect(doc: MotionResult): number {
+  const { reference_width_px: W, reference_height_px: H } = doc.camera.intrinsics;
+  if (W > 0 && H > 0) return W / H;
+  return doc.source_video.width_px / doc.source_video.height_px;
+}
+
+/**
+ * How much of an `elW` x `elH` box a frame of aspect `aspect` fills under
+ * `object-fit: contain`, per axis: one of the two is 1, the other is the letterbox's
+ * share. A 16:9 frame in a portrait phone panel fills all of the width and a third of
+ * the height; a 9:16 one in a wide desktop panel, the reverse.
+ */
+export function containFit(aspect: number, elW: number, elH: number): { x: number; y: number } {
+  if (!(elW > 0 && elH > 0 && aspect > 0)) return { x: 1, y: 1 };
+  const box = elW / elH;
+  return aspect >= box ? { x: 1, y: box / aspect } : { x: aspect / box, y: 1 };
+}
+
+/**
  * Turn a projected body rectangle into a crop window for the video element.
+ *
+ * `fit` is `containFit` for the element the video sits in: how much of it the frame
+ * fills. `tx`/`ty` are fractions of that ELEMENT box, and `zoom` scales the element,
+ * so the letterbox is part of the arithmetic — a landscape clip in a portrait panel
+ * is framed by its dancer's height against the PANEL's height, which means zooming
+ * past the letterbox into real, wider-than-the-panel pixels. The default (a frame
+ * that fills its element) is the old behaviour exactly.
  *
  * THE HONESTY CONSTRAINT (DESIGN.md §7h). Two rules, both hard:
  *
  *  1. `zoom` is never below 1. Zooming OUT would have to invent pixels outside the
  *     frame the phone actually shot.
- *  2. The visible window is clamped to stay INSIDE the source frame. When the dancer
- *     walks toward the edge the window stops at the edge and the dancer slides off
- *     centre — it never keeps panning and pads with black, and it never zooms further
- *     to hide the fact that the dancer is leaving. A dancer at the edge of frame LOOKS
- *     like a dancer at the edge of frame. `clipped` reports that so the caller can
- *     say so in words too.
+ *  2. On an axis where the magnified frame is wider than the panel, the visible
+ *     window is clamped to stay INSIDE the source frame. When the dancer walks toward
+ *     the edge the window stops at the edge and the dancer slides off centre — it
+ *     never keeps panning and pads with black, and it never zooms further to hide
+ *     the fact that the dancer is leaving. A dancer at the edge of frame LOOKS like a
+ *     dancer at the edge of frame. On an axis where the frame is still narrower than
+ *     the panel, it may slide toward the dancer but never past the panel's edge.
+ *     `clipped` reports a dancer partly out of shot so the caller can say so in words.
  *
- * `MAX_CROP_ZOOM` is a second, softer limit: past ~2.5x a 1080-wide phone clip is
- * visibly upscaled, and a blurry crop implies detail the source never had.
+ * `MAX_CROP_ZOOM` is a second, softer limit, on how far the frame's HEIGHT is
+ * magnified past filling the panel's: past ~2.5x a 1080-wide phone clip is visibly
+ * upscaled, and a blurry crop implies detail the source never had.
  */
-export function cropTransform(body: Rect | null): CropWindow {
+export function cropTransform(body: Rect | null, fit: { x: number; y: number } = { x: 1, y: 1 }): CropWindow {
   if (!body || body.height <= 0) return NO_CROP;
-  const zoom = Math.min(Math.max(CROP_TARGET_HEIGHT / body.height, 1), MAX_CROP_ZOOM);
-  const half = 0.5 / zoom; // half-extent of the visible window, in frame fractions
-  const cx = body.x + body.width / 2;
-  const cy = body.y + body.height / 2;
-  // Rule 2: the window centre cannot go closer to an edge than its own half-extent.
-  const px = half >= 0.5 ? 0.5 : Math.min(Math.max(cx, half), 1 - half);
-  const py = half >= 0.5 ? 0.5 : Math.min(Math.max(cy, half), 1 - half);
+  const zoom = Math.min(Math.max(CROP_TARGET_HEIGHT / (fit.y * body.height), 1), MAX_CROP_ZOOM / fit.y);
+  // `translate(t) scale(zoom)` about the element centre puts frame point p at element
+  // fraction 0.5 + zoom * k * (p - 0.5) + t. Aim the dancer's centre at 0.5, then clamp:
+  // |t| <= |zoom * k - 1| / 2 is rule 2 for both the wider and the narrower case.
+  const pan = (c: number, k: number) => {
+    const lim = Math.abs(zoom * k - 1) / 2;
+    return Math.min(Math.max(-zoom * k * (c - 0.5), -lim), lim) + 0; // + 0: no -0
+  };
   return {
     zoom,
-    // `transform: translate(tx, ty) scale(zoom)` maps frame point p to
-    // zoom * (p - 0.5) + t; solving for the dancer landing at the centre gives this.
-    tx: -zoom * (px - 0.5),
-    ty: -zoom * (py - 0.5),
+    tx: pan(body.x + body.width / 2, fit.x),
+    ty: pan(body.y + body.height / 2, fit.y),
     clipped: body.x < 0 || body.y < 0 || body.x + body.width > 1 || body.y + body.height > 1,
   };
 }

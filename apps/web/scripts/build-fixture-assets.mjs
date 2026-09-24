@@ -351,6 +351,42 @@ function buildUnplacedDancer(travelling) {
   return doc;
 }
 
+/* ------------------------------------- derived landscape document (see note) */
+
+/**
+ * The same two dancers shot on a 1280x720 (16:9) camera — a YouTube clip, where every
+ * other fixture is a 9:16 short. Same world, same camera pose; the intrinsics are
+ * rescaled so the frame keeps the portrait fixtures' vertical field of view (a dancer
+ * is as tall in the frame as before) and simply sees more of the room either side.
+ * The normalized crop rects are re-projected into the wider frame, and each dancer's
+ * are moved to where their lateral offset projects — `buildTwoDancers` leaves them on
+ * the centre line, which a wide frame would make obvious.
+ */
+function buildLandscape(good, half = 1.1) {
+  const doc = buildTwoDancers(good, half);
+  doc.job_id = "job_dev_landscape_000000000000000000000000";
+  const W = 1280, H = 720;
+  const { fx, fy, cx, cy, reference_width_px: W0, reference_height_px: H0 } = doc.camera.intrinsics;
+  const s = H / H0;
+  doc.source_video = { ...doc.source_video, width_px: W, height_px: H };
+  doc.camera.intrinsics = { fx: fx * s, fy: fy * s, cx: W / 2, cy: H / 2, reference_width_px: W, reference_height_px: H };
+  const depth = doc.camera.camera_to_world[14] - doc.persons[0].root_trajectory[0].position[2];
+  doc.persons.forEach((p, k) => {
+    const dx = ((k === 0 ? -half : half) * fx * s) / depth / W;
+    for (const region of Object.keys(p.crop_rects)) {
+      p.crop_rects[region] = p.crop_rects[region].map((r) =>
+        r && {
+          x: (W / 2 + s * (r.x * W0 - cx)) / W + dx,
+          y: (H / 2 + s * (r.y * H0 - cy)) / H,
+          width: (r.width * W0 * s) / W,
+          height: (r.height * H0 * s) / H,
+        },
+      );
+    }
+  });
+  return doc;
+}
+
 /* ---------------------------------------------------------------------- main */
 
 const lessons = [
@@ -386,6 +422,7 @@ lessons.push({
   })(),
 });
 lessons.push({ name: "unplaced-dancer", doc: buildUnplacedDancer(buildTravellingDancer(lessons[0].doc)) });
+lessons.push({ name: "landscape-lesson", doc: buildLandscape(lessons[0].doc) });
 
 for (const { name, doc } of lessons) {
   writeFileSync(path.join(outDir, `${name}.json`), JSON.stringify(doc));
