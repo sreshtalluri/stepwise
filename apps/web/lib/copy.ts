@@ -646,7 +646,7 @@ export const privacy = {
         // lib/analytics.ts optedOut()
         "If your browser sends Global Privacy Control or Do Not Track, no notes are sent.",
         // analytics.rollup from modal_app.sweep_expired
-        "The notes are kept in our own database for 13 months, then reduced to daily totals and deleted.",
+        "In our own database the notes are kept for 13 months, then reduced to daily totals and deleted.",
         // analytics.forward (server-side, after ingest), POSTHOG_KEY in modal_app.py POSTHOG_SECRET; no SDK in apps/web
         "To draw charts of these counts we pass a copy of the same notes to PostHog, an analytics company hosted in the US, which processes them for us. It gets exactly what is in each note plus the day's keyed hash, from our server, never from your browser: no cookies, no PostHog code on the page, and not your IP address or browser name. We tell it not to build a profile of you or look up your location. PostHog keeps its copy under its own retention period.",
       ],
