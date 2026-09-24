@@ -31,7 +31,7 @@ export const marketing = {
     headlineLead: "Learn any dance,",
     headlineAccent: "count by count.",
     lede:
-      "Paste a TikTok or YouTube link. You get the dancer as a 3D body you can walk around, split into 8-counts.",
+      "Add a dance video up to 60 seconds long. You get each dancer as a 3D body you can walk around, split into 8-counts.",
     primary: "Try it free",
     // DESIGN.md §7e, verbatim.
     noAccount: "No account. Works in your browser.",
@@ -74,7 +74,7 @@ export const marketing = {
         // Reconciled against PRD §5 "Multi-dancer, revised 2026-09-18".
         // Deliberately not "one dancer" — that cap was removed.
         body:
-          "Filmed on one camera, held still. Up to 60 seconds, no cuts. One dancer or several.",
+          "Filmed on one camera, held still. Up to 60 seconds, no cuts. One to six dancers.",
       },
       {
         title: "We build the body",
@@ -133,15 +133,20 @@ export const upload = {
     // would be the same sentence pretending the same thing is true, and it is
     // not.
     //
-    // So this says what actually happens and who can stop it, and claims
-    // nothing about permission. It does not say "we check", "we verify" or
-    // "we have permission" (§7h bans all three, and §12.13 lists them), and it
+    // So this says what actually happens, and claims nothing about
+    // permission. It used to add "Anyone in the clip can ask us to take it
+    // down, and we will." POST /lessons/{id}/removal exists, but nothing on the
+    // site lets anyone ask, so that half was a promise with no door (owner
+    // rule, 2026-09-23: only what the product does today). Put it back in the
+    // same commit as a removal link or contact route.
+    //
+    // It does not say "we check", "we verify" or "we have permission" (§7h bans all three, and §12.13 lists them), and it
     // does not ask for a tick — docs/research/rights-and-privacy.md §7a found
     // that a checkbox collects an attestation from the wrong person, since the
     // consent that matters is the dancer's and the person pasting cannot give
     // it.
     rights:
-      "We fetch the video from the link and build a lesson from it. Anyone in the clip can ask us to take it down, and we will.",
+      "We fetch the video from the link and build a lesson from it.",
   },
 
   // Failures on the link path, in the vocabulary the service actually returns
@@ -158,7 +163,7 @@ export const upload = {
   worksBest: [
     "Filmed from the front, on one camera held still.",
     "Up to 60 seconds, with no cuts between shots.",
-    "One dancer or several. You pick whose body you learn from.",
+    "One to six dancers. You pick whose body you learn from.",
   ],
 
   // The rights line appears here, once, plainly — DESIGN.md §7d,
@@ -182,13 +187,14 @@ export const upload = {
 export const processing = {
   // Before the counts. "Hear the beat" is literal: they come from the audio.
   title: "Start on the video while the 3D is built.",
-  subtitle: "Slow it down and loop it. The counts show up as soon as we hear the beat.",
+  subtitle: "Slow it down and mirror it. If the music has a clear beat, the counts show up here.",
   // Once `milestones.counts` has landed.
-  countsTitle: "Found the beat. Learn the first 8.",
+  countsTitle: "The counts are in. Learn the first 8.",
   countsSubtitle: "This is how the lesson is split. Loop one 8-count until it sticks, then move on.",
   // At success: the handoff, carrying speed and loop into the lesson.
   readyTitle: "Ready. Same counts, now in 3D.",
   readySubtitle: "Your loop and speed carry over.",
+  readyPlain: "Your lesson is ready.",
   open: "Open the lesson",
 
   videoLabel: "Your clip, playing now",
@@ -232,7 +238,7 @@ export const processing = {
     body: "3D body",
     frames: (done: number, total: number) => `Frame ${done} of ${total}`,
     eights: (done: number, total: number) => `${done} of ${total} eight-counts built`,
-    finishing: "Putting it on the floor",
+    finishing: "Finishing up",
     ready: "Ready",
   },
   waiting: "Waiting in the queue",

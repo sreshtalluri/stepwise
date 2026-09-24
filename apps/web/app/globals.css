@@ -685,6 +685,7 @@ button {
   justify-content: space-between;
   gap: 12px;
   min-height: 60px;
+  max-width: 1180px; /* same column as .proc-grid below it */
 }
 .rail-steps {
   position: relative;
