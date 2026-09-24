@@ -4,7 +4,9 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Focus } from "../Stage3D";
 import {
   projectBoxToFrame,
+  containFit,
   cropTransform,
+  sourceAspect,
   followStep,
   damp,
   sampleIndexAt,
@@ -321,17 +323,11 @@ export function useVideoCrop(
         height = damp(height, raw.height, FOLLOW.tauDistance, dt);
       }
 
-      const win = cropTransform({ x: centre[0] - raw.width / 2, y: centre[1] - height / 2, width: raw.width, height });
-      // translate() percentages resolve against the ELEMENT box; `object-fit: contain`
-      // letterboxes the frame inside it. Convert once, here.
-      const elW = video.clientWidth;
-      const elH = video.clientHeight;
-      const aspect = doc.source_video.width_px / doc.source_video.height_px;
-      const imgW = Math.min(elW, elH * aspect);
-      const imgH = imgW / aspect;
-      const tx = elW > 0 ? (win.tx * imgW) / elW : 0;
-      const ty = elH > 0 ? (win.ty * imgH) / elH : 0;
-      video.style.transform = `${mirror}translate(${(tx * 100).toFixed(3)}%, ${(ty * 100).toFixed(3)}%) scale(${win.zoom.toFixed(4)})`;
+      // `object-fit: contain` letterboxes the frame inside the element, and
+      // cropTransform works in element fractions with that letterbox in it.
+      const fit = containFit(sourceAspect(doc), video.clientWidth, video.clientHeight);
+      const win = cropTransform({ x: centre[0] - raw.width / 2, y: centre[1] - height / 2, width: raw.width, height }, fit);
+      video.style.transform = `${mirror}translate(${(win.tx * 100).toFixed(3)}%, ${(win.ty * 100).toFixed(3)}%) scale(${win.zoom.toFixed(4)})`;
 
       const next = {
         cropped: win.zoom > 1.05,

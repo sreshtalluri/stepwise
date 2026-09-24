@@ -28,6 +28,8 @@ const FIXTURES: Record<string, { title: string }> = {
   // the placement solve keeps a placeholder position that is not a place in the room.
   // One dancer travels, the other stays where their clip puts them.
   "unplaced-dancer": { title: "One dancer placed, one the pipeline could not place" },
+  // Every other fixture is a 9:16 short; this is a 16:9 (1280x720) YouTube-shaped clip.
+  "landscape-lesson": { title: "Landscape 16:9 — two dancers, a wide shot" },
 };
 
 export const LESSONS: Record<string, { title: string }> = EXAMPLES_ENABLED ? FIXTURES : {};

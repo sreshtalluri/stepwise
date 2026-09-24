@@ -42,6 +42,7 @@ export default function Demo({ clip = DEMO }: { clip?: DemoClip | null }) {
   const visible = useVisible(stage, 0.35);
   const [reduced, setReduced] = useState(false);
   const [paused, setPaused] = useState(true);
+  const [aspect, setAspect] = useState(0);
   useEffect(() => setReduced(prefersReducedMotion()), []);
 
   // Plays only while on screen; reduced motion never autoplays.
@@ -89,7 +90,12 @@ export default function Demo({ clip = DEMO }: { clip?: DemoClip | null }) {
         )}
       </div>
       <div>
-        <div className={`fd-demo-stage${clip ? "" : " fd-demo-empty"}`} ref={stage}>
+        <div
+          className={`fd-demo-stage${clip ? "" : " fd-demo-empty"}`}
+          ref={stage}
+          data-wide={aspect >= 1 ? "" : undefined}
+          style={aspect ? ({ ["--ar" as string]: aspect } as React.CSSProperties) : undefined}
+        >
           <span className="fd-tag">{copy.onVideo}</span>
           {clip ? (
             <>
@@ -104,6 +110,7 @@ export default function Demo({ clip = DEMO }: { clip?: DemoClip | null }) {
                 aria-label={copy.heading}
                 onPlay={() => setPaused(false)}
                 onPause={() => setPaused(true)}
+                onLoadedMetadata={(e) => setAspect(e.currentTarget.videoWidth / (e.currentTarget.videoHeight || 1))}
               />
               {reduced && paused && (
                 <button type="button" className="fd-demo-play" onClick={() => void video.current?.play()}>

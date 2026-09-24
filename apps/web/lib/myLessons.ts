@@ -123,8 +123,12 @@ export function captureThumb(id: string, videoUrl: string): void {
     "loadeddata",
     () => {
       try {
-        const w = 120;
-        const h = Math.round((w * video.videoHeight) / (video.videoWidth || 1)) || 120;
+        // Scaled by the SHORT side: the list crops it into a 56x72 portrait card
+        // (object-fit: cover), and a 16:9 frame sized by its width left the visible
+        // middle about 50 px wide — blurry at 2x.
+        const k = 144 / (Math.min(video.videoWidth, video.videoHeight) || 144);
+        const w = Math.round(video.videoWidth * k) || 144;
+        const h = Math.round(video.videoHeight * k) || 144;
         const canvas = document.createElement("canvas");
         canvas.width = w;
         canvas.height = h;

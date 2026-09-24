@@ -9,8 +9,10 @@ import Link from "next/link";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Stage3D from "../Stage3D";
 import {
+  containFit,
   cropRegions,
   sampleIndexAt,
+  sourceAspect,
   steadyCropAt,
   steadyCropTrack,
   viewLabel,
@@ -53,6 +55,12 @@ import { StructureEditor } from "../../../../packages/navigation/src/LessonNavig
 import "../../../../packages/navigation/src/navigation.css";
 
 export const accentOf = (l: Lesson) => accentForPerson(l.doc, l.selected);
+
+/** The lesson root's class and CSS variables: the accent, and the source frame's aspect for the layout. */
+export const rootProps = (l: Lesson, className: string) => ({
+  className: `ls ${className}${l.wide ? " ls-wide" : ""}`,
+  style: { ["--accent" as string]: accentOf(l), ["--ar" as string]: l.aspect },
+});
 
 // ------------------------------------------------------------------ icons
 
@@ -180,8 +188,8 @@ function DancerMarkers({ l }: { l: Lesson }) {
       if (key === last) return;
       last = key;
       // object-fit: contain — the frame's box inside the element.
-      const aspect = doc.source_video.width_px / doc.source_video.height_px;
-      const fw = Math.min(w, hgt * aspect), fh = fw / aspect;
+      const fit = containFit(sourceAspect(doc), w, hgt);
+      const fw = w * fit.x, fh = hgt * fit.y;
       const ox = (w - fw) / 2, oy = (hgt - fh) / 2;
       doc.persons.forEach((_, k) => {
         const el = host.children[k] as HTMLElement | undefined;
@@ -675,11 +683,20 @@ export function Panels({ l, children, ...rest }: { l: Lesson; children?: React.R
   const firstAngle = others.find((p) => p !== "hands" && p !== "feet");
   const stage = <MainStage l={l} view={cam ?? "overlay"} hidden={!cam} />;
   const tiles: string[] = [...(cam ? ["cam"] : []), ...others];
+  // The panels' own height as `--ph`, for lesson.css to size a wide video's column to it.
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => el.style.setProperty("--ph", `${e.contentRect.height}px`));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
-    <div className="ls-panels" data-n={tiles.length} {...rest}>
+    <div ref={box} className="ls-panels" data-n={tiles.length} data-cam={cam ? "" : undefined} {...rest}>
       {!cam && stage}
       {tiles.map((t, i) => (
-        <div key={t} className={`ls-tile${i === 1 ? " ls-second" : ""}`}>
+        <div key={t} className={`ls-tile${t === "cam" ? " ls-cam" : ""}${i === 1 ? " ls-second" : ""}`}>
           {t === "cam" ? (
             stage
           ) : t === "hands" || t === "feet" ? (

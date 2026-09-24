@@ -4,7 +4,6 @@ import Link from "next/link";
 import type { Lesson } from "../LessonViewer";
 import { lesson as copy } from "../../lib/copy";
 import {
-  accentOf,
   BottomBar,
   CountBar,
   DancerPicker,
@@ -12,6 +11,7 @@ import {
   Icon,
   MoreContent,
   Panels,
+  rootProps,
   useDancerShots,
   useLessonKeys,
   ViewBar,
@@ -28,7 +28,7 @@ export default function DesktopLesson({ l }: { l: Lesson }) {
   const shots = useDancerShots(l);
 
   return (
-    <main className="ls ls-desk" style={{ ["--accent" as string]: accentOf(l) }}>
+    <main {...rootProps(l, "ls-desk")}>
       <h1 className="sr-only">{l.title}</h1>
       <ViewBar
         l={l}

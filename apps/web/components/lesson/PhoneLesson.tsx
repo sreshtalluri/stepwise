@@ -6,13 +6,13 @@ import type { Lesson } from "../LessonViewer";
 import { lesson as copy } from "../../lib/copy";
 import { spanLabel } from "../../lib/lessonEngine";
 import {
-  accentOf,
   BottomBar,
   CountBar,
   DancerPicker,
   Icon,
   MoreContent,
   Panels,
+  rootProps,
   useDancerShots,
   ViewBar,
   WhoChip,
@@ -158,7 +158,7 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
   const loopLabel = l.loop ? (l.loopEight?.label ?? spanLabel(l.loop)) : "";
 
   return (
-    <main className={`ls ls-phone${land ? " ls-land" : ""}${prop ? " ls-prop" : ""}`} style={{ ["--accent" as string]: accentOf(l) }}>
+    <main {...rootProps(l, `ls-phone${land ? " ls-land" : ""}${prop ? " ls-prop" : ""}`)}>
       <h1 className="sr-only">{l.title}</h1>
       <ViewBar
         l={l}

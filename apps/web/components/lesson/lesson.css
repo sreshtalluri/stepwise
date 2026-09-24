@@ -1324,3 +1324,90 @@ a.ls-chip {
   width: 36px;
   height: 36px;
 }
+
+/* ================================================================== the source's shape */
+/* `--ar` is the clip's width / height (lib/motion.ts sourceAspect) and `.ls-wide` marks a
+   square or wider one — a YouTube clip, not a 9:16 short. `--ph` is the panels' own
+   height (Panels, a ResizeObserver). */
+
+/* Desktop: the video's column is as wide as its frame at the panels' full height (so no
+   black bars), up to two thirds of the width; the other views stack beside it. The band
+   left under a capped video is where the counts sit, off the dancer. */
+.ls-desk.ls-wide .ls-panels[data-cam]:not([data-n="1"]) {
+  grid-auto-flow: row;
+  grid-template-columns: minmax(0, min(calc(var(--ph, 100vh) * var(--ar)), 66%)) minmax(0, 1fr);
+  grid-auto-rows: minmax(0, 1fr);
+}
+.ls-desk.ls-wide .ls-panels[data-n="3"] > .ls-cam {
+  grid-row: span 2;
+}
+.ls-desk.ls-wide .ls-panels[data-n="4"] > .ls-cam {
+  grid-row: span 3;
+}
+
+/* Phone upright: the video full-width on top at its own shape, the other view under it
+   (not an inset over a video that is already short). */
+.ls-phone.ls-wide:not(.ls-land) .ls-panels[data-cam]:not([data-n="1"]) {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 2px;
+}
+.ls-phone.ls-wide:not(.ls-land) .ls-panels[data-cam]:not([data-n="1"]) > .ls-cam {
+  aspect-ratio: var(--ar);
+  max-height: 58dvh;
+}
+.ls-phone.ls-wide:not(.ls-land) .ls-panels[data-cam] > .ls-second {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  width: auto;
+  aspect-ratio: auto;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Phone on its side, any clip: the panels full height on the left, the bar and the
+   transport a rail on the right, so the video is not squeezed between two bars. */
+.ls-phone.ls-land {
+  grid-template-columns: minmax(0, 1fr) clamp(250px, 36vw, 360px);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.ls-land .ls-panels {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  padding-left: env(safe-area-inset-left);
+}
+.ls-land .ls-bar,
+.ls-land .ls-bottom {
+  grid-column: 2;
+  min-width: 0;
+  padding-right: calc(8px + env(safe-area-inset-right));
+}
+.ls-land .ls-bar {
+  grid-row: 1;
+}
+.ls-land .ls-bottom {
+  grid-row: 2;
+  align-content: end;
+}
+.ls-land .ls-transport {
+  flex-wrap: wrap;
+}
+.ls-phone.ls-land.ls-prop {
+  grid-template-columns: minmax(0, 1fr);
+}
+/* A wide clip on its side: the video gets the width its frame needs, the rail the rest,
+   and a second view is an inset over the video rather than a sliver beside it. */
+.ls-phone.ls-land.ls-wide:not(.ls-prop) {
+  grid-template-columns: minmax(0, min(calc(100dvh * var(--ar)), calc(100vw - 250px))) minmax(250px, 1fr);
+}
+.ls-phone.ls-land.ls-wide .ls-panels[data-cam] > .ls-second {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 4;
+  width: 26%;
+  aspect-ratio: 3 / 4;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.15), 0 8px 24px rgb(0 0 0 / 0.4);
+}
