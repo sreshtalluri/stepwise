@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { upload } from "../../lib/copy";
+import { privacy, upload } from "../../lib/copy";
 import { submitLink } from "../../lib/submit";
 
 const copy = upload.link;
@@ -60,6 +61,12 @@ export default function LinkDoor({ id }: { id: string }) {
         </button>
       </div>
       <p className="fd-note">{copy.gated}</p>
+      <p className="fd-note">
+        {privacy.atHandover}{" "}
+        <Link href="/privacy" style={{ textDecoration: "underline", textUnderlineOffset: 3 }}>
+          {privacy.atHandoverLink}
+        </Link>
+      </p>
       {open && (
         <div className="fd-invite">
           <label htmlFor={`${id}-invite`}>{copy.inviteLabel}</label>

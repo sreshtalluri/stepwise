@@ -251,3 +251,10 @@ test("the entry flow never makes 8 counts a rule — owner, 2026-09-23", () => {
   assert.match(copy.upload.link.gated, /invited/i);
   assert.match(copy.upload.link.gated, /file works for everyone/i);
 });
+
+test("the handover privacy line states only what the code does", () => {
+  // retention.TTL_DAYS == 180 (six months since last open); removal is on every lesson.
+  assert.match(copy.privacy.atHandover, /six months unopened/);
+  assert.match(copy.privacy.atHandover, /remove it from the lesson page/);
+  assert.doesNotMatch(copy.privacy.atHandover, /\b(never|forever|guarantee|secure|encrypted)\b/i);
+});

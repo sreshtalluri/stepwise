@@ -557,6 +557,13 @@ export const privacy = {
   linkSubmit: "Continue",
   linkInvalid: "That is not a lesson link from this site. It looks like /lesson/ followed by an id.",
   footer: "Privacy",
+  // Shown where a video is handed over (the paste box and the upload page), so
+  // the promise is read at the moment it matters, not only in the footer.
+  // Every clause is code: retention.TTL_DAYS == 180 since last open (the same
+  // fact as the /privacy sentence), and "Report or remove this video" on every
+  // lesson deletes it for everyone at once. No accounts, so nothing else to say.
+  atHandover: "We keep a clip only while its lesson gets used: six months unopened and it is deleted. Anyone in it can remove it from the lesson page.",
+  atHandoverLink: "How we handle videos",
 };
 
 /**
