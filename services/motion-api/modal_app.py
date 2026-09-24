@@ -953,6 +953,11 @@ ORIGIN_SECRET = optional_secret("stepwise-origin")
 # Absent -> /metrics answers 404 to everyone.
 ADMIN_SECRET = optional_secret("stepwise-admin")
 
+# STEPWISE_INVITE_CODES (comma-separated): who may use POST /clips/link during
+# the beta (ingest.invite_code_ok). Absent -> the link door is shut and only
+# file upload works, which is the closed-by-default the gate was built for.
+INVITE_SECRET = optional_secret("stepwise-invite")
+
 
 # glTF sampler interpolation, fixed up after pymomentum writes the file.
 #
@@ -1883,6 +1888,11 @@ api_image = (
     # One dependency list, not two: requirements-api.txt is what a laptop
     # installs and what this image installs, so they cannot drift.
     .pip_install_from_requirements(os.path.join(MOTION_API_DIR, "requirements-api.txt"))
+    # The yt-dlp BINARY for pasted links (ingest.ytdlp_available checks PATH).
+    # It was never installed here, so every link failed as fetch_failed. The
+    # curl-cffi extra is TikTok's browser impersonation. Pinned, and it needs
+    # bumping: platforms change their pages and old yt-dlp stops working.
+    .pip_install("yt-dlp[default,curl-cffi]==2026.08.19")
     # Mounted so that api.py's own `Path(__file__).parent.parent.parent /
     # "packages" / "motion-contract" / "python"` resolves inside the container
     # exactly as it does on a laptop. Reproducing the repo's shape is cheaper
@@ -1929,7 +1939,7 @@ api_image = (
 
 @app.function(
     image=api_image,
-    secrets=R2_SECRET + DB_SECRET + ORIGIN_SECRET + ADMIN_SECRET + OBS_SECRETS,
+    secrets=R2_SECRET + DB_SECRET + ORIGIN_SECRET + ADMIN_SECRET + INVITE_SECRET + OBS_SECRETS,
     # Scale to zero. A cold start is a few seconds on the upload endpoint,
     # where it is invisible, and on the first two-second job poll, where it is
     # also invisible. min_containers=1 pins ~$45/month of always-on container

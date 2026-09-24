@@ -79,18 +79,31 @@ function reproportion(p: Pt[]): Pt[] {
 const lerpPose = (a: Pt[], b: Pt[], e: number): Pt[] =>
   a.map((p, j) => [p[0] + (b[j][0] - p[0]) * e, p[1] + (b[j][1] - p[1]) * e]);
 
-// One pose per count, authored in the first drawing's proportions.
-const AUTHORED: Pt[][] = [
-  [[50,22],[50,38],[50,100],[34,66],[30,92],[66,66],[70,92],[40,145],[34,194],[60,145],[66,194]],
-  [[50,28],[50,44],[50,106],[34,62],[60,58],[66,62],[40,56],[38,150],[36,194],[62,150],[64,194]],
-  [[54,22],[53,38],[52,100],[36,62],[42,84],[76,30],[94,12],[40,146],[30,194],[60,146],[62,194]],
-  [[50,20],[50,36],[50,98],[30,24],[26,4],[70,24],[74,4],[42,146],[38,194],[58,146],[62,194]],
-  [[50,40],[50,56],[50,118],[26,64],[8,70],[74,64],[92,70],[30,152],[28,194],[70,152],[72,194]],
-  [[46,24],[47,40],[50,102],[24,40],[20,16],[70,76],[58,98],[42,148],[40,194],[62,146],[70,194]],
-  [[46,24],[47,40],[48,100],[30,54],[16,40],[64,62],[74,80],[44,148],[42,194],[70,124],[92,140]],
-  [[52,22],[51,38],[46,102],[30,70],[38,98],[74,28],[58,14],[36,148],[30,194],[58,150],[60,194]],
+/**
+ * One pose per count: an 8-count phrase that reads as a little dance when it
+ * loops. Accents on 1 (the arm lock, the brand mark's own pose) and 5 (the
+ * wave); every count has a bent knee, the hip off the feet's centre and
+ * uneven arms. Authored in the construction above directly (round 2's joint
+ * angles run through LEN), from scratchpad countoff-poses/fk.py.
+ */
+export const COUNT_POSES: Pt[][] = [
+  // 1: HIT: the arm lock (the logo)
+  [[31.8,49.4],[39.4,63.5],[50.0,106.2],[14.2,78.3],[0.1,102.7],[68.7,66.2],[68.7,38.0],[32.9,148.7],[28.7,196.0],[85.1,135.6],[80.9,183.0]],
+  // 2: bounce: sink, arms swing
+  [[44.5,52.2],[43.4,68.2],[48.0,111.9],[23.0,92.3],[20.6,120.3],[62.1,95.0],[90.1,97.4],[21.1,148.9],[14.5,196.0],[76.2,148.0],[86.1,194.5]],
+  // 3: groove: snap up, hip out
+  [[36.9,51.4],[44.9,65.3],[54.0,108.3],[22.9,86.6],[15.6,113.8],[59.2,45.6],[63.1,17.7],[32.5,148.7],[27.5,196.0],[89.1,137.8],[95.7,184.8]],
+  // 4: bounce: the wave loads
+  [[38.4,55.0],[43.4,70.2],[51.0,113.5],[20.4,90.3],[0.5,110.2],[66.5,58.1],[84.6,36.5],[21.6,148.6],[18.3,196.0],[80.4,148.6],[90.3,195.1]],
+  // 5: HIT: the wave
+  [[62.1,56.0],[56.1,70.8],[47.0,113.8],[32.9,58.6],[14.8,37.0],[78.9,90.9],[99.2,110.4],[15.2,146.7],[8.6,193.8],[75.2,149.9],[86.7,196.0]],
+  // 6: the wave rolls through
+  [[49.8,52.8],[52.5,68.6],[51.0,112.5],[24.3,76.3],[10.2,100.7],[76.7,87.9],[98.3,69.8],[26.8,151.3],[43.0,196.0],[80.4,147.6],[68.9,193.7]],
+  // 7: groove: step-touch
+  [[59.0,49.3],[54.1,64.5],[51.0,108.4],[29.3,83.8],[13.2,60.8],[71.8,91.3],[74.3,119.4],[19.2,141.3],[9.3,187.8],[68.1,150.8],[53.5,196.0]],
+  // 8: load the lock (other side)
+  [[63.1,47.3],[58.1,62.5],[52.0,106.1],[29.3,65.3],[29.3,37.1],[82.3,81.0],[94.2,106.5],[19.1,137.9],[25.7,184.9],[69.1,148.5],[70.8,196.0]],
 ];
-export const COUNT_POSES: Pt[][] = AUTHORED.map(reproportion);
 
 const backOut = (x: number) => {
   const c = 1.9;
@@ -112,8 +125,9 @@ export function poseAt(n: number, frac: number, soft = false): Pt[] {
 /**
  * The state screens' poses (components/StateScreen.tsx), one pose, one meaning.
  * Each is two keyframes the figure glides between and the seconds per glide;
- * reduced motion holds the first. Authored like the counts, from the approved
- * board (scratchpad brand/figure.js), and re-derived the same way.
+ * reduced motion holds the first. Authored in the first drawing's
+ * proportions, from the approved board (scratchpad brand/figure.js), and
+ * re-derived by reproportion().
  */
 export type StatePose = "shrug" | "sit" | "wave" | "breathe" | "look" | "sitback" | "ready";
 
@@ -154,8 +168,10 @@ const AUTHORED_STATES: Record<StatePose, [Pt[], Pt[], number]> = {
     [[30.7,134.4],[20.4,146.7],[28,190],[48.5,159.2],[72.9,173.3],[49.4,149.4],[75.9,159],[57.4,154.9],[81.2,196],[62,159.4],[89.2,196]],
     [[32.3,136],[20.4,146.7],[28,190],[48.5,159.2],[72.9,173.3],[49.4,149.4],[76.5,160.5],[57.4,154.9],[81.2,196],[62,159.4],[89.2,196]],
     1.8],
-  // Nothing yet: count 1, ready, barely moving.
-  ready: [AUTHORED[0], stand([50,21],[50,37],[[34,65],[30,91],[66,65],[70,91]], [[40,145],[34,194],[60,145],[66,194]]), 2.2],
+  // Nothing yet: ready, barely moving (the first drawing's count 1).
+  ready: [
+    [[50,22],[50,38],[50,100],[34,66],[30,92],[66,66],[70,92],[40,145],[34,194],[60,145],[66,194]],
+    stand([50,21],[50,37],[[34,65],[30,91],[66,65],[70,91]], [[40,145],[34,194],[60,145],[66,194]]), 2.2],
 };
 
 // Poses authored in the new proportions already: not re-derived.
