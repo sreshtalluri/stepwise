@@ -298,7 +298,7 @@ writes a batch to Neon, the API forwards the same allowlisted events to
 `distinct_id` is the day hash, person profiles and geoip are off, `$ip` is
 null, and no user agent is sent. A PostHog failure is logged and dropped. The
 browser events are forwarded, plus `job_created` (with its day hash) and `job_finished` (distinct_id = the job id).
-Without the secret nothing leaves Neon. After `POSTHOG_DAILY_CAP` events in a UTC day (default 30000, under the free tier's 1M a month) forwarding stops until midnight; Neon keeps everything. Also set a $0 billing limit in PostHog.
+Without the secret nothing leaves Neon. After `POSTHOG_DAILY_CAP` events in a UTC day (default 30000, under the free tier's 1M a month) forwarding stops until midnight; Neon keeps everything. Also set a $0 billing limit in PostHog. Hitting the cap logs a Sentry warning. **Before public launch: raise or remove the cap and the billing limit.**
 
 ```sh
 # PostHog → Project settings → Project API key (phc_…; a write-only key)

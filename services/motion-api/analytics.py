@@ -265,7 +265,7 @@ def forward(visitor: bytes | str, rows: list, when: str) -> None:
 def posthog_daily_cap() -> int:
     """Events a day we send PostHog. 30k/day keeps a month under the free
     tier's 1M; Neon still gets everything past it."""
-    return int(os.environ.get("POSTHOG_DAILY_CAP") or 30000)
+    return int(os.environ.get("POSTHOG_DAILY_CAP") or 30000)  # ponytail: beta cap; raise or drop at public launch
 
 
 def _posthog_ok(conn) -> bool:
@@ -275,7 +275,25 @@ def _posthog_ok(conn) -> bool:
     if not os.environ.get("POSTHOG_KEY"):
         return False
     (n,) = conn.execute("SELECT count(*) FROM events WHERE occurred_at >= %s", (_today(),)).fetchone()
-    return n <= posthog_daily_cap()
+    if n <= posthog_daily_cap():
+        return True
+    if _CAPPED_ON != _today():  # once a day per container
+        _note_capped(n)
+    return False
+
+
+_CAPPED_ON: dt.date | None = None
+
+
+def _note_capped(n: int) -> None:
+    global _CAPPED_ON
+    _CAPPED_ON = _today()
+    print(f"[analytics] PostHog daily cap reached ({n} events today); Neon only until midnight UTC")
+    try:
+        import observability
+        observability.message("PostHog daily cap reached", "web", level="warning", events_today=str(n))
+    except Exception:  # noqa: BLE001 -- a warning about dashboards must never break a request
+        pass
 
 
 def _forward_soon(visitor, rows: list) -> None:
