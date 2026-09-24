@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import Link from "next/link";
+import { privacy } from "../lib/copy";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -26,7 +28,14 @@ export default function RootLayout({
           href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@700,800,900&f[]=switzer@400,500,600&display=swap"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <footer className="wrap meta" style={{ padding: "24px clamp(20px, 4vw, 48px) 32px" }}>
+          <Link href="/privacy" style={{ textDecoration: "underline", textUnderlineOffset: 3 }}>
+            {privacy.footer}
+          </Link>
+        </footer>
+      </body>
     </html>
   );
 }
