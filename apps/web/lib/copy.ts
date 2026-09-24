@@ -451,6 +451,8 @@ export const lesson = {
     hands: "Hands",
     feet: "Feet",
     mirror: "Mirror",
+    /** Said for a moment when a pick past the cap turns the oldest view off. */
+    bumped: (max: number, off: string) => `Up to ${max} views at once · ${off} off`,
     mirrored: "mirrored",
     est: "est.",
     dancer: "Dancer",
