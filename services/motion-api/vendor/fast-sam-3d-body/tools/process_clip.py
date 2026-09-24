@@ -379,7 +379,7 @@ def process_clip(
 # `expr_params` is 0.02 MB and is here for the other reason: 72 facial
 # expression coefficients per person per frame are the most face-shaped thing
 # the system stores, they exist purely because the whole dict got pickled, and
-# nothing has ever read them (docs/research/rights-and-privacy.md section 6.2).
+# nothing has ever read them (docs/legal/rights-and-privacy.md section 6.2).
 # Dropping the persistence costs no capability -- the model still emits them on
 # demand if a future feature wants expression.
 #

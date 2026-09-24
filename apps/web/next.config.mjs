@@ -90,4 +90,19 @@ export default {
    */
   output: process.env.STEPWISE_CF_BUILD ? "standalone" : undefined,
 
+  /**
+   * 6. Lessons and processing pages stay out of search
+   * (docs/legal/legal-public-learning.md §6(a)1). The header covers what a
+   * meta tag cannot (a crawler that skips HTML); the pages' layouts carry the
+   * meta tag too, and app/robots.ts disallows both. OpenNext applies these
+   * (@opennextjs/aws core/routing/matcher.js getNextConfigHeaders).
+   */
+  async headers() {
+    const noindex = [{ key: "X-Robots-Tag", value: "noindex, nofollow" }];
+    return [
+      { source: "/lesson/:path*", headers: noindex },
+      { source: "/job/:path*", headers: noindex },
+    ];
+  },
+
 };

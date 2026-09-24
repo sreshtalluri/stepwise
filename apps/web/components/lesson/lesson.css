@@ -591,6 +591,7 @@ a.ls-chip {
 .ls-prop .ls-bottom,
 .ls-prop .ls-second,
 .ls-prop .ls-corner,
+.ls-prop .ls-ph-credit,
 .ls-prop .ls-ph-unit,
 .ls-prop .ls-install {
   display: none;
@@ -1000,6 +1001,27 @@ a.ls-chip {
   font-size: 0.8125rem;
   color: var(--ink-muted);
   white-space: nowrap;
+}
+/* The creator credit: in the desktop bar, and over the phone stage under its tag. */
+.ls-credit {
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 34ch;
+}
+.ls-ph-credit {
+  position: absolute;
+  left: 10px;
+  top: 28px;
+  z-index: 3;
+  max-width: calc(100% - 20px);
+  font-size: 0.75rem;
+  color: var(--on-stage-muted);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.6);
 }
 .ls-who {
   white-space: nowrap;

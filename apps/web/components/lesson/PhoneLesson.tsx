@@ -8,6 +8,7 @@ import { spanLabel } from "../../lib/lessonEngine";
 import {
   BottomBar,
   CountBar,
+  CreditLine,
   DancerPicker,
   Icon,
   MoreContent,
@@ -174,6 +175,7 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
           {loopLabel && <span className="ls-ph-unit">{loopLabel}</span>}
           <CountBar l={l} big={prop} />
         </div>
+        <CreditLine l={l} className="ls-ph-credit" />
         {hint && !prop && <p className="ls-ph-hint">{copy.phone.hint}</p>}
         <div className={`ls-flash${flash ? " ls-show" : ""}`} aria-live="polite">
           {flash}

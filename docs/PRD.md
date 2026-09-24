@@ -128,7 +128,7 @@ Why the change: the builder's description of the MVP is "someone comes to the we
 
 What shipped, precisely: `POST /clips/link`, gated on an invite-code allowlist and **closed by default**. File upload is ungated and remains the primary path for everyone. Both doors converge on one `clip_id`, so a takedown still removes a lesson once for everyone who reached it either way.
 
-**This is scoped to the invite-only W12 pilot and is NOT cleared for public launch.** Both platforms' terms prohibit automated downloading; `docs/research/link-ingestion.md` is the analysis (the one in `rights-and-privacy.md` covers uploads and does not transfer), and its §6 lists the six things that must be decided before link ingestion is opened to anyone the builder has not met.
+**This is scoped to the invite-only W12 pilot and is NOT cleared for public launch.** Both platforms' terms prohibit automated downloading; `docs/research/link-ingestion.md` is the analysis (the one in `docs/legal/rights-and-privacy.md` covers uploads and does not transfer), and its §6 lists the six things that must be decided before link ingestion is opened to anyone the builder has not met.
 
 **Out for v1:** groups and cross-dancer consensus, formation view, moving cameras, cut-heavy edits, VRM avatars, 3D hand articulation, record-yourself/scoring, public API. Designs for these are preserved in §9.
 

@@ -134,7 +134,7 @@ export const upload = {
     // /privacy has the same form for anyone holding only the link.
     //
     // It does not say "we check", "we verify" or "we have permission" (§7h bans all three, and §12.13 lists them), and it
-    // does not ask for a tick: docs/research/rights-and-privacy.md §7a found
+    // does not ask for a tick: docs/legal/rights-and-privacy.md §7a found
     // that a checkbox collects an attestation from the wrong person, since the
     // consent that matters is the dancer's and the person pasting cannot give
     // it.
@@ -261,6 +261,14 @@ export const processing = {
 };
 
 export const lesson = {
+  /**
+   * The credit on a link lesson, linking to the video it was made from
+   * (GET /jobs/{id}/source; docs/legal/legal-public-learning.md §6(a)2).
+   * "Original" is the video, nothing more: it does not say the creator made
+   * this lesson or agreed to it. No handle in the metadata: the host only.
+   */
+  credit: (host: string, creator: string | null) =>
+    creator ? `Original by ${creator} on ${host}` : `Original on ${host}`,
   /**
    * Opening a lesson by its link, keyed by what services/motion-api answered.
    * An unknown job_id reads as "queued" there, not 404, so a mistyped link lands
@@ -537,6 +545,7 @@ export const removal = {
   relationshipLegend: "Which is closest?",
   relationships: {
     i_am_in_it: "I am in this video",
+    under_18: "Someone in this video is under 18",
     i_own_the_rights: "I own the rights to this video",
     other: "Something else",
   },

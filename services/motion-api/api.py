@@ -191,7 +191,7 @@ def _r2_read(key: str) -> Optional[bytes]:
 # canonical entry, deleted once, and it is gone for everyone who uploaded it,
 # instead of the dancer having to find every scattered copy.
 #
-# The line this deliberately does not cross (docs/research/rights-and-privacy.md):
+# The line this deliberately does not cross (docs/legal/rights-and-privacy.md):
 # this is dedupe-on-upload only. You still upload your own clip. Nothing here
 # builds a browsable or searchable index of who is in what -- no lookup by
 # fingerprint, no "find this dancer", no public list. The index is keyed by
@@ -290,7 +290,7 @@ def _too_many(e: ratelimit.Limited) -> HTTPException:
 
 
 def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict, http: Request,
-                        source_key: str | None = None) -> DispatchResponse:
+                        source_key: str | None = None, credit: dict | None = None) -> DispatchResponse:
     """The single path from "we have the bytes" to "a job is running".
 
     Both front doors -- an uploaded file and a pasted link -- end here, so
@@ -326,7 +326,7 @@ def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict, http: Request,
 
     # job_id -> clip_id is needed later (retry, result-building) without
     # parsing it back out of the job_id string -- written once, here.
-    jobstore.record_dispatch(results_volume, job_id, clip_id)
+    jobstore.record_dispatch(results_volume, job_id, clip_id, credit)
     entry = dict(fp, clip_id=clip_id, job_id=job_id, created_at=time.time())
     if source_key:
         entry["source_key"] = source_key
@@ -480,11 +480,13 @@ def ingest_clip_link(request: LinkRequest, http: Request,
         raise _refuse(e) from None
 
     key = ingest.source_key(info)
+    credit = ingest.credit(info, request.url)
 
     # Layer 1: the same link, already a lesson. Settled before any download.
     hit = _find_by_source(key)
     if hit:
         print(f"[dedupe] url hit: {key} -> {hit['clip_id']} -- nothing fetched")
+        _stamp_credit(hit["job_id"], credit)
         return DispatchResponse(clip_id=hit["clip_id"], job_id=hit["job_id"],
                                 deduplicated=True)
 
@@ -526,6 +528,7 @@ def ingest_clip_link(request: LinkRequest, http: Request,
             # This is also what keeps the two layers converging on ONE clip_id
             # rather than quietly maintaining two ideas of the same lesson.
             _stamp_source_key(existing["clip_id"], key)
+            _stamp_credit(existing["job_id"], credit)
             _created(http, fp, "link", existing["clip_id"], existing["job_id"], deduplicated=True)
             return DispatchResponse(clip_id=existing["clip_id"],
                                     job_id=existing["job_id"], deduplicated=True)
@@ -539,7 +542,7 @@ def ingest_clip_link(request: LinkRequest, http: Request,
             # delete. A fresh random clip_id makes that true here too -- the
             # tombstone keeps its own id and its own 410 forever.
             clip_id = uuid.uuid4().hex
-        return _store_and_dispatch(tmp_path, clip_id, fp, http, source_key=key)
+        return _store_and_dispatch(tmp_path, clip_id, fp, http, source_key=key, credit=credit)
     finally:
         os.unlink(tmp_path)
 
@@ -554,6 +557,29 @@ def _stamp_source_key(clip_id: str, key: str) -> None:
             changed = True
     if changed:
         retention.write_index(results_volume, entries)
+
+
+def _stamp_credit(job_id: str, credit: dict) -> None:
+    """Credit a lesson reached by link that has none yet: one made before
+    credits were stored, or an uploaded file that turned out to be this link's
+    video. Best-effort, like _stamp_source_key; an existing credit is kept."""
+    path = f"/{job_id}.job-meta.json"
+    meta = _volume_read_json(results_volume, path)
+    if meta is not None and "credit" not in meta:
+        retention.write_json(results_volume, path, dict(meta, credit=credit))
+
+
+@app.get("/jobs/{job_id}/source")
+def get_job_source(job_id: str) -> dict:
+    """Where a link lesson's video came from: {url, host, creator}, for the
+    "Original by @creator on TikTok" line (docs/legal/legal-public-learning.md
+    §6(a)2). 404 for an uploaded file, which has no source to credit. Kept out
+    of the MotionResult and the job status, both strict contracts; removal
+    deletes job-meta, so a removed lesson has no credit either."""
+    meta = _volume_read_json(results_volume, f"/{job_id}.job-meta.json")
+    if not meta or not meta.get("credit"):
+        raise HTTPException(404, "No source link for this lesson.")
+    return meta["credit"]
 
 
 # ---------------------------------------------------------------------------
@@ -900,7 +926,7 @@ def get_asset(asset_id: str) -> Response:
 # ---------------------------------------------------------------------------
 # POST /lessons/{clip_id}/removal -- the takedown path.
 #
-# docs/research/rights-and-privacy.md section 1 and 6.1: the largest real
+# docs/legal/rights-and-privacy.md section 1 and 6.1: the largest real
 # exposure is not a lawsuit, it is a dancer finding their own body
 # reconstructed on a site they never heard of with no way to ask for it to
 # stop. This is the way to ask. It is the highest-value, lowest-cost item in
@@ -928,11 +954,12 @@ def get_asset(asset_id: str) -> Response:
 # ---------------------------------------------------------------------------
 
 class RemovalRequest(BaseModel):
-    # Three plain boxes, none of them a legal category: the dancer (no
-    # copyright claim, the person most likely to ask -- rights-and-privacy.md
-    # 6.1), the rights holder, and everyone else. Required, because the owner
-    # alert is only useful if it says which kind of request this was.
-    relationship: Literal["i_am_in_it", "i_own_the_rights", "other"]
+    # Plain boxes, none of them a legal category: the dancer (no copyright
+    # claim, the person most likely to ask -- rights-and-privacy.md 6.1),
+    # someone under 18 in the clip (legal-public-learning.md §5: asked, never
+    # estimated), the rights holder, and everyone else. Required, because the
+    # owner alert is only useful if it says which kind of request this was.
+    relationship: Literal["i_am_in_it", "under_18", "i_own_the_rights", "other"]
     # Optional free text. Kept on the tombstone only (so whoever restores or
     # disputes a removal can read why); never sent to Sentry or the events
     # table, where it could carry a name or a handle.
