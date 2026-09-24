@@ -15,6 +15,7 @@ import {
 } from "../../lib/motion";
 import { dancerBox, stillCrop } from "../../lib/dancers";
 import { countAtTime, type CountGrid } from "../../../../packages/navigation/src/core";
+import { clicksAhead, type ClickMode } from "../../lib/metronome";
 
 /**
  * The video is the clock. `requestVideoFrameCallback` hands back the exact
@@ -104,19 +105,142 @@ export function useVideoClock(
  * numerals must turn over on the beat, not on a 10 Hz display tick. +40 ms because a
  * seek to a count boundary lands a hair early on some decoders.
  */
-export function useCount(timeRef: React.RefObject<number>, grid: CountGrid): number {
-  const [count, setCount] = useState(() => Math.floor(countAtTime(grid, timeRef.current + 0.04)));
+export function useCount(timeRef: React.RefObject<number>, grid: CountGrid, step = 1): number {
+  const at = () => Math.floor(countAtTime(grid, timeRef.current + 0.04) / step) * step;
+  const [count, setCount] = useState(at);
   useEffect(() => {
     let h = 0;
     const tick = () => {
       h = requestAnimationFrame(tick);
-      const c = Math.floor(countAtTime(grid, timeRef.current + 0.04));
+      const c = at();
       setCount((prev) => (prev === c ? prev : c));
     };
     h = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(h);
-  }, [timeRef, grid]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `at` is over these
+  }, [timeRef, grid, step]);
   return count;
+}
+
+// ------------------------------------------------------------------ the click
+
+let audio: { ctx: AudioContext; out: GainNode } | null = null;
+
+/**
+ * The page's one AudioContext, made or resumed — call it from inside a tap: iOS (and
+ * Chrome's autoplay policy) only let audio start from a user gesture.
+ */
+export function unlockAudio() {
+  if (typeof window === "undefined") return null;
+  if (!audio) {
+    const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
+    if (!Ctx) return null;
+    const ctx: AudioContext = new Ctx();
+    const out = ctx.createGain();
+    out.connect(ctx.destination);
+    audio = { ctx, out };
+  }
+  if (audio.ctx.state !== "running") void audio.ctx.resume().catch(() => {});
+  return audio;
+}
+
+/** How far ahead clicks are booked, in wall seconds. Short, so a pause or seek cuts in fast. */
+const LOOKAHEAD_S = 0.12;
+const TICK_MS = 25;
+
+/**
+ * A click on the lesson's counts, locked to the video clock. Every 25 ms it reads the
+ * video's own time and rate and books the clicks of the next ~120 ms on the
+ * AudioContext's clock (`clicksAhead`), so speed, pauses, seeks and loop wraps are
+ * followed within one tick and nothing accumulates: each booking is re-derived from
+ * `video.currentTime`, never from the last click. A seek, pause or rate change drops
+ * the clicks not yet sounded; the loop wrap is a seek, so the loop's first click is
+ * booked from where the video really restarted.
+ *
+ * `window.__metronomeLog`, when a test sets it to an array, gets every booked click.
+ */
+export function useMetronome(
+  video: HTMLVideoElement | null,
+  loopRef: React.RefObject<[number, number] | null>,
+  grid: CountGrid,
+  on: boolean,
+  mode: ClickMode,
+  volume: number,
+) {
+  useEffect(() => {
+    // Squared: the slider feels even to the ear.
+    if (audio) audio.out.gain.value = volume * volume;
+  }, [volume, on]);
+
+  useEffect(() => {
+    if (!video || !on) return;
+    const a = unlockAudio();
+    if (!a) return;
+    const { ctx, out } = a;
+    out.gain.value = volume * volume;
+    let booked: { when: number; node: GainNode }[] = [];
+    let last = -Infinity;
+
+    const blip = (when: number, label: number) => {
+      const osc = ctx.createOscillator();
+      const env = ctx.createGain();
+      // The 1 highest, the "and" lowest and softer: heard apart without looking.
+      osc.frequency.value = label === 1 ? 1760 : label === 0 ? 880 : 1320;
+      const peak = label === 0 ? 0.45 : 1;
+      env.gain.setValueAtTime(0, when);
+      env.gain.linearRampToValueAtTime(peak, when + 0.002);
+      env.gain.exponentialRampToValueAtTime(0.001, when + 0.045);
+      osc.connect(env).connect(out);
+      osc.start(when);
+      osc.stop(when + 0.05);
+      booked.push({ when, node: env });
+    };
+
+    /** Drop what has not sounded yet; what already started stays, so it is not doubled. */
+    const drop = () => {
+      const now = ctx.currentTime;
+      booked = booked.filter((b) => {
+        if (b.when > now + 0.003) {
+          b.node.disconnect();
+          return false;
+        }
+        return true;
+      });
+      last = booked.reduce((m, b) => Math.max(m, b.when), -Infinity);
+    };
+
+    const tick = () => {
+      if (video.paused || video.seeking || ctx.state !== "running") return;
+      const now = ctx.currentTime;
+      const rate = video.playbackRate;
+      const gap = (0.4 * (mode === "ands" ? 0.5 : 1) * grid.secondsPerCount) / rate;
+      for (const c of clicksAhead({ grid, loop: loopRef.current, t: video.currentTime, rate, lookahead: LOOKAHEAD_S, mode })) {
+        const when = now + c.in;
+        if (when < last + gap) continue; // already booked on an earlier tick
+        blip(when, c.label);
+        last = when;
+        (window as any).__metronomeLog?.push({ when, at: c.at, label: c.label, rate });
+      }
+      booked = booked.filter((b) => b.when > now - 1);
+    };
+
+    const id = window.setInterval(tick, TICK_MS);
+    const onSeeked = () => (drop(), tick());
+    const events = ["seeking", "pause", "ratechange"] as const;
+    events.forEach((e) => video.addEventListener(e, drop));
+    video.addEventListener("seeked", onSeeked);
+    video.addEventListener("playing", tick);
+    return () => {
+      clearInterval(id);
+      events.forEach((e) => video.removeEventListener(e, drop));
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("playing", tick);
+      last = -Infinity;
+      drop();
+    };
+    // `volume` is applied by the effect above without rebooking.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video, loopRef, grid, on, mode]);
 }
 
 export function useMedia(query: string): boolean {
