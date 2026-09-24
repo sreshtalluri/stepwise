@@ -729,9 +729,9 @@ export type ViewId = "camera" | "front" | "back" | "side" | "top" | "hands" | "f
 export interface ViewPreset {
   id: ViewId;
   label: string;
-  /** Radians, 0 = in front of the dancer (+Z), measured about +Y. */
+  /** Radians, 0 = toward the source camera, measured about the floor normal (`stageBasis`). */
   azimuth: number;
-  /** Radians above the horizon. */
+  /** Radians above the floor plane (`stageBasis`). */
   elevation: number;
   /** Extra margin on the distance that frames `focus` — 1 is a tight fit. */
   distance: number;
@@ -750,6 +750,69 @@ export const VIEW_PRESETS: ViewPreset[] = [
   // (`sourceProjection`). The numbers are unused; the 3D pane shows "camera" meanwhile.
   { id: "overlay", label: "on video", azimuth: 0, elevation: 0.14, distance: 1, focus: "body" },
 ];
+
+/**
+ * The axes the estimated views orbit in: `up` is the floor normal, `back` points from
+ * the dancer toward the source camera along the floor, `right = up × back`. A preset's
+ * azimuth/elevation are read in this basis (azimuth 0 = `back`, measured about `up`).
+ *
+ * WHY. World space IS the source camera's frame (`camera_to_world` is identity on
+ * real clips), so world +Y is "up in the phone's picture", not up in the room. A
+ * phone pitched up 13.6° (solo-02: normal [-0.016, 0.972, -0.235]) put every orbit
+ * view on an axis 13.6° off gravity, and the side view showed the floor and the body
+ * leaning by exactly that. The body and the fitted floor agree with each other (mean
+ * pelvis→neck is 6° off the normal on the upright half of solo-02, vs 12° off +Y);
+ * only the camera rig was tilted.
+ *
+ * `level` false, or grounding "none", returns the camera's own axes. The "camera"
+ * preset uses that on purpose — it is the one view that is not estimated, so it stays
+ * in the source camera's frame. "none" uses it because there is no floor to level to,
+ * and a body-derived up is a dancer's lean, not gravity.
+ */
+export interface StageBasis {
+  right: Vec3;
+  up: Vec3;
+  back: Vec3;
+}
+
+export function stageBasis(doc: MotionResult, level = true): StageBasis {
+  const m = doc.camera.camera_to_world; // column-major: columns are the camera's x, y, z axes
+  const camX: Vec3 = [m[0], m[1], m[2]];
+  const camY: Vec3 = [m[4], m[5], m[6]];
+  const camZ: Vec3 = [m[8], m[9], m[10]];
+  const plane = !level || doc.grounding.status === "none" ? null : doc.grounding.floor_plane;
+  if (!plane) return { right: camX, up: camY, back: camZ };
+
+  let up = norm(plane.normal as Vec3);
+  // The camera is always on the room side of the floor, so that is the side up points to.
+  const c: Vec3 = [m[12] - plane.point[0], m[13] - plane.point[1], m[14] - plane.point[2]];
+  if (dot(up, c) < 0) up = [-up[0], -up[1], -up[2]];
+  // The camera's +Z (toward the viewer) laid onto the floor; a straight-down camera has
+  // no such direction, so its picture-down (-Y) is used instead.
+  let back = reject(camZ, up);
+  if (Math.hypot(...back) < 1e-3) back = reject([-camY[0], -camY[1], -camY[2]], up);
+  back = norm(back);
+  return { right: cross(up, back), up, back };
+}
+
+/** `subject + dist * (direction of azimuth/elevation in `basis`)`. */
+export function orbitPosition(basis: StageBasis, subject: Vec3, azimuth: number, elevation: number, dist: number): Vec3 {
+  const r = Math.sin(azimuth) * Math.cos(elevation) * dist;
+  const u = Math.sin(elevation) * dist;
+  const b = Math.cos(azimuth) * Math.cos(elevation) * dist;
+  return [0, 1, 2].map((i) => subject[i] + basis.right[i] * r + basis.up[i] * u + basis.back[i] * b) as Vec3;
+}
+
+const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const norm = (a: Vec3): Vec3 => {
+  const l = Math.hypot(...a);
+  return [a[0] / l, a[1] / l, a[2] / l];
+};
+const reject = (a: Vec3, n: Vec3): Vec3 => {
+  const k = dot(a, n);
+  return [a[0] - n[0] * k, a[1] - n[1] * k, a[2] - n[2] * k];
+};
+const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
 /**
  * DESIGN.md §4: the front view is camera evidence; every other viewpoint is
