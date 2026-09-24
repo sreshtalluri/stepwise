@@ -220,3 +220,22 @@ test("no em-dashes on the entry flow — flow redesign voice", () => {
   collect({ marketing: copy.marketing, upload: copy.upload, processing: copy.processing }, "copy", entry);
   for (const [path, line] of entry) assert.ok(!line.includes("—"), `${path} has an em-dash: ${line}`);
 });
+
+test("privacy and removal copy match what the code does — §7h", () => {
+  const all = copy.privacy.sections.flatMap((s) => s.items).join(" ");
+  // retention.TTL_DAYS = 180. If that changes, this sentence changes with it.
+  assert.ok(all.includes(
+    "We keep the clip while the lesson exists. Lessons nobody opens for six months are deleted, and a removal request deletes one straight away.",
+  ));
+  // The takedown deletes for everyone (dedupe: one canonical lesson) and keeps nothing to restore.
+  assert.equal(copy.removal.body,
+    "This deletes the video and the 3D lesson for everyone who has the link. It can't be undone.");
+  // No accounts: "my lessons" is this browser and must say so.
+  assert.match(copy.myLessons.subtitle, /on this device/i);
+  // The API's relationship enum, verbatim (services/motion-api/api.py RemovalRequest).
+  assert.deepEqual(Object.keys(copy.removal.relationships), ["i_am_in_it", "i_own_the_rights", "other"]);
+  // Nothing there is to promise: no terms, no response time, no inbox.
+  assert.ok(!/\b(terms|within \d+|hours?|we will respond|contact us)\b/i.test(all), all);
+  // There is no app, only a website (1e680e3).
+  for (const [path, line] of lines) assert.ok(!/\bthe app\b/i.test(line), `${path}: ${line}`);
+});
