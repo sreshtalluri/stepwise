@@ -108,7 +108,9 @@ export const upload = {
   // otherwise.
   link: {
     label: "TikTok or YouTube link",
-    placeholder: "Paste a TikTok or YouTube link",
+    // Longest first; the field shows the longest that fits its width (a
+    // placeholder clips, it cannot wrap). The accessible label keeps the full name.
+    placeholders: ["Paste a TikTok or YouTube link", "Paste a TikTok/YouTube link", "Paste a video link"],
     submit: "Learn the dance",
     busy: "Fetching the video",
     inviteLabel: "Invite code",

@@ -1392,6 +1392,12 @@ a.ls-chip {
 .ls-land .ls-transport {
   flex-wrap: wrap;
 }
+/* Prop it up hides the bar and the transport, so the panels are the only row:
+   let them fill it (as the first, auto row they collapsed to nothing and the
+   counts pinned to their foot sat above the screen). */
+.ls-phone.ls-prop:not(.ls-land) {
+  grid-template-rows: minmax(0, 1fr);
+}
 .ls-phone.ls-land.ls-prop {
   grid-template-columns: minmax(0, 1fr);
 }
