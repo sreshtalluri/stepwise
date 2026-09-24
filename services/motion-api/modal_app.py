@@ -1445,9 +1445,10 @@ def export_clip_gltf(clip_id: str, job_id: str | None = None):
     # a retryable `export_error` on a job that had already done all the GPU
     # work. A Volume is storage, not a queue: there is no delivery guarantee
     # beyond eventual consistency, so the reload has to be explicit.
-    if not os.path.exists(npz_path):
-        print(f"{npz_path} not visible yet -- reloading the results Volume")
-        results.reload()
+    # Always, not only when the npz is missing: on a re-run the OLD npz is
+    # visible, and exporting it shipped every pre-hygiene track again
+    # (345b..., 2026-09-24: 4 GLBs for 1 dancer).
+    results.reload()
     print(f"loading {npz_path}")
     data = np.load(npz_path, allow_pickle=True)
     if bool(data["refused"]):
