@@ -242,7 +242,9 @@ export const lesson = {
    * on `notReady` — which is why that line does not promise the lesson exists.
    */
   load: {
-    loading: "Loading the lesson.",
+    loading: "Getting your lesson ready",
+    // True of every lesson: the page downloads the moves, then each dancer's 3D body.
+    loadingNote: "Fetching the moves and each dancer's 3D body.",
     jobTitle: "Your lesson",
     notReady: "This lesson is not ready yet.",
     notReadyLink: "See how it is going",

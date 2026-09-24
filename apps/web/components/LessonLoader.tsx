@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import LessonViewer from "./LessonViewer";
 import RemoveLessonDialog from "./RemoveLessonDialog";
+import LessonLoading from "./LessonLoading";
 import { LESSONS, lessonSource } from "../lib/lessons";
 import { captureThumb, forgetLesson, hasThumb, recordOpened } from "../lib/myLessons";
 import { lesson as lessonCopy } from "../lib/copy";
@@ -87,15 +88,13 @@ export default function LessonLoader({ lessonId }: { lessonId: string }) {
     );
   }
 
+  if (load.kind === "loading") return <LessonLoading />;
+
   const copy = lessonCopy.load;
   const job = encodeURIComponent(lessonId);
   return (
     <main className="wrap app-screen">
-      {load.kind === "loading" ? (
-        <p className="muted" aria-live="polite">
-          {copy.loading}
-        </p>
-      ) : load.status === 409 ? (
+      {load.status === 409 ? (
         <>
           <h1 className="app-title">{copy.notReady}</h1>
           <Link href={`/job/${job}`} className="btn" style={{ marginTop: 20 }}>
