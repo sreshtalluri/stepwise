@@ -19,11 +19,15 @@ import {
   saveLoopLength,
   spanDone,
   stepLoop as stepLoopBy,
-  windowAt,
+  loopLength,
+  presetCounts,
   type Eight,
 } from "../lib/lessonEngine";
+import { loadClickVolume, loadMusicVolume, saveClickVolume, saveMusicVolume, type ClickMode } from "../lib/metronome";
 import {
   currentCount,
+  eightStartCount,
+  timeOfCount,
   loopTimesS,
   nudgeCountOne,
   setCountOne,
@@ -31,7 +35,7 @@ import {
   timelineEndS,
 } from "../../../packages/navigation/src/core";
 import type { LessonStructure, LoopSpan } from "../../../packages/navigation/src/core";
-import { PHONE_QUERY, useMedia, useVideoClock, useVideoCrop } from "./lesson/hooks";
+import { PHONE_QUERY, unlockAudio, useMedia, useMetronome, useVideoClock, useVideoCrop } from "./lesson/hooks";
 import DesktopLesson from "./lesson/DesktopLesson";
 import PhoneLesson from "./lesson/PhoneLesson";
 import "./lesson/lesson.css";
@@ -41,8 +45,9 @@ import "./lesson/lesson.css";
  * desktop are different layouts, not one stretched). Same URL for both; the phone one
  * is switched in on narrow or sideways screens, and both read and write only this.
  *
- * One mode, nothing forced: pick some counts to loop (2, 4 or 8 of them, a range, or
- * the whole dance), a speed, optionally Build up, and follow. There is exactly one clock — the `<video>` — and one
+ * One mode, nothing forced: the whole dance plays with its counts until the learner
+ * drags a loop across the timeline (or taps a shortcut), a speed, optionally Build up
+ * and a click on the counts, and follow. There is exactly one clock — the `<video>` — and one
  * loop, applied inside it (`useVideoClock`); build-up and the full-speed ticks count
  * that clock's loop passes.
  */
@@ -233,6 +238,7 @@ function useLesson(
     // Play starts inside the loop, not wherever the playhead drifted.
     if (lp && (video.currentTime < lp[0] - 0.05 || video.currentTime >= lp[1])) video.currentTime = lp[0];
     if (!lp && video.currentTime >= endS - 0.05) video.currentTime = 0;
+    if (clickOnRef.current) unlockAudio(); // inside the tap: iOS suspends audio between plays
     void video.play().catch(() => {});
   }, [video, endS]);
   const pause = useCallback(() => video?.pause(), [video]);
@@ -244,14 +250,19 @@ function useLesson(
     [video, endS],
   );
 
-  /** Change the loop: build-up starts over, and the playhead jumps into the new loop. */
+  /**
+   * Change the loop: build-up starts over, and the playhead jumps into the new loop —
+   * or, with `keep` (a handle dragged), stays put if it is already inside it.
+   */
   const setLoop = useCallback(
-    (next: LoopSpan | null, opts: { play?: boolean } = {}) => {
+    (next: LoopSpan | null, opts: { play?: boolean; keep?: boolean } = {}) => {
       setLoopState(next);
       setPasses(0);
       // Sync before seeking: the seek's own clock tick must not wrap back into the old loop.
       loopRef.current = loopTimes(next);
-      if (video && next) video.currentTime = loopRef.current![0];
+      const lp = loopRef.current;
+      const inside = !!video && !!lp && video.currentTime >= lp[0] && video.currentTime < lp[1];
+      if (video && lp && !(opts.keep && inside)) video.currentTime = lp[0];
       if (video && opts.play) void video.play().catch(() => {});
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loopTimes is pure over structure/endS
@@ -266,23 +277,36 @@ function useLesson(
   const hereCount = currentCount(structure.grid, displayTime);
   const here: Eight | null = eights.find((e) => hereCount >= e.startCount && hereCount <= e.endCount) ?? null;
   const loopEight = eightOf(eights, loop);
-  /** Next or previous `loopLen` counts; 0 = loop `loopLen` from here. */
+  /**
+   * Next or previous: the loop moves by its own length (a dragged 3& – 6 steps on by
+   * 3½). With no loop, the playhead moves by an eight and nothing starts looping.
+   * 0 = loop the preset length from here.
+   */
+  const preset = presetCounts(loopLen, total);
   const stepLoop = useCallback(
-    (delta: number, opts: { play?: boolean } = {}) => setLoop(stepLoopBy(loop, hereCount, loopLen, delta, total), opts),
-    [loop, hereCount, loopLen, total, setLoop],
+    (delta: number, opts: { play?: boolean } = {}) => {
+      if (!loop && delta !== 0) {
+        const c = Math.min(Math.max(1, eightStartCount(hereCount) + delta * 8), total);
+        seek(timeOfCount(structure.grid, c));
+        if (opts.play && video) void video.play().catch(() => {});
+        return;
+      }
+      setLoop(stepLoopBy(loop, hereCount, delta === 0 || !loop ? preset : loopLength(loop), delta, total), opts);
+    },
+    [loop, hereCount, preset, total, setLoop, seek, structure, video],
   );
-  /** A new length re-cuts the current loop from its first count. */
+  /** A preset re-cuts the current loop from its first count, or loops that many from here. */
   const setLoopLen = useCallback(
     (len: number) => {
       setLoopLenState(len);
       saveLoopLength(lessonId, len);
-      if (loop) setLoop(stepLoopBy(loop, hereCount, len, 0, total), { play: playingRef.current });
+      setLoop(stepLoopBy(loop, hereCount, presetCounts(len, total), 0, total), { play: playingRef.current });
     },
     [lessonId, loop, hereCount, total, setLoop],
   );
-  const next = passes >= 1 ? nextLoop(loop, loopLen, total) : null;
+  const next = passes >= 1 && loop ? nextLoop(loop, loopLength(loop), total) : null;
 
-  // ---- first open: loop from the first count not yet done at full speed, or the hand-off's
+  // ---- first open: the whole dance, unless the hand-off brought a loop
   const opened = useRef(false);
   useEffect(() => {
     if (!restored || opened.current || !video) return;
@@ -291,11 +315,31 @@ function useLesson(
     // already practising a speed and some counts, so the lesson opens on the same ones.
     const q = parseHandoff(window.location.search, SPEEDS, total);
     if (q.speed !== null) setSpeed(q.speed);
-    const saved = loadDone(lessonId);
-    let first = 1;
-    while (first < total && saved.has(first)) first++;
-    setLoop(q.loop ?? windowAt(first, loadLoopLength(lessonId), total));
-  }, [restored, video, total, lessonId, setLoop]);
+    if (q.loop) setLoop(q.loop);
+  }, [restored, video, total, setLoop]);
+
+  // ---- the click: on our count grid, locked to the video clock (useMetronome)
+  const [clickOn, setClickOnState] = useState(false);
+  const clickOnRef = useRef(false);
+  clickOnRef.current = clickOn;
+  const [clickMode, setClickMode] = useState<ClickMode>("counts");
+  const [clickVol, setClickVolState] = useState(0.3);
+  const [musicVol, setMusicVolState] = useState(1);
+  useEffect(() => {
+    setClickVolState(loadClickVolume());
+    setMusicVolState(loadMusicVolume());
+  }, []);
+  /** Must run inside the tap that turns it on: iOS only starts audio from a gesture. */
+  const setClickOn = useCallback((on: boolean) => {
+    if (on) unlockAudio();
+    setClickOnState(on);
+  }, []);
+  const setClickVol = useCallback((v: number) => (setClickVolState(v), saveClickVolume(v)), []);
+  const setMusicVol = useCallback((v: number) => (setMusicVolState(v), saveMusicVolume(v)), []);
+  useEffect(() => {
+    if (video) video.volume = musicVol;
+  }, [video, musicVol]);
+  useMetronome(video, loopRef, structure.grid, clickOn, clickMode, clickVol);
 
   // ---- count 1: one tap, a nudge, or one of the tracker's other candidates
   const tapOne = useCallback(() => editStructure(tapOnOne(structure, timeRef.current, endS)), [structure, timeRef, endS, editStructure]);
@@ -316,6 +360,7 @@ function useLesson(
     structure, editStructure, authored, countsFrom, tapOne, nudgeOne, tryOne, alternates,
     eights, loop, setLoop, loopEight, here, hereCount, stepLoop, loopLen, setLoopLen, next, done, sameSpan,
     speed, speedPick, setSpeed, cycleSpeed, buildUp, setBuildUp, passes, setHoldSlow,
+    clickOn, setClickOn, clickMode, setClickMode, clickVol, setClickVol, musicVol, setMusicVol,
     multi, selected, chooseDancer, pickerOpen, setPickerOpen,
     view, setView, angle, setAngle, extras, setExtras, mirrored, setMirrored, follow, setFollow,
     showCrops, setShowCrops, absent, setAbsent, focusRef, crop,

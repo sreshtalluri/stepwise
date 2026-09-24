@@ -1006,25 +1006,182 @@
   gap: 4px;
   min-width: 0;
 }
-/* A plain scrubber for the whole clip; the chips are the navigation. */
-.ls-scrub {
-  width: 100%;
-  height: 24px;
-  margin: 0;
-  accent-color: var(--accent);
-  cursor: pointer;
+/* The timeline: the primary control. A tick a count, a taller one with a "1" on each downbeat. */
+.ls-tl-wrap {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
-.ls-chips-top {
+.ls-tl {
+  position: relative;
+  height: 48px;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ls-tl-track {
+  position: absolute;
+  inset: 16px 0 10px;
+}
+.ls-tl-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--line);
+}
+.ls-tl-tick {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--line);
+  pointer-events: none;
+}
+.ls-tl-tick.ls-one {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -0.5px;
+  background: var(--ink-faint);
+}
+.ls-tl-tick b {
+  position: absolute;
+  top: -14px;
+  left: 1px;
+  transform: translateX(-50%);
+  font: 600 0.6875rem/1 var(--font-ui);
+  color: var(--ink-faint);
+}
+.ls-tl-loop {
+  position: absolute;
+  top: 12px;
+  bottom: 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  pointer-events: none;
+}
+.ls-tl-loop.ls-preview {
+  background: color-mix(in srgb, var(--accent) 36%, transparent);
+}
+.ls-tl-head {
+  position: absolute;
+  top: 10px;
+  bottom: 4px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--ink);
+  pointer-events: none;
+}
+/* A 44 px target around a slim grip. */
+.ls-tl-handle {
+  position: absolute;
+  top: 4px;
+  bottom: 0;
+  width: 44px;
+  margin-left: -22px;
+  z-index: 2;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.ls-tl-handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  bottom: 4px;
+  width: 8px;
+  margin-left: -4px;
+  border-radius: 4px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--paper);
+}
+.ls-tl-handle:focus-visible {
+  outline: none;
+}
+.ls-tl-handle:focus-visible::after {
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--ink);
+}
+.ls-tl-read {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-width: 0;
+  gap: 6px;
+  min-height: 36px;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
 }
-.ls-chips-top .ls-scrub {
+.ls-tl-name {
+  font-weight: 700;
+  color: var(--ink);
+}
+.ls-tl-nudge {
+  display: inline-flex;
+  align-items: center;
+}
+.ls-tl-nudge b {
+  min-width: 2.4em;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.ls-tl-nudge button,
+.ls-tl-clear {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: var(--ink-muted);
+}
+.ls-tl-nudge button:hover,
+.ls-tl-clear:hover {
+  background: var(--paper-sunk);
+  color: var(--ink);
+}
+.ls-tl-clear {
+  margin-left: auto;
+}
+.ls-vol {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+.ls-vol input {
   flex: 1;
   min-width: 0;
+  accent-color: var(--accent);
 }
-/* "Loop 2 · 4 · 8 counts": small, beside the scrubber, so it costs no row. */
+/* The "and" between counts: faint, and lit on the off-beat so it can be seen. */
+.ls-and {
+  position: absolute;
+  right: 0;
+  bottom: 8px;
+  transform: translateX(50%);
+  font: 600 0.75rem/1 var(--font-ui);
+  color: var(--ink-faint);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.ls-and.ls-on {
+  color: var(--accent);
+  opacity: 1;
+  transform: translateX(50%) scale(1.6);
+}
+.ls-ph-counts .ls-and {
+  color: rgb(232 225 216 / 0.6);
+}
+.ls-ph-counts .ls-and.ls-on {
+  color: var(--accent);
+}
+/* "Loop 2 · 4 · 8 · 16 · All counts", under More. */
 .ls-looplen {
   display: inline-flex;
   align-items: center;
@@ -1060,12 +1217,14 @@
   align-items: center;
   justify-content: center;
   gap: 4px;
-  min-height: 48px;
+  /* Shortcuts under the timeline, so quieter than it: shorter, smaller, outlined. */
+  min-height: 36px;
   padding: 0 10px;
-  border-radius: 12px;
-  background: var(--paper-sunk);
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
   color: var(--ink-muted);
-  font: 700 1.125rem/1 var(--font-display);
+  font: 600 0.9375rem/1 var(--font-display);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -1340,9 +1499,6 @@
 .ls-sheet {
   gap: 10px;
   padding-top: 12px;
-}
-.ls-sheet .ls-scrub {
-  height: 20px;
 }
 .ls-ph-transport {
   flex-wrap: nowrap;

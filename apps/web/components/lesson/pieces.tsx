@@ -20,10 +20,32 @@ import {
   type MotionResult,
   type ViewId,
 } from "../../lib/motion";
-import { accentForPerson, countLabel, eightStartCount, timeOfCount } from "../../../../packages/navigation/src/core";
+import {
+  accentForPerson,
+  countAtTime,
+  countLabel,
+  eightStartCount,
+  loopTimesS,
+  timeOfCount,
+  type LoopSpan,
+} from "../../../../packages/navigation/src/core";
 import { footContact, type FootContact } from "../../lib/footContact";
 import { dancerBox, firstWellObserved, markerPoint, sideWord, stillCrop } from "../../lib/dancers";
-import { chipLoop, countLoop, extendAnchor, LOOP_LENGTHS, spanDone, spanLabel, type Eight } from "../../lib/lessonEngine";
+import {
+  chipLoop,
+  countLoop,
+  countName,
+  edgeLoop,
+  extendAnchor,
+  LOOP_ALL,
+  LOOP_LENGTHS,
+  loopName,
+  nudgeEdge,
+  presetCounts,
+  spanDone,
+  spanLabel,
+  type Eight,
+} from "../../lib/lessonEngine";
 import { lesson as copy } from "../../lib/copy";
 import { prefersReducedMotion } from "../../lib/reveal";
 import { useCount, useFrameGrabs } from "./hooks";
@@ -391,7 +413,9 @@ export function CloseUps({ l, className = "", onRegion }: { l: Lesson; className
 export function CountBar({ l, big = false, select = false }: { l: Lesson; big?: boolean; select?: boolean }) {
   const grid = l.structure.grid;
   const total = grid.countTotal;
-  const count = useCount(l.timeRef, grid);
+  const half = useCount(l.timeRef, grid, 0.5);
+  const count = Math.floor(half);
+  const len = presetCounts(l.loopLen, total);
   const inDance = count >= 1 && count <= total;
   const first = eightStartCount(inDance ? count : (l.loop?.startCount ?? 1));
   const drag = useRef<{ anchor: number; moved: boolean } | null>(null);
@@ -407,7 +431,7 @@ export function CountBar({ l, big = false, select = false }: { l: Lesson; big?: 
         const c = d && countAt(e.clientX, e.clientY);
         if (!d || !c || (c === d.anchor && !d.moved)) return;
         d.moved = true;
-        l.setLoop(countLoop(c, l.loopLen, total, d.anchor));
+        l.setLoop(countLoop(c, len, total, d.anchor));
       }}
       onPointerUp={() => (drag.current = null)}
       onPointerCancel={() => (drag.current = null)}
@@ -419,7 +443,7 @@ export function CountBar({ l, big = false, select = false }: { l: Lesson; big?: 
           tabIndex={-1}
           data-count={c}
           className={`ls-count${c === count ? " ls-on" : ""}${out(c) ? " ls-out" : ""}${l.done.has(c) ? " ls-done" : ""}`}
-          aria-label={select ? copy.loopLen.fromCount(c, l.loopLen) : undefined}
+          aria-label={select ? copy.loopLen.fromCount(c, len) : undefined}
           title={select ? copy.loopLen.countHint : undefined}
           onPointerDown={(ev) => {
             if (!select || (ev.pointerType === "mouse" && ev.button !== 0)) return;
@@ -433,18 +457,24 @@ export function CountBar({ l, big = false, select = false }: { l: Lesson; big?: 
             drag.current = null;
             if (d?.moved) return;
             const anchor = ev.shiftKey && l.loop ? extendAnchor(l.loop, c) : null;
-            l.setLoop(countLoop(c, l.loopLen, total, anchor), { play: l.playing });
+            l.setLoop(countLoop(c, len, total, anchor), { play: l.playing });
           }}
           disabled={c > total}
         >
           {c <= total ? countLabel(c) : ""}
+          {/* The "and" after the count: there to SEE, it lights on the off-beat. */}
+          {c <= total && (
+            <span className={`ls-and${half === c + 0.5 ? " ls-on" : ""}`} aria-hidden="true">
+              &amp;
+            </span>
+          )}
         </button>
       ))}
     </div>
   );
 }
 
-/** "Loop 2 · 4 · 8 counts": how many counts a tap on a chip or a count loops. */
+/** "Loop 2 · 4 · 8 · 16 · All counts": how many counts a chip, a count or a preset loops. Under More. */
 export function LoopLength({ l }: { l: Lesson }) {
   return (
     <div className="ls-looplen" role="group" aria-label={copy.loopLen.label}>
@@ -452,7 +482,7 @@ export function LoopLength({ l }: { l: Lesson }) {
       <div className="ls-seg">
         {LOOP_LENGTHS.map((n) => (
           <button key={n} type="button" aria-pressed={l.loopLen === n} aria-label={copy.loopLen.option(n)} onClick={() => l.setLoopLen(n)}>
-            {n}
+            {n === LOOP_ALL ? copy.loopLen.all : n}
           </button>
         ))}
       </div>
@@ -462,11 +492,158 @@ export function LoopLength({ l }: { l: Lesson }) {
 }
 
 /**
- * The one row that drives the lesson: a chip per part (an eight until the learner
+ * The timeline: the whole dance, a tick per count and a taller one with a small "1"
+ * on each eight's downbeat. Tap = go there; press and drag across it = loop exactly
+ * those counts, snapped to counts and "and"s (Alt: unsnapped); the loop's two handles
+ * drag to adjust it (44 px targets, arrow keys ½ a count). One pointer model for
+ * mouse and touch, captured on the bar, and `touch-action: none` so a drag here is
+ * never the page's swipe. Under it, the loop in words, ½-count nudges and ×.
+ */
+export function Timeline({ l }: { l: Lesson }) {
+  const bar = useRef<HTMLDivElement>(null);
+  const grid = l.structure.grid;
+  const total = grid.countTotal;
+  const endS = l.endS;
+  const pct = (t: number) => `${(Math.min(Math.max(t / endS, 0), 1) * 100).toFixed(3)}%`;
+  const g = useRef<{ kind: "new" | "start" | "end"; x0: number; from: number; moved: boolean } | null>(null);
+  const [preview, setPreview] = useState<LoopSpan | null>(null);
+  const timeAtX = (x: number) => {
+    const r = bar.current!.getBoundingClientRect();
+    return Math.min(Math.max((x - r.left) / r.width, 0), 1) * endS;
+  };
+  const countAtX = (x: number) => countAtTime(grid, timeAtX(x));
+  const ticks = useMemo(
+    () =>
+      Array.from({ length: total }, (_, i) => i + 1).map((c) => (
+        <span key={c} className={countLabel(c) === 1 ? "ls-tl-tick ls-one" : "ls-tl-tick"} style={{ left: pct(timeOfCount(grid, c)) }}>
+          {countLabel(c) === 1 && <b>1</b>}
+        </span>
+      )),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pct is over endS
+    [grid, total, endS],
+  );
+
+  const spanFor = (x: number, free: boolean): LoopSpan | null => {
+    const d = g.current!;
+    const c = countAtX(x);
+    if (d.kind === "new") return edgeLoop(d.from, c, total, free);
+    const lp = l.loop!;
+    // The other edge stays put; a handle dragged past it swaps roles.
+    return d.kind === "start" ? edgeLoop(c, lp.endCount + 1, total, free) : edgeLoop(lp.startCount, c, total, free);
+  };
+  const onDown = (e: React.PointerEvent, kind: "new" | "start" | "end") => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    bar.current!.setPointerCapture(e.pointerId);
+    g.current = { kind, x0: e.clientX, from: countAtX(e.clientX), moved: kind !== "new" };
+  };
+  const onMove = (e: React.PointerEvent) => {
+    const d = g.current;
+    if (!d) return;
+    if (!d.moved && Math.abs(e.clientX - d.x0) < 6) return;
+    d.moved = true;
+    setPreview(spanFor(e.clientX, e.altKey));
+  };
+  const onUp = (e: React.PointerEvent) => {
+    const d = g.current;
+    g.current = null;
+    setPreview(null);
+    if (!d) return;
+    if (!d.moved) return l.seek(timeAtX(e.clientX));
+    const s = spanFor(e.clientX, e.altKey);
+    if (s) l.setLoop(s, { play: l.playing, keep: d.kind !== "new" });
+  };
+  const nudge = (edge: "start" | "end", d: number) => l.loop && l.setLoop(nudgeEdge(l.loop, edge, d, total), { play: l.playing, keep: true });
+
+  const shown = preview ?? l.loop;
+  const [a, b] = shown ? loopTimesS(grid, shown) : [0, 0];
+  const handle = (edge: "start" | "end", t: number) => (
+    <span
+      role="slider"
+      tabIndex={0}
+      className={`ls-tl-handle ls-${edge}`}
+      style={{ left: pct(t) }}
+      aria-label={edge === "start" ? copy.timeline.start : copy.timeline.end}
+      aria-valuemin={1}
+      aria-valuemax={total}
+      aria-valuenow={edge === "start" ? shown!.startCount : shown!.endCount}
+      aria-valuetext={countName(edge === "start" ? shown!.startCount : shown!.endCount)}
+      onPointerDown={(e) => onDown(e, edge)}
+      onKeyDown={(e) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        e.preventDefault();
+        e.stopPropagation(); // not the page's seek-by-a-count
+        nudge(edge, e.key === "ArrowLeft" ? -0.5 : 0.5);
+      }}
+    />
+  );
+  const nudges = (edge: "start" | "end") => {
+    const name = edge === "start" ? copy.timeline.start : copy.timeline.end;
+    return (
+      <span className="ls-tl-nudge">
+        <button type="button" onClick={() => nudge(edge, -0.5)} aria-label={copy.timeline.earlier(name)}>
+          <Icon name="left" size={14} />
+        </button>
+        <b>{countName(edge === "start" ? l.loop!.startCount : l.loop!.endCount)}</b>
+        <button type="button" onClick={() => nudge(edge, 0.5)} aria-label={copy.timeline.later(name)}>
+          <Icon name="right" size={14} />
+        </button>
+      </span>
+    );
+  };
+
+  return (
+    <div className="ls-tl-wrap">
+      <div
+        ref={bar}
+        className="ls-tl"
+        role="slider"
+        tabIndex={-1}
+        aria-label={copy.timeline.label}
+        aria-valuemin={0}
+        aria-valuemax={Math.round(endS)}
+        aria-valuenow={Math.round(l.displayTime)}
+        onPointerDown={(e) => onDown(e, "new")}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={() => ((g.current = null), setPreview(null))}
+      >
+        <div className="ls-tl-track">{ticks}</div>
+        {shown && <div className={`ls-tl-loop${preview ? " ls-preview" : ""}`} style={{ left: pct(a), width: `calc(${pct(b)} - ${pct(a)})` }} />}
+        <div className="ls-tl-head" style={{ left: pct(l.displayTime) }} />
+        {shown && handle("start", a)}
+        {shown && handle("end", b)}
+      </div>
+      <div className="ls-tl-read" aria-live="polite">
+        {l.loop && !preview ? (
+          <>
+            <span className="ls-tl-name">{copy.loopLen.lead}</span>
+            {nudges("start")}
+            <span aria-hidden="true">–</span>
+            {nudges("end")}
+            <button type="button" className="ls-tl-clear" onClick={() => l.setLoop(null)} aria-label={copy.timeline.clear} title={copy.timeline.clear}>
+              <Icon name="x" size={16} />
+            </button>
+          </>
+        ) : preview ? (
+          <span className="ls-tl-name">{loopName(preview)}</span>
+        ) : (
+          <span className="ls-hint" title={copy.timeline.hintFree}>
+            {copy.timeline.hint}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Shortcuts, secondary to the timeline: a chip per part (an eight until the learner
  * edits them). Tap = loop the chosen length from its first count; tap again (or
  * "All") = the whole dance; shift-tap or drag across chips = loop those whole chips.
  * A quiet tick marks a chip whose counts have all been looped at full speed. Above
- * it, a plain scrubber for the whole clip, and the loop length.
+ * it, the timeline.
  */
 export function EightChips({ l }: { l: Lesson }) {
   const drag = useRef<{ anchor: number; moved: boolean } | null>(null);
@@ -476,23 +653,11 @@ export function EightChips({ l }: { l: Lesson }) {
   };
   // Lit when the loop touches it, so four counts inside an eight still show where they are.
   const inLoop = (e: Eight) => !!l.loop && e.startCount <= l.loop.endCount && e.endCount >= l.loop.startCount;
-  const endS = l.endS;
   const total = l.structure.grid.countTotal;
+  const len = presetCounts(l.loopLen, total);
   return (
     <div className="ls-chips-wrap">
-      <div className="ls-chips-top">
-        <input
-          className="ls-scrub"
-          type="range"
-          min={0}
-          max={endS}
-          step={0.01}
-          value={Math.min(l.displayTime, endS)}
-          onChange={(e) => l.seek(Number(e.target.value))}
-          aria-label={copy.chips.scrub}
-        />
-        <LoopLength l={l} />
-      </div>
+      <Timeline l={l} />
       <div
         className="ls-chips"
         role="group"
@@ -503,7 +668,7 @@ export function EightChips({ l }: { l: Lesson }) {
           const k = chipAt(e.clientX, e.clientY);
           if (k < 0 || (k === d.anchor && !d.moved)) return;
           d.moved = true;
-          l.setLoop(chipLoop(l.loop, l.eights[k], l.loopLen, total, l.eights[d.anchor]));
+          l.setLoop(chipLoop(l.loop, l.eights[k], len, total, l.eights[d.anchor]));
         }}
         onPointerUp={() => (drag.current = null)}
         onPointerCancel={() => (drag.current = null)}
@@ -531,7 +696,7 @@ export function EightChips({ l }: { l: Lesson }) {
                 if (d?.moved) return;
                 const from = l.loop?.startCount ?? 0;
                 const anchor = ev.shiftKey ? (l.eights.find((x) => x.startCount <= from && x.endCount >= from) ?? null) : null;
-                l.setLoop(chipLoop(l.loop, e, l.loopLen, total, anchor), { play: l.playing });
+                l.setLoop(chipLoop(l.loop, e, len, total, anchor), { play: l.playing });
               }}
             >
               <span>{e.n}</span>
@@ -578,6 +743,15 @@ export function Transport({ l, more, className = "" }: { l: Lesson; more: React.
           {copy.transport.build}
           {l.buildUp && <b> {l.speed}×</b>}
         </span>
+      </button>
+      <button
+        type="button"
+        className={`ls-build${l.clickOn ? " ls-on" : ""}`}
+        aria-pressed={l.clickOn}
+        onClick={() => l.setClickOn(!l.clickOn)}
+        title={copy.click.toggleHint}
+      >
+        <span>{copy.click.toggle}</span>
       </button>
       {l.next && (
         <button type="button" className="ls-next" onClick={() => l.setLoop(l.next, { play: l.playing })}>
@@ -626,6 +800,44 @@ export function CountOneTools({ l }: { l: Lesson }) {
         </div>
       )}
       <span className="ls-hint">{copy.countOne.tapHint}</span>
+    </div>
+  );
+}
+
+/**
+ * The click's options: counts or counts + and, its own volume and the music's, so the
+ * two can be balanced. iOS ignores a page setting a video's volume, so no music slider
+ * there (it would move and do nothing).
+ */
+export function ClickTools({ l }: { l: Lesson }) {
+  const [ios, setIos] = useState(false);
+  useEffect(() => setIos(/iPhone|iPad|iPod/.test(navigator.userAgent)), []);
+  return (
+    <div className="ls-group" role="group" aria-labelledby="ls-click-h">
+      <span className="ls-group-label" id="ls-click-h">
+        {copy.click.heading}
+      </span>
+      <div className="ls-group-row">
+        <button type="button" className="ls-chip" aria-pressed={l.clickOn} onClick={() => l.setClickOn(!l.clickOn)}>
+          {l.clickOn ? copy.click.on : copy.click.off}
+        </button>
+        {(["counts", "ands"] as const).map((m) => (
+          <button key={m} type="button" className="ls-chip" aria-pressed={l.clickMode === m} onClick={() => (l.setClickMode(m), l.setClickOn(true))}>
+            {copy.click[m]}
+          </button>
+        ))}
+      </div>
+      <label className="ls-vol">
+        <span>{copy.click.volume}</span>
+        <input type="range" min={0} max={1} step={0.05} value={l.clickVol} onChange={(e) => l.setClickVol(Number(e.target.value))} />
+      </label>
+      {!ios && (
+        <label className="ls-vol">
+          <span>{copy.click.music}</span>
+          <input type="range" min={0} max={1} step={0.05} value={l.musicVol} onChange={(e) => l.setMusicVol(Number(e.target.value))} />
+        </label>
+      )}
+      <span className="ls-hint">{l.countsFrom === "hand" ? copy.click.yours : copy.click.guess}</span>
     </div>
   );
 }
@@ -819,6 +1031,11 @@ export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }
         </div>
       </div>
       {extra}
+      <div className="ls-group">
+        <span className="ls-group-label">{copy.loopLen.label}</span>
+        <LoopLength l={l} />
+      </div>
+      <ClickTools l={l} />
       <CountOneTools l={l} />
       {l.multi && (
         <div className="ls-group">
