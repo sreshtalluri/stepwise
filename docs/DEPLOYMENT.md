@@ -167,6 +167,7 @@ developer-machine copy only; the Modal Secrets are the deployed source of truth.
 | `stepwise-origin` | `STEPWISE_ORIGIN_KEY` (same value as the Worker secret) | `web` (origin lock) | **yes** |
 | `stepwise-sentry` | `SENTRY_DSN_BACKEND` (+ `SENTRY_DSN_WEB`, ignored by Modal) | every function | **yes** — §5.3 |
 | `stepwise-invite` | `STEPWISE_INVITE_CODES`, comma-separated | `web` (`POST /clips/link`) | **yes** |
+| `stepwise-posthog` | `POSTHOG_KEY` (project key, `phc_…`), *(optional)* `POSTHOG_HOST` | `web` (`analytics.forward`) | no — §3.2 |
 
 To add or revoke an invite code: rewrite the whole list (`--force` replaces,
 it does not merge), then redeploy and stop the warm container (§7.1) — the
@@ -287,6 +288,33 @@ also needs its own /privacy line.
 value for /admin. **Retention:** `sweep_expired` rolls rows older than 13
 months into `event_daily` and deletes them. A dry run prints `events:
 {rolled_up_rows: N}`.
+
+### 3.2 PostHog: the dashboards
+
+PostHog Cloud (US) replaces Grafana and `/admin` as the place to look. Nothing
+changes in the browser: no PostHog SDK, no cookies. After `POST /events`
+writes a batch to Neon, the API forwards the same allowlisted events to
+`https://us.i.posthog.com/batch/` in a background task (`analytics.forward`):
+`distinct_id` is the day hash, person profiles and geoip are off, `$ip` is
+null, and no user agent is sent. A PostHog failure is logged and dropped. Only
+the browser events are forwarded; `job_created` / `job_finished` stay in Neon.
+Without the secret nothing leaves Neon.
+
+```sh
+# PostHog → Project settings → Project API key (phc_…; a write-only key)
+modal secret create stepwise-posthog POSTHOG_KEY=phc_...
+# optional, only for another region or a proxy:
+#   modal secret create stepwise-posthog --force POSTHOG_KEY=phc_... POSTHOG_HOST=https://eu.i.posthog.com
+cd services/motion-api && modal deploy modal_app.py   # then stop the warm container (§7.1)
+```
+
+In PostHog, also turn on **Project settings → Discard client IP data**, so
+the one address it does see (Modal's) is not stored either.
+
+Once events show up in PostHog, `/admin`, `GET /metrics`, the `stepwise-admin`
+secret and the Grafana `stepwise_reader` login can be retired (`ALTER ROLE
+stepwise_reader NOLOGIN;`). They are left in place until then. Neon stays the
+source of truth, with the 13-month roll-up.
 
 ### Environments
 

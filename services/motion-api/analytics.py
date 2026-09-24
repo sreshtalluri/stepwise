@@ -5,7 +5,9 @@ rules, kept rather than paraphrased:
 
   * No third-party suite, no autocapture, no session replay, no mouse or
     scroll tracking. An event is one of the names below with the props listed
-    for it, validated here; anything else is dropped.
+    for it, validated here; anything else is dropped. (PostHog, when
+    POSTHOG_KEY is set, only receives a server-side copy of these accepted
+    events for dashboards -- see forward().)
   * Nothing is stored on the device for analytics and nothing is read from it.
     The browser sends a batch of `{name, props}` with no identifier at all.
   * `day_hash` = HMAC(today's salt, ip | user-agent), computed here. The salt
@@ -30,6 +32,7 @@ import json
 import os
 import re
 import secrets
+import urllib.request
 
 import jobstore
 import ratelimit
@@ -216,8 +219,43 @@ def record_finished(doc: dict, clip_id: str, persons_of) -> None:
     _guarded("job_finished", run)
 
 
-def ingest(body: bytes, headers, client_host) -> int:
-    """POST /events. Returns how many events were kept; never raises."""
+# ---------------------------------------------------------------------------
+# PostHog Cloud (US): dashboards only (docs/research/analytics-options.md,
+# "Upgrade path"). Server-side forwarding of rows we already accepted -- no
+# browser SDK, no cookies. It gets the same allowlisted props and the same
+# day_hash we store, never the IP or user agent: `$ip` is sent as null and
+# geoip is off, so the only address PostHog could see is Modal's.
+# ---------------------------------------------------------------------------
+
+def posthog_batch(key: str, visitor: bytes, rows: list, when: str) -> dict:
+    """rows are validate()'s (name, props, lesson) tuples."""
+    return {"api_key": key, "batch": [
+        {"event": name, "distinct_id": visitor.hex(), "timestamp": when,
+         "properties": {**props, **({"lesson": lesson} if lesson else {}),
+                        "$process_person_profile": False, "$geoip_disable": True, "$ip": None}}
+        for name, props, lesson in rows]}
+
+
+def forward(visitor: bytes, rows: list, when: str) -> None:
+    """POST the batch to PostHog. No POSTHOG_KEY -> no-op. Runs after the
+    response (api.py BackgroundTasks); a failure is logged and dropped."""
+    key = os.environ.get("POSTHOG_KEY")
+    if not key or not rows:
+        return
+    host = (os.environ.get("POSTHOG_HOST") or "https://us.i.posthog.com").rstrip("/")
+    req = urllib.request.Request(f"{host}/batch/", method="POST",
+                                 data=json.dumps(posthog_batch(key, visitor, rows, when)).encode(),
+                                 headers={"content-type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=3).close()
+    except Exception as e:  # noqa: BLE001 -- dashboards are optional
+        print(f"[analytics] posthog forward dropped: {type(e).__name__}: {e}")
+
+
+def ingest(body: bytes, headers, client_host, defer=None) -> int:
+    """POST /events. Returns how many events were kept; never raises.
+    `defer(fn, *args)` (BackgroundTasks.add_task) schedules the PostHog
+    forward so it runs after the response, never inside it."""
     if len(body) > MAX_BODY:
         return 0
     try:
@@ -242,6 +280,8 @@ def ingest(body: bytes, headers, client_host) -> int:
                 with conn.cursor() as cur:
                     cur.executemany("INSERT INTO events (name, job_id, day_hash, props) "
                                     "VALUES (%s, %s, %s, %s::jsonb)", rows)
+                if defer and os.environ.get("POSTHOG_KEY"):
+                    defer(forward, visitor, kept[:room], dt.datetime.now(dt.timezone.utc).isoformat())
             return len(rows)
     return _guarded("batch", run, 0)
 

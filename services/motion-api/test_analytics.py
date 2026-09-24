@@ -98,7 +98,37 @@ def test_events_endpoint_answers_without_a_database(api, monkeypatch):  # noqa: 
     async def body():
         return _body({"name": "tap_on_one"})
     req = types.SimpleNamespace(headers=UA, client=None, body=body)
-    assert asyncio.run(api.post_events(req)) == {"accepted": 0}
+    assert asyncio.run(api.post_events(req, api.BackgroundTasks())) == {"accepted": 0}
+
+
+def test_posthog_forward_sends_day_hash_only_and_is_off_without_a_key(monkeypatch):
+    sent = []
+    monkeypatch.setattr(analytics.urllib.request, "urlopen",
+                        lambda req, timeout: sent.append(req) or types.SimpleNamespace(close=lambda: None))
+    visitor = analytics.day_hash(b"salt", "203.0.113.7", "Mozilla/5.0 test")
+    rows = [analytics.validate({"name": "loop_created", "lesson": "job_1",
+                                "props": {"counts": 8, "via": "drag", "ip": "203.0.113.7"}})]
+
+    monkeypatch.delenv("POSTHOG_KEY", raising=False)
+    analytics.forward(visitor, rows, "2026-09-23T00:00:00+00:00")
+    assert sent == [], "no key -> no request"
+
+    monkeypatch.setenv("POSTHOG_KEY", "phc_test")
+    monkeypatch.delenv("POSTHOG_HOST", raising=False)
+    analytics.forward(visitor, rows, "2026-09-23T00:00:00+00:00")
+    (req,) = sent
+    assert req.full_url == "https://us.i.posthog.com/batch/"
+    body = json.loads(req.data)
+    assert body["api_key"] == "phc_test"
+    (ev,) = body["batch"]
+    assert ev["event"] == "loop_created" and ev["distinct_id"] == visitor.hex()
+    assert ev["properties"] == {"counts": 8.0, "via": "drag", "lesson": "job_1",
+                                "$process_person_profile": False, "$geoip_disable": True, "$ip": None}
+    assert "203.0.113.7" not in req.data.decode() and "Mozilla" not in req.data.decode()
+
+    # A PostHog outage is dropped, never raised.
+    monkeypatch.setattr(analytics.urllib.request, "urlopen", lambda *a, **k: 1 / 0)
+    analytics.forward(visitor, rows, "2026-09-23T00:00:00+00:00")
 
 
 # --------------------------------------------------------------------------
@@ -141,6 +171,20 @@ def test_per_visitor_daily_cap(pg, monkeypatch):
     assert analytics.ingest(_body(*[{"name": "tap_on_one"}] * 5), UA, "1.1.1.1") == 3
     assert analytics.ingest(_body({"name": "tap_on_one"}), UA, "1.1.1.1") == 0
     assert analytics.ingest(_body({"name": "tap_on_one"}), UA, "2.2.2.2") == 1
+
+
+@needs_pg
+def test_ingest_defers_the_posthog_forward_only_with_a_key(pg, monkeypatch):
+    deferred = []
+    defer = lambda fn, *args: deferred.append((fn, args))  # noqa: E731
+    monkeypatch.delenv("POSTHOG_KEY", raising=False)
+    analytics.ingest(_body({"name": "tap_on_one"}), UA, "1.1.1.1", defer=defer)
+    assert deferred == []
+    monkeypatch.setenv("POSTHOG_KEY", "phc_test")
+    analytics.ingest(_body({"name": "tap_on_one"}, {"name": "nope"}), UA, "1.1.1.1", defer=defer)
+    ((fn, (visitor, rows, _when)),) = deferred
+    assert fn is analytics.forward and rows == [("tap_on_one", {}, None)]
+    assert visitor == pg.execute("SELECT day_hash FROM events ORDER BY id DESC LIMIT 1").fetchone()[0]
 
 
 @needs_pg
