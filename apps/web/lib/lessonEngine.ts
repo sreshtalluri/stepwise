@@ -87,23 +87,6 @@ export function loopAt(start: number, len: number, total: number): LoopSpan {
 export const windowAt = (count: number, len: number, total: number) =>
   loopAt(Math.floor((clampCount(count, total) - 1) / len) * len + 1, len, total);
 
-/**
- * A chip was tapped. Tap = loop `len` counts from its start; tap it again while that
- * is the loop = play the whole dance; `extend` (shift, or a drag across chips from
- * that chip) = loop the whole chips between them. Returns the new loop, null for the
- * whole dance.
- */
-export function chipLoop(current: LoopSpan | null, chip: Eight, len: number, total: number, extend: Eight | null = null): LoopSpan | null {
-  if (extend) {
-    return {
-      startCount: Math.min(extend.startCount, chip.startCount),
-      endCount: Math.max(extend.endCount, chip.endCount),
-    };
-  }
-  const span = loopAt(chip.startCount, len, total);
-  return sameSpan(current, span) ? null : span;
-}
-
 /** A count was tapped: loop `len` from it; with `anchor` (shift, or a drag) the counts between the two. */
 export function countLoop(count: number, len: number, total: number, anchor: number | null = null): LoopSpan {
   if (anchor === null) return loopAt(count, len, total);

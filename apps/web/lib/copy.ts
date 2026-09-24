@@ -331,6 +331,7 @@ export const lesson = {
     hint: "Drag across the timeline to loop any counts",
     hintFree: "Hold Alt to drag without snapping to the counts",
     clear: "Stop looping",
+    section: (label: string) => `Loop ${label.replace(/^Counts/, "counts")}`,
     start: "Loop start",
     end: "Loop end",
     earlier: (edge: string) => `${edge}: half a count earlier`,
@@ -344,6 +345,7 @@ export const lesson = {
   click: {
     toggle: "Click",
     toggleHint: "A click on each count, locked to the video",
+    settings: "Click settings and volume",
     heading: "Click",
     on: "Click on",
     off: "Click off",
@@ -370,6 +372,7 @@ export const lesson = {
     play: "Play",
     pause: "Pause",
     speedLabel: "Speed",
+    speedNext: (s: number) => `Speed ${s}×. Tap for the next speed`,
     build: "Build up",
     buildHint: "Starts the loop at 0.5× and adds 0.1× each time round, up to 1×",
     more: "More",
@@ -380,18 +383,21 @@ export const lesson = {
     back: "Home",
   },
 
+  /** The top bar: each view a toggle, every one on is a panel. */
   views: {
-    group: "View",
+    group: "Views",
     video: "Video",
+    videoCropped: "Video, cropped",
     overlay: "On video",
-    threeD: "3D",
-    angle: "Angle",
+    front: "Front",
+    side: "Side",
+    back: "Back",
+    top: "Top",
+    hands: "Hands",
+    feet: "Feet",
+    mirror: "Mirror",
+    mirrored: "mirrored",
     est: "est.",
-    addAngle: "Add an angle",
-    removeAngle: "Remove this angle",
-    inset: "Small second angle",
-    insetOff: "None",
-    closeups: "Close-ups",
     dancer: "Dancer",
   },
 
@@ -450,6 +456,7 @@ export const lesson = {
     heading: "This lesson",
     removeMine: "Remove from my lessons",
     report: "Report or remove this video",
+    privacy: "Privacy",
   },
 
   install: {
