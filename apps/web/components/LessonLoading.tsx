@@ -5,56 +5,49 @@ import { lesson as lessonCopy } from "../lib/copy";
 import { drawFigure } from "../lib/countoff";
 import { prefersReducedMotion } from "../lib/reveal";
 
-const SECONDS_PER_COUNT = 0.5; // a neutral tempo: this is a wait, not the song
+const SECONDS_PER_COUNT = 0.6; // calmer than the landing's toy: this is a wait, not the song
+const FIG_W = 120;
+const FIG_H = 160;
+const EIGHT = [1, 2, 3, 4, 5, 6, 7, 8];
 
 /**
- * The lesson's loading screen: the landing's count-off (A2), full-bleed, while
- * the lesson document downloads. It claims nothing it cannot see: there is no
- * percentage, because a gzipped response's Content-Length does not match the
- * bytes the stream hands us, so the bar is indeterminate. Reduced motion shows
- * a still figure on count 1.
+ * The lesson's loading screen, "Quiet dancer" (owner's pick): the landing's
+ * drawn figure, small and thin, gliding between its eight poses, with eight
+ * dots that light up on the count and one line of text. No percentage: nothing
+ * here can honestly measure the download. Reduced motion shows a still figure.
  */
 export default function LessonLoading() {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const big = useRef<HTMLElement>(null);
+  const dots = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const cv = canvas.current;
     const ctx = cv?.getContext("2d");
     if (!cv || !ctx) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = FIG_W * dpr;
+    cv.height = FIG_H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const reduced = prefersReducedMotion();
     const ink = getComputedStyle(cv).getPropertyValue("--ink").trim() || "#221e1c";
-    let beat = 0;
+    const start = performance.now();
     let lastN = 0;
-    let last = performance.now();
     let raf = 0;
     const frame = (now: number) => {
-      if (!reduced) beat += Math.min(250, now - last) / 1000 / SECONDS_PER_COUNT;
-      last = now;
+      const beat = reduced ? 0 : (now - start) / 1000 / SECONDS_PER_COUNT;
       const a = Math.floor(beat);
       const n = (a % 8) + 1;
-      if (n !== lastN && big.current) {
+      if (n !== lastN) {
         lastN = n;
-        big.current.textContent = String(n);
-        if (!reduced) {
-          big.current.classList.remove("fd-hit");
-          void big.current.offsetWidth;
-          big.current.classList.add("fd-hit");
-        }
+        dots.current?.querySelectorAll("i").forEach((d, i) => d.classList.toggle("ll-on", i === n - 1));
       }
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
-      const w = cv.clientWidth;
-      const h = cv.clientHeight;
-      if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
-        cv.width = Math.round(w * dpr);
-        cv.height = Math.round(h * dpr);
-      }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, w, h);
-      drawFigure(ctx, w / 2, h * 0.98, Math.min(h * 0.92, w * 1.5), n, reduced ? 1 : beat - a, {
+      ctx.clearRect(0, 0, FIG_W, FIG_H);
+      drawFigure(ctx, FIG_W / 2, FIG_H - 4, FIG_H * 0.9, n, reduced ? 1 : beat - a, {
         color: ink,
-        width: 3.2,
+        width: 1.6,
         flip: false,
+        soft: true,
+        joints: false,
       });
       if (!reduced) raf = requestAnimationFrame(frame);
     };
@@ -64,20 +57,16 @@ export default function LessonLoading() {
 
   return (
     <main className="ll" aria-busy="true">
-      <div className="fd-stagev ll-stage" aria-hidden="true">
-        <div className="fd-big">
-          <b ref={big}>1</b>
+      <div className="ll-quiet">
+        <canvas ref={canvas} style={{ width: FIG_W, height: FIG_H }} aria-hidden="true" />
+        <div className="ll-dots" ref={dots} aria-hidden="true">
+          {EIGHT.map((n) => (
+            <i key={n} className={n === 1 ? "ll-on" : undefined} />
+          ))}
         </div>
-        <canvas ref={canvas} />
-      </div>
-      <div className="ll-text">
         <p className="ll-title" role="status" aria-live="polite">
           {lessonCopy.load.loading}
         </p>
-        <div className="ll-bar" aria-hidden="true">
-          <span />
-        </div>
-        <p className="ll-note">{lessonCopy.load.loadingNote}</p>
       </div>
     </main>
   );

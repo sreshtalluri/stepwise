@@ -899,58 +899,40 @@
 }
 
 /* ------------------------------------------------ lesson loading screen */
+/* "Quiet dancer": a small drawn figure, eight count dots, one line. */
 
 .ll {
   min-height: 100dvh;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  align-content: center;
-  padding: var(--s4, 24px) var(--gut, 16px) var(--s5, 40px);
-  gap: var(--s3, 16px);
+  place-items: center;
+  padding: var(--gut, 16px);
 }
-.ll-stage {
-  /* .fd-stagev names a grid-area for the landing's grid; this grid has none. */
-  grid-area: 1 / 1;
-  min-height: min(56dvh, 520px);
-}
-.ll-text {
-  grid-area: 2 / 1;
-  align-content: start;
-  width: min(100%, 420px);
-  margin: 0 auto;
-  text-align: center;
+.ll-quiet {
   display: grid;
-  gap: 12px;
+  justify-items: center;
+  gap: 14px;
+}
+.ll-dots {
+  display: flex;
+  gap: 7px;
+}
+.ll-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line);
+  transition: background 120ms, transform 120ms;
+}
+.ll-dots i.ll-on {
+  background: var(--accent);
+  transform: scale(1.35);
 }
 .ll-title {
   margin: 0;
-  font: 800 clamp(1.4rem, 4.5vw, 2rem) / 1.1 var(--font-display);
-  letter-spacing: -0.02em;
+  font: 600 15px/1.3 var(--font-body, system-ui);
   color: var(--ink);
-}
-.ll-note {
-  margin: 0;
-  color: var(--ink-faint);
-  font-size: 0.95rem;
-}
-.ll-bar {
-  height: 4px;
-  border-radius: 99px;
-  background: var(--line);
-  overflow: hidden;
-}
-.ll-bar span {
-  display: block;
-  height: 100%;
-  width: 35%;
-  border-radius: inherit;
-  background: var(--accent);
-  animation: ll-slide 1.4s var(--ease, ease-in-out) infinite;
-}
-@keyframes ll-slide {
-  from { transform: translateX(-110%); }
-  to { transform: translateX(310%); }
+  text-align: center;
 }
 @media (prefers-reduced-motion: reduce) {
-  .ll-bar span { animation: none; width: 100%; opacity: 0.5; }
+  .ll-dots i { transition: none; }
 }
