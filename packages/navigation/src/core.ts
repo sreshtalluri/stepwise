@@ -46,7 +46,7 @@ export function sampleIndexAt(sampleTimesS: readonly number[], t: number): numbe
 
 /** A uniform count grid. Manual by design; beat detection is a later proposal only. */
 export interface CountGrid {
-  /** Timeline seconds at which count 1 lands. */
+  /** Timeline seconds at which count 1 lands. Before 0 when the clip opens mid-eight. */
   countOneS: number;
   /** Seconds per count (one count = one beat). */
   secondsPerCount: number;
@@ -158,6 +158,9 @@ export function loopTimesS(grid: CountGrid, loop: LoopSpan): [number, number] {
 
 // ---------------------------------------------------------------- invariants
 
+/** A beat this close before 0 still counts as in the clip (a seek lands a hair early). */
+const CLIP_EDGE_S = 0.02;
+
 let nextId = 0;
 const makeId = () => `part-${Date.now().toString(36)}-${(nextId++).toString(36)}`;
 
@@ -167,12 +170,21 @@ const makeId = () => `part-${Date.now().toString(36)}-${(nextId++).toString(36)}
  * parts are renumbered to their position (custom names are left alone).
  */
 export function normalizeStructure(structure: LessonStructure, endS: number): LessonStructure {
-  const { countOneS, secondsPerCount } = structure.grid;
+  const { secondsPerCount } = structure.grid;
+  // The counts run from the clip's first beat, wherever count 1 was set: a 1 set
+  // mid-song is a 1 of every eight, so the beats before it count …6, 7, 8 instead
+  // of being blank. Count 1 of the dance is therefore the last 1 at or before the
+  // first beat in the clip, which may be before the clip starts (a pickup). Moving
+  // it by whole eights only renumbers: parts shift with it and stay at the same
+  // moments, and each eight added at the front gets a part of its own.
+  const eights = Math.ceil(Math.floor((structure.grid.countOneS + CLIP_EDGE_S) / secondsPerCount) / 8) || 0;
+  const countOneS = structure.grid.countOneS - eights * 8 * secondsPerCount;
   const countTotal = Math.max(1, Math.floor((endS - countOneS) / secondsPerCount) + 1);
+  const added: Part[] = [];
+  for (let e = 0; e < eights; e++) added.push({ id: makeId(), name: "Part 1", startCount: 1 + 8 * e });
 
   const seen = new Set<number>();
-  const parts = structure.parts
-    .slice()
+  const parts = [...added, ...structure.parts.map((p) => ({ ...p, startCount: p.startCount + 8 * eights }))]
     .sort((a, b) => a.startCount - b.startCount)
     .map((p) => ({ ...p, startCount: Math.round(p.startCount) }))
     .filter((p) => {
@@ -250,25 +262,30 @@ export function renamePart(structure: LessonStructure, partId: string, name: str
 
 // ---------------------------------------------------------------- grid edits
 
-/** "Set 1 here": re-anchor count 1 to the playhead, keeping the spacing. */
+/**
+ * "Set 1 here" / "Try another 1": a 1 lands on `t`, keeping the spacing, and the
+ * counts fill in before it back to the clip's first beat (`normalizeStructure`).
+ * Of the 1s that puts in the grid, count 1 of the dance is the one nearest the
+ * current count 1, so parts move at most four counts rather than a whole eight.
+ */
 export function setCountOne(structure: LessonStructure, t: number, endS: number): LessonStructure {
-  return normalizeStructure({ ...structure, grid: { ...structure.grid, countOneS: t } }, endS);
+  const eight = 8 * structure.grid.secondsPerCount;
+  const one = t - eight * Math.round((t - structure.grid.countOneS) / eight);
+  return normalizeStructure({ ...structure, grid: { ...structure.grid, countOneS: one } }, endS);
 }
 
 /**
- * "−1 / +1 count": move count 1 by whole counts, keeping the spacing — the fix for
- * a beat tracker that found the beats but started the eight on the wrong one.
- *
- * Built on `setCountOne`, so it is the same edit as "Set count 1 here", only
- * stepped. Parts keep their count numbers, so every loop window moves with count 1.
- * Count 1 may not go before the clip: one count earlier is the same place in the
- * eight as seven counts later, so it wraps forward by an eight instead.
+ * "−1 / +1 count": move count 1 by whole counts from where it is NOW, keeping the
+ * spacing — the fix for a beat tracker that found the beats but started the eight
+ * on the wrong one. Presses add up, on top of a 1 set by hand as much as on the
+ * proposal. Parts keep their count numbers, so every loop window moves with count 1.
  */
 export function nudgeCountOne(structure: LessonStructure, deltaCounts: number, endS: number): LessonStructure {
   const { countOneS, secondsPerCount: spc } = structure.grid;
-  let t = countOneS + Math.round(deltaCounts) * spc;
-  if (t < -0.02) t += Math.ceil(-t / (8 * spc)) * 8 * spc;
-  return setCountOne(structure, t, endS);
+  return normalizeStructure(
+    { ...structure, grid: { ...structure.grid, countOneS: countOneS + Math.round(deltaCounts) * spc } },
+    endS,
+  );
 }
 
 /**
@@ -278,6 +295,7 @@ export function nudgeCountOne(structure: LessonStructure, deltaCounts: number, e
  * reaction time; the tempo is not what is wrong), and that beat becomes a 1 of the
  * eight NEAREST the current count 1 — so the correction is at most four counts either
  * way and the dance is not renumbered because someone tapped in its third eight.
+ * The counts before it fill in back to the start (`normalizeStructure`).
  * A tap that lands on a beat already numbered 1 changes nothing but confirms it.
  */
 export function tapOnOne(structure: LessonStructure, tapS: number, endS: number): LessonStructure {
@@ -305,9 +323,12 @@ export function retempo(structure: LessonStructure, factor: "half" | "double", e
 }
 
 /**
- * Tap-in: the learner taps along with the music. Count 1 is the first tap and the
- * spacing is the average gap, which is more forgiving of one bad tap than using
- * consecutive gaps. Needs two taps; returns null below that.
+ * Tap-in: the learner taps along with the music, first tap on a 1. `tapsS` are
+ * MEDIA times (the video's clock, so playback speed does not matter). The spacing
+ * is the average gap, more forgiving of one bad tap than consecutive gaps; count 1
+ * sits where the whole run of taps puts it, not on the first tap alone, and the
+ * counts fill in before it like any other 1 (`normalizeStructure`). Needs two
+ * taps; returns null below that.
  */
 export function gridFromTaps(
   structure: LessonStructure,
@@ -317,8 +338,9 @@ export function gridFromTaps(
   if (tapsS.length < 2) return null;
   const spc = (tapsS[tapsS.length - 1] - tapsS[0]) / (tapsS.length - 1);
   if (!(spc > 0)) return null;
+  const one = tapsS.reduce((sum, t, i) => sum + t - i * spc, 0) / tapsS.length;
   return normalizeStructure(
-    { ...structure, grid: { countOneS: tapsS[0], secondsPerCount: spc, countTotal: 1 } },
+    { ...structure, grid: { countOneS: one, secondsPerCount: spc, countTotal: 1 } },
     endS,
   );
 }

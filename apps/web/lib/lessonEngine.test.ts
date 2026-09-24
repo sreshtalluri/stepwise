@@ -96,11 +96,11 @@ test("a merged part is one longer chip", () => {
 });
 
 test("loop windows move with count 1 but chip ids do not", () => {
-  const moved = eightsOf(nudgeCountOne(base, 1, endS));
+  const moved = eightsOf(nudgeCountOne(base, -1, endS));
   assert.equal(moved[0].id, eights[0].id);
   const [a0] = loopTimesS(base.grid, eights[0]);
-  const [a1] = loopTimesS(nudgeCountOne(base, 1, endS).grid, moved[0]);
-  assert.ok(Math.abs(a1 - a0 - 0.51) < 1e-9);
+  const [a1] = loopTimesS(nudgeCountOne(base, -1, endS).grid, moved[0]);
+  assert.ok(Math.abs(a1 - a0 + 0.51) < 1e-9);
 });
 
 test("full speed ticks counts, whatever the loop length; a chip is done when all its counts are", () => {
