@@ -74,6 +74,7 @@ from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 
+import analytics
 import fingerprint
 import ingest
 import jobstore
@@ -272,6 +273,17 @@ def _limited(http: Request, charge_as: tuple[str, str] | None = None) -> None:
         raise _too_many(e) from None
 
 
+def _created(http: Request, fp: dict, source: str, clip_id: str, job_id: str,
+             deduplicated: bool = False) -> None:
+    """analytics `job_created`: every accepted clip, a dedupe hit included
+    (flagged), so uploads and GPU runs can both be counted."""
+    seconds = fp.get("duration_s")
+    analytics.record("job_created", {
+        "source": source, "deduplicated": deduplicated,
+        "seconds": round(seconds, 1) if seconds is not None else None,
+    }, http.headers, http.client and http.client.host, job_id=job_id, clip_id=clip_id)
+
+
 def _too_many(e: ratelimit.Limited) -> HTTPException:
     return HTTPException(429, headers={"Retry-After": str(e.retry_after)}, detail={"error": {
         "code": e.code, "message": e.message, "retryable": True}})
@@ -291,6 +303,7 @@ def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict, http: Request,
     # "no existing lesson", so this request really will spend a GPU run. And
     # before any byte is stored, so a 429 leaves no half-made lesson behind.
     _limited(http, charge_as=(job_id, clip_id))
+    _created(http, fp, "link" if source_key else "file", clip_id, job_id)
     with uploads_volume.batch_upload(force=True) as batch:
         batch.put_file(tmp_path, f"/{clip_id}.mp4")
     # The video goes to R2 here rather than at export time, because these
@@ -375,6 +388,7 @@ async def upload_clip(http: Request, file: UploadFile = File(...)) -> DispatchRe
         if existing:
             print(f"[dedupe] hit: reusing {existing['clip_id']} "
                   f"(job {existing['job_id']}) -- no GPU run dispatched")
+            _created(http, fp, "file", existing["clip_id"], existing["job_id"], deduplicated=True)
             return DispatchResponse(clip_id=existing["clip_id"],
                                     job_id=existing["job_id"], deduplicated=True)
 
@@ -512,6 +526,7 @@ def ingest_clip_link(request: LinkRequest, http: Request,
             # This is also what keeps the two layers converging on ONE clip_id
             # rather than quietly maintaining two ideas of the same lesson.
             _stamp_source_key(existing["clip_id"], key)
+            _created(http, fp, "link", existing["clip_id"], existing["job_id"], deduplicated=True)
             return DispatchResponse(clip_id=existing["clip_id"],
                                     job_id=existing["job_id"], deduplicated=True)
 
@@ -619,6 +634,10 @@ def get_job_status(job_id: str) -> dict:
         raise HTTPException(500, f"job-status document failed contract validation: {result.errors}")
     if doc["state"] == "succeeded":
         _prime_result(job_id)
+    if doc["state"] in ("succeeded", "failed"):
+        clip_id = _clip_id_for(job_id)
+        analytics.record_finished(doc, clip_id, lambda: len((_volume_read_json(
+            results_volume, f"/{clip_id}.export-manifest.json") or {}).get("glb_paths") or {}))
     return doc
 
 
@@ -982,6 +1001,30 @@ def remove_lesson(clip_id: str, request: RemovalRequest, http: Request) -> Remov
                           relationship=request.relationship, clip_id=clip_id)
     return RemovalResponse(clip_id=clip_id, removed=outcome["deleted"],
                            already_absent=outcome["already_absent"])
+
+
+# ---------------------------------------------------------------------------
+# Analytics (analytics.py). POST /events is the browser's beacon: a batch of
+# allowlisted {name, props}, no identifier. It always answers 200 -- a bad or
+# over-cap event is dropped, and no database means everything is dropped.
+# GET /metrics is the owner's read, behind STEPWISE_ADMIN_KEY; 404 without it,
+# so its existence is not advertised.
+# ---------------------------------------------------------------------------
+
+@app.post("/events")
+async def post_events(http: Request) -> dict:
+    body = await http.body()
+    return {"accepted": analytics.ingest(body, http.headers, http.client and http.client.host)}
+
+
+@app.get("/metrics")
+def get_metrics(http: Request, days: int = 30) -> dict:
+    if not analytics.admin_ok(http.headers):
+        raise HTTPException(404, "Not found.")
+    if not jobstore.postgres_enabled():
+        raise HTTPException(503, "No analytics database configured (STEPWISE_JOB_BACKEND=postgres).")
+    with jobstore.connection() as conn:
+        return analytics.metrics(conn, max(1, min(days, 400)))
 
 
 @app.get("/health")

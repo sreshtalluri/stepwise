@@ -111,6 +111,7 @@ export function AnglePane({ l, angle, focus }: { l: Lesson; angle: ViewId; focus
         follow={l.follow}
         focusRef={focus ? l.focusRef : undefined}
         glbUrls={l.glbUrls}
+        showEveryone={l.showEveryone}
       />
       <span className="ls-tag ls-corner" title={viewLabel(angle, l.mirrored)}>
         {angle}
@@ -154,7 +155,7 @@ export function MainStage({
       {view === "overlay" && (
         // Mirrored by CSS with the video, never on the mesh, so the two flip together.
         <div className="ls-overlay" style={mirrored ? { transform: "scaleX(-1)" } : undefined}>
-          <Stage doc={l.doc} selectedIndex={l.selected} view="overlay" mirrored={false} timeRef={l.timeRef} glbUrls={l.glbUrls} onAbsent={l.setAbsent} overlay />
+          <Stage doc={l.doc} selectedIndex={l.selected} view="overlay" mirrored={false} timeRef={l.timeRef} glbUrls={l.glbUrls} onAbsent={l.setAbsent} showEveryone={l.showEveryone} overlay />
         </div>
       )}
       {view === "overlay" && l.multi && <DancerMarkers l={l} />}
@@ -384,7 +385,7 @@ export function CountBar({ l, big = false, select = false }: { l: Lesson; big?: 
         const c = d && countAt(e.clientX, e.clientY);
         if (!d || !c || (c === d.anchor && !d.moved)) return;
         d.moved = true;
-        l.setLoop(countLoop(c, len, total, d.anchor));
+        l.setLoop(countLoop(c, len, total, d.anchor), { via: "drag" });
       }}
       onPointerUp={() => (drag.current = null)}
       onPointerCancel={() => (drag.current = null)}
@@ -410,7 +411,7 @@ export function CountBar({ l, big = false, select = false }: { l: Lesson; big?: 
             drag.current = null;
             if (d?.moved) return;
             const anchor = ev.shiftKey && l.loop ? extendAnchor(l.loop, c) : null;
-            l.setLoop(countLoop(c, len, total, anchor), { play: l.playing });
+            l.setLoop(countLoop(c, len, total, anchor), { play: l.playing, via: "count" });
           }}
           disabled={c > total}
         >
@@ -513,9 +514,9 @@ export function Timeline({ l }: { l: Lesson }) {
     if (!d) return;
     if (!d.moved) return l.seek(timeAtX(e.clientX));
     const s = spanFor(d, e.clientX, e.altKey);
-    if (s) l.setLoop(s, { play: l.playing, keep: d.kind !== "new" });
+    if (s) l.setLoop(s, { play: l.playing, keep: d.kind !== "new", via: "drag" });
   };
-  const nudge = (edge: "start" | "end", d: number) => l.loop && l.setLoop(nudgeEdge(l.loop, edge, d, total), { play: l.playing, keep: true });
+  const nudge = (edge: "start" | "end", d: number) => l.loop && l.setLoop(nudgeEdge(l.loop, edge, d, total), { play: l.playing, keep: true, via: "drag" });
 
   const shown = preview ?? l.loop;
   const [a, b] = shown ? loopTimesS(grid, shown) : [0, 0];
@@ -581,7 +582,7 @@ export function Timeline({ l }: { l: Lesson }) {
           const on = sameSpan(l.loop, e);
           const loopIt = () => {
             setSecOpen(null);
-            l.setLoop(on ? null : { startCount: e.startCount, endCount: e.endCount }, { play: l.playing });
+            l.setLoop(on ? null : { startCount: e.startCount, endCount: e.endCount }, { play: l.playing, via: "marker" });
           };
           return (
             <span key={e.id} className={`ls-tl-sec${on ? " ls-on" : ""}${secOpen === e.id ? " ls-open" : ""}`} style={{ left: pct(timeOfCount(grid, e.startCount)) }}>
@@ -766,7 +767,7 @@ export function BottomBar({ l, more }: { l: Lesson; more: React.ReactNode }) {
           <ClickTools l={l} />
         </div>
         {l.next && (
-          <button type="button" className="ls-pill ls-next" onClick={() => l.setLoop(l.next, { play: l.playing })}>
+          <button type="button" className="ls-pill ls-next" onClick={() => l.setLoop(l.next, { play: l.playing, via: "step" })}>
             {copy.chips.next(spanLabel(l.next))}
           </button>
         )}
@@ -1018,6 +1019,9 @@ export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }
           <div className="ls-group-row">
             <button type="button" className="ls-chip" onClick={() => l.setPickerOpen(true)}>
               {copy.dancers.change}
+            </button>
+            <button type="button" className="ls-chip" aria-pressed={l.showEveryone} onClick={() => l.setShowEveryone(!l.showEveryone)}>
+              {copy.dancers.everyone}
             </button>
           </div>
         </div>

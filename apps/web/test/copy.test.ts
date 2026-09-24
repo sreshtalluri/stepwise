@@ -252,6 +252,39 @@ test("the entry flow never makes 8 counts a rule — owner, 2026-09-23", () => {
   assert.match(copy.upload.link.gated, /file works for everyone/i);
 });
 
+test("the usage-counts section names exactly what lib/analytics.ts sends — §7h", async () => {
+  const { EVENTS, PLAY_BUCKET_S } = await import("../lib/analytics");
+  const usage = copy.privacy.sections.find((s) => s.heading === "Usage counts");
+  assert.ok(usage, "/privacy must say what is collected");
+  const text = usage.items.join(" ");
+  // One phrase per client event: add an event, and this fails until /privacy says so.
+  const said: Record<(typeof EVENTS)[number], RegExp> = {
+    lesson_opened: /open a lesson/,
+    play_seconds: new RegExp(`every ${PLAY_BUCKET_S} seconds of playing`),
+    loop_created: /make a loop \(its length, where it starts and how you made it\)/,
+    speed_changed: /change the speed/,
+    build_up_toggled: /Build up/,
+    click_toggled: /the click/,
+    view_toggled: /a view/,
+    tap_on_one: /correct count 1/,
+    count_one_nudged: /correct count 1/,
+    count_one_alternate: /correct count 1/,
+    dancer_picked: /pick a dancer/,
+    link_copied: /copy a link/,
+  };
+  for (const name of EVENTS) assert.match(text, said[name], name);
+  // The server-side pair, the referrer rule, and the identifier promises.
+  assert.match(text, /each clip added/);
+  assert.match(text, /how each job ended/);
+  assert.match(text, /its name only, not the page/);
+  assert.match(text, /Nothing is stored in your browser for this/);
+  assert.match(text, /used for one day and is then deleted/); // analytics_salts
+  assert.match(text, /The address itself is not saved/);
+  assert.match(text, /Global Privacy Control or Do Not Track/); // optedOut()
+  assert.match(text, /kept for 13 months, then reduced to daily totals/); // analytics.rollup
+  assert.doesNotMatch(text, /\b(anonymous|anonymi[sz]ed|never identif)/i, "a daily hash is pseudonymous, not anonymous");
+});
+
 test("the handover privacy line states only what the code does", () => {
   // retention.TTL_DAYS == 180 (six months since last open); removal is on every lesson.
   assert.match(copy.privacy.atHandover, /six months unopened/);

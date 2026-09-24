@@ -8,6 +8,7 @@ import { processing as copy } from "../lib/copy";
 import { failedBody, flowSteps, handoffHref, type Step } from "../lib/flow";
 import { localClipUrl, timeRemaining, useJobStatus, type JobStatus } from "../lib/jobStatus";
 import { prefersReducedMotion } from "../lib/reveal";
+import { track } from "../lib/analytics";
 
 /**
  * Processing, A2 "Count off" with the owner's change of 2026-09-23: wait for
@@ -145,6 +146,7 @@ function CopyLink() {
         try {
           await navigator.clipboard.writeText(window.location.href);
           setCopied(true);
+          track("link_copied");
           setTimeout(() => setCopied(false), 2000);
         } catch {
           // Clipboard blocked: the address bar still has it.

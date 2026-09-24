@@ -38,7 +38,24 @@ import type { LessonStructure, LoopSpan } from "../../../packages/navigation/src
 import { PHONE_QUERY, unlockAudio, useMedia, useMetronome, useVideoClock, useVideoCrop } from "./lesson/hooks";
 import DesktopLesson from "./lesson/DesktopLesson";
 import PhoneLesson from "./lesson/PhoneLesson";
+import { addPlay, referrerHost, track } from "../lib/analytics";
 import "./lesson/lesson.css";
+
+/** Where a loop came from, for `loop_created` (lib/analytics.ts). */
+export type LoopVia = "drag" | "count" | "marker" | "preset" | "step" | "handoff" | "other";
+
+/** Calls `fn(value)` when `value` changes after mount; never for the first value. */
+function useOnChange<T>(value: T, fn: (v: T) => void) {
+  // Compared with the last value rather than "skip the first run": React's
+  // strict mode runs a mount effect twice, and that must not look like a change.
+  const prev = useRef(value);
+  useEffect(() => {
+    if (Object.is(prev.current, value)) return;
+    prev.current = value;
+    fn(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires on value only
+  }, [value]);
+}
 
 /**
  * The lesson page's one state, shared by two compositions (DESIGN.md §6: phone and
@@ -84,6 +101,7 @@ export function togglePanel(panels: readonly PanelId[], id: PanelId, max: number
 }
 
 const DANCER_KEY = (id: string) => `stepwise.lesson-dancer.v1.${id}`;
+const EVERYONE_KEY = (id: string) => `stepwise.lesson-everyone.v1.${id}`;
 
 export default function LessonViewer(props: LessonViewerProps) {
   const phone = useMedia(PHONE_QUERY);
@@ -99,6 +117,7 @@ function useLesson(
 ) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const endS = useMemo(() => timelineEndS(doc.sample_times_s), [doc]);
+  useEffect(() => track("lesson_opened", { ref: referrerHost(document.referrer, location.hostname) }, lessonId), [lessonId]);
 
   // ---- counts and parts: the proposal until the learner edits; manual always wins.
   const opening = useMemo(() => openingStructure(doc, endS), [doc, endS]);
@@ -164,6 +183,7 @@ function useLesson(
   const chooseDancer = useCallback(
     (i: number) => {
       setSelected(i);
+      track("dancer_picked", { persons: doc.persons.length, index: i }, lessonId);
       try {
         window.localStorage.setItem(DANCER_KEY(lessonId), doc.persons[i].person_id);
       } catch {
@@ -171,6 +191,26 @@ function useLesson(
       }
     },
     [doc, lessonId],
+  );
+  // The other dancers' meshes, faint. Off by default so the 3D is one body to copy.
+  const [showEveryone, setShowEveryoneState] = useState(false);
+  useEffect(() => {
+    try {
+      setShowEveryoneState(multi && window.localStorage.getItem(EVERYONE_KEY(lessonId)) === "1");
+    } catch {
+      setShowEveryoneState(false);
+    }
+  }, [multi, lessonId]);
+  const setShowEveryone = useCallback(
+    (on: boolean) => {
+      setShowEveryoneState(on);
+      try {
+        window.localStorage.setItem(EVERYONE_KEY(lessonId), on ? "1" : "0");
+      } catch {
+        /* private mode: this visit only */
+      }
+    },
+    [lessonId],
   );
 
   // ---- the source frame's shape: a 9:16 short and a 16:9 YouTube clip lay out differently.
@@ -184,7 +224,13 @@ function useLesson(
   const [panelPicks, setPanels] = useState<PanelId[]>(phone && !wide ? ["overlay"] : ["overlay", "front"]);
   // Rotating a desktop-sized pick onto a phone keeps the picks, just draws the first two.
   const panels = panelPicks.slice(0, maxPanels);
-  const toggleView = useCallback((id: PanelId) => setPanels((p) => togglePanel(p.slice(0, maxPanels), id, maxPanels)), [maxPanels]);
+  const toggleView = useCallback(
+    (id: PanelId) => {
+      track("view_toggled", { view: id, on: !panels.includes(id) }, lessonId);
+      setPanels((p) => togglePanel(p.slice(0, maxPanels), id, maxPanels));
+    },
+    [maxPanels, panels, lessonId],
+  );
   const [mirrored, setMirrored] = useState(false);
   const [follow, setFollow] = useState(true);
   const [absent, setAbsent] = useState<string[]>([]);
@@ -212,6 +258,19 @@ function useLesson(
     playingRef.current = p;
     setPlayingState(p);
   }, [video]);
+
+  // Playing time, wall-clock, for `play_seconds` (30 s buckets, lib/analytics.ts).
+  useEffect(() => {
+    if (!playing) return;
+    let last = Date.now();
+    const tick = () => {
+      const now = Date.now();
+      addPlay((now - last) / 1000, lessonId);
+      last = now;
+    };
+    const id = window.setInterval(tick, 5000);
+    return () => (window.clearInterval(id), tick());
+  }, [playing, lessonId]);
 
   // One pass of the loop: build-up steps up, and counts played through at full
   // speed get their tick.
@@ -278,8 +337,10 @@ function useLesson(
    * Change the loop: build-up starts over, and the playhead jumps into the new loop —
    * or, with `keep` (a handle dragged), stays put if it is already inside it.
    */
+  const loopVia = useRef<LoopVia>("other");
   const setLoop = useCallback(
-    (next: LoopSpan | null, opts: { play?: boolean; keep?: boolean } = {}) => {
+    (next: LoopSpan | null, opts: { play?: boolean; keep?: boolean; via?: LoopVia } = {}) => {
+      loopVia.current = opts.via ?? "other";
       setLoopState(next);
       setPasses(0);
       // Sync before seeking: the seek's own clock tick must not wrap back into the old loop.
@@ -292,6 +353,18 @@ function useLesson(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loopTimes is pure over structure/endS
     [video, structure, endS],
   );
+  // `loop_created` once a loop has settled for a second, so a drag across the
+  // counts is one loop, not one per count it crossed.
+  useEffect(() => {
+    if (!loop) return;
+    const half = (c: number) => Number.isInteger(c * 2);
+    const id = window.setTimeout(() => track("loop_created", {
+      counts: loopLength(loop), start: loop.startCount,
+      snapped: half(loop.startCount) && half(loop.endCount), via: loopVia.current,
+    }, lessonId), 1000);
+    return () => window.clearTimeout(id);
+  }, [loop, lessonId]);
+
   const setBuildUp = useCallback((on: boolean) => {
     setBuildUpState(on);
     setPasses(0);
@@ -315,7 +388,9 @@ function useLesson(
         if (opts.play && video) void video.play().catch(() => {});
         return;
       }
-      setLoop(stepLoopBy(loop, hereCount, delta === 0 || !loop ? preset : loopLength(loop), delta, total), opts);
+      setLoop(stepLoopBy(loop, hereCount, delta === 0 || !loop ? preset : loopLength(loop), delta, total), {
+        ...opts, via: delta === 0 ? "preset" : "step",
+      });
     },
     [loop, hereCount, preset, total, setLoop, seek, structure, video],
   );
@@ -324,7 +399,7 @@ function useLesson(
     (len: number) => {
       setLoopLenState(len);
       saveLoopLength(lessonId, len);
-      setLoop(stepLoopBy(loop, hereCount, presetCounts(len, total), 0, total), { play: playingRef.current });
+      setLoop(stepLoopBy(loop, hereCount, presetCounts(len, total), 0, total), { play: playingRef.current, via: "preset" });
     },
     [lessonId, loop, hereCount, total, setLoop],
   );
@@ -339,7 +414,7 @@ function useLesson(
     // already practising a speed and some counts, so the lesson opens on the same ones.
     const q = parseHandoff(window.location.search, SPEEDS, total);
     if (q.speed !== null) setSpeed(q.speed);
-    if (q.loop) setLoop(q.loop);
+    if (q.loop) setLoop(q.loop, { via: "handoff" });
   }, [restored, video, total, setLoop]);
 
   // ---- the click: on our count grid, locked to the video clock (useMetronome)
@@ -366,15 +441,30 @@ function useLesson(
   useMetronome(video, loopRef, structure.grid, clickOn, clickMode, clickVol);
 
   // ---- count 1: one tap, a nudge, or one of the tracker's other candidates
-  const tapOne = useCallback(() => editStructure(tapOnOne(structure, timeRef.current, endS)), [structure, timeRef, endS, editStructure]);
-  const nudgeOne = useCallback((d: number) => editStructure(nudgeCountOne(structure, d, endS)), [structure, endS, editStructure]);
-  const tryOne = useCallback((s: number) => editStructure(setCountOne(structure, s, endS)), [structure, endS, editStructure]);
+  // Each is also a `count_one_*` event: how often count 1 needs correcting.
   const alternates = doc.proposed_counts?.count_one_alternates ?? [];
+  const tapOne = useCallback(() => {
+    track("tap_on_one", undefined, lessonId);
+    editStructure(tapOnOne(structure, timeRef.current, endS));
+  }, [structure, timeRef, endS, editStructure, lessonId]);
+  const nudgeOne = useCallback((d: number) => {
+    track("count_one_nudged", { by: d }, lessonId);
+    editStructure(nudgeCountOne(structure, d, endS));
+  }, [structure, endS, editStructure, lessonId]);
+  const tryOne = useCallback((s: number) => {
+    const shift = alternates.find((a) => a.count_one_s === s)?.shift_counts;
+    track("count_one_alternate", shift === undefined ? undefined : { shift }, lessonId);
+    editStructure(setCountOne(structure, s, endS));
+  }, [structure, endS, editStructure, lessonId, alternates]);
 
   const cycleSpeed = useCallback(() => {
     setBuildUp(false);
     setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s as 1) + 1) % SPEEDS.length] ?? 1);
   }, [setBuildUp]);
+
+  useOnChange(speedPick, (s) => track("speed_changed", { speed: s }, lessonId));
+  useOnChange(buildUp, (on) => track("build_up_toggled", { on }, lessonId));
+  useOnChange(`${clickOn}|${clickMode}`, () => track("click_toggled", { on: clickOn, mode: clickMode }, lessonId));
 
   const crop = useVideoCrop(video, doc, focusRef, timeRef, selected, follow && panels.includes("video"), mirrored);
 
@@ -385,7 +475,7 @@ function useLesson(
     eights, loop, setLoop, loopEight, here, hereCount, stepLoop, loopLen, setLoopLen, next, done, sameSpan,
     speed, speedPick, setSpeed, cycleSpeed, buildUp, setBuildUp, passes, setHoldSlow,
     clickOn, setClickOn, clickMode, setClickMode, clickVol, setClickVol, musicVol, setMusicVol,
-    multi, selected, chooseDancer, pickerOpen, setPickerOpen,
+    multi, selected, chooseDancer, pickerOpen, setPickerOpen, showEveryone, setShowEveryone,
     panels, toggleView, mirrored, setMirrored, follow, setFollow,
     absent, setAbsent, focusRef, crop,
     onRemoveFromMyLessons, onReportOrRemove,

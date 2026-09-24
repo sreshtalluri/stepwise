@@ -455,11 +455,13 @@ export const lesson = {
 
   dancers: {
     title: "Who are you learning?",
-    lead: "Each body takes its dancer's colour. The counts stay the same when you switch.",
+    lead: "Only the dancer you pick is drawn in 3D. The counts stay the same when you switch.",
     name: (n: number) => `Dancer ${n}`,
     side: { left: "on the left", middle: "in the middle", right: "on the right" },
     start: "Start",
     change: "Change dancer",
+    /** A toggle (aria-pressed): the other dancers, faint and grey, for the formation. */
+    everyone: "Show everyone",
   },
 
   help: {
@@ -605,7 +607,7 @@ export const privacy = {
       heading: "Kept only in your browser",
       items: [
         // lib/myLessons.ts, lib/structure.ts, lib/reveal.ts — localStorage, never sent
-        "My lessons (with a small picture from each video's first frame), the counts and parts you set, and whether a lesson has already done its opening turn. These are stored by your browser on this device and are never sent to us. Clearing this site's data in your browser deletes them.",
+        "My lessons (with a small picture from each video's first frame), the counts and parts you set, and whether a lesson has already done its opening turn. These are stored by your browser on this device and are never sent to us (the usage notes below carry a loop's length and start and how far count 1 moved, not your saved counts and parts). Clearing this site's data in your browser deletes them.",
         // LessonLoader 410 -> forgetLesson
         "If a lesson is removed, its entry leaves My lessons the next time its link is opened on this device.",
       ],
@@ -617,6 +619,23 @@ export const privacy = {
         "To stop one person using up the day's processing, each new lesson and each removal is counted against a keyed hash of your IP address. The key changes every day, so one day's counts cannot be matched to the next. The address itself is not written to our database, and these counts are kept after a lesson is deleted.",
         // wrangler.jsonc (Cloudflare Worker), modal_app.py, storage.py (R2), layout.tsx (Google Fonts, Fontshare)
         "The site runs on Cloudflare, processing runs on Modal, and files are stored on Modal and Cloudflare. Fonts load from Google Fonts and Fontshare. Like any web host, these services see your requests, including your IP address.",
+      ],
+    },
+    {
+      heading: "Usage counts",
+      items: [
+        // lib/analytics.ts EVENTS, LessonViewer.tsx, ProcessingScreen CopyLink -> POST /api/events
+        "To learn which parts of stepwise help people practise, the lesson page sends us a short note when you open a lesson, for every 30 seconds of playing, and when you make a loop (its length, where it starts and how you made it), change the speed, Build up, the click or a view, correct count 1, pick a dancer, or copy a link. Each note has the control, its setting and the lesson's id. Nothing you type, no mouse movements, no screen recordings, nothing from the video.",
+        // analytics.CLIENT_EVENTS lesson_opened.ref, referrerHost()
+        "When you open a lesson we note which website sent you there: its name only, not the page.",
+        // api._created (job_created), analytics.record_finished (job_finished)
+        "On our side we count each clip added (how long it is, file or link) and how each job ended: finished or which error, how many retries, how long it took, and how many dancers.",
+        // analytics.day_hash, migrations/002 analytics_salts; no storage in lib/analytics.ts
+        "Nothing is stored in your browser for this. We group the notes by a keyed hash of your IP address and browser name. The key is random, is used for one day and is then deleted, so we can count visitors each day but cannot link one day to the next. The address itself is not saved.",
+        // lib/analytics.ts optedOut()
+        "If your browser sends Global Privacy Control or Do Not Track, no notes are sent.",
+        // analytics.rollup from modal_app.sweep_expired
+        "The notes are kept for 13 months, then reduced to daily totals and deleted. We use no analytics company: the notes stay in our own database.",
       ],
     },
     {

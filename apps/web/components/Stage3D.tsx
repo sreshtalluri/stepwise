@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import * as THREE from "three";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { REGIONS, HAND_JOINTS, FOOT_JOINTS, lookupJoint } from "../lib/regions";
+import { dancerLook, type DancerLook } from "../lib/dancers";
 import {
   sampleIndexAt,
   regionVisibility,
@@ -107,9 +108,14 @@ interface DancerProps {
   onAbsent?: (notes: string[]) => void;
   focusRef?: RefObject<Focus | null>;
   glbUrl: string;
+  /**
+   * `hidden` stays mounted, just not drawn: switching dancer then swaps visibility
+   * instead of remounting (no GLB suspend, no sole-lift re-measure).
+   */
+  look: DancerLook;
 }
 
-function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, focusRef, glbUrl }: DancerProps) {
+function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, focusRef, glbUrl, look }: DancerProps) {
   const gltf = useGLTF(glbUrl);
   const ramp = useMemo(toonRamp, []);
 
@@ -170,11 +176,17 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
   // Material per region, rebuilt only when the colour or selection changes.
   const materials = useMemo(() => {
     const accent = dancerColor(doc, personIndex, selectedIndex);
+    if (look === "faint") {
+      // Context, not a second lesson: neutral grey, see-through, one surface for
+      // seen and unsure alike (the hatch would be noise at this opacity).
+      const faint = new THREE.MeshToonMaterial({ color: accent, gradientMap: ramp, transparent: true, opacity: 0.22, depthWrite: false });
+      return { observed: faint, uncertain: faint };
+    }
     return {
       observed: new THREE.MeshToonMaterial({ color: accent, gradientMap: ramp }),
       uncertain: uncertainMaterial(ramp),
     };
-  }, [doc, personIndex, selectedIndex, ramp]);
+  }, [doc, personIndex, selectedIndex, ramp, look]);
 
   const lastIndex = useRef(-1);
 
@@ -270,6 +282,8 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
   }, [doc, personIndex, floor, rootBone, mixer, clip]);
 
   useFrame((_, delta) => {
+    // Not drawn and never the selected one (so no focus box to write): skip the work.
+    if (look === "hidden") return;
     const t = timeRef.current ?? 0;
     mixer.setTime(t);
 
@@ -321,10 +335,10 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
           mesh.visible = state !== "absent";
           mesh.material = state === "uncertain" ? materials.uncertain : materials.observed;
           // DESIGN.md §4: only `observed` contributes to the contact shadow.
-          mesh.castShadow = state === "observed";
+          mesh.castShadow = state === "observed" && look === "solo";
         }
         const stub = stubs.get(region.id);
-        if (stub) stub.visible = state === "absent";
+        if (stub) stub.visible = state === "absent" && look === "solo";
       }
       if (onAbsent) {
         const notes = absentNotes(vis);
@@ -338,8 +352,10 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
 
     // ~6 Hz reseed: the sketchy surface shimmers, it does not strobe.
     const seed = materials.uncertain.userData.seed;
-    seed.value += delta * 6;
-    if (seed.value > 1e6) seed.value = 0;
+    if (seed) {
+      seed.value += delta * 6;
+      if (seed.value > 1e6) seed.value = 0;
+    }
 
     if (focusRef) {
       // Bounds from the POSED BONES, not Box3.setFromObject. A SkinnedMesh reports
@@ -368,7 +384,7 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
   // lesson should mirror the PATH as well as the body is a real question and an open
   // one; it is not answered here, and today's behaviour is preserved exactly.
   return (
-    <group ref={placeRef}>
+    <group ref={placeRef} visible={look !== "hidden"}>
       <primitive object={scene} scale-x={mirrored ? -1 : 1} />
     </group>
   );
@@ -764,6 +780,8 @@ export interface Stage3DProps {
    * `<video>` (the "overlay" view). Drops floor, backdrop, orbit and follow.
    */
   overlay?: boolean;
+  /** Draw the other dancers too, faint. Off: only the selected dancer's mesh. */
+  showEveryone?: boolean;
 }
 
 export default function Stage3D({
@@ -778,6 +796,7 @@ export default function Stage3D({
   onResetView,
   glbUrls,
   overlay = false,
+  showEveryone = false,
 }: Stage3DProps) {
   const ownFocusRef = useRef<Focus | null>(null);
   const focusRef = externalFocusRef ?? ownFocusRef;
@@ -816,6 +835,7 @@ export default function Stage3D({
           timeRef={timeRef}
           mirrored={mirrored}
           glbUrl={glbUrls[i]}
+          look={dancerLook(i, selectedIndex, showEveryone)}
           onAbsent={i === selectedIndex ? onAbsent : undefined}
           focusRef={i === selectedIndex ? focusRef : undefined}
         />
