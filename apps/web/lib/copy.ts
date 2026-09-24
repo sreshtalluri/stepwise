@@ -272,6 +272,17 @@ export const lesson = {
   credit: (host: string, creator: string | null) =>
     creator ? `Original by ${creator} on ${host}` : `Original on ${host}`,
   /**
+   * Under that credit: who the post's caption credits with the choreography,
+   * and its sound. Only what services/motion-api found (ingest.credit), never
+   * a guess; null when neither is there. The title says where it came from.
+   */
+  postCredit: (c: { choreo: string | null; track: string | null; artist: string | null }) => {
+    const music = [c.track, c.artist].filter(Boolean).join(" · ");
+    const parts = [c.choreo && `Choreo ${c.choreo}`, music && `♪ ${music}`].filter(Boolean);
+    return parts.length ? parts.join(" · ") : null;
+  },
+  postCreditTitle: (text: string) => `From the post's caption and sound: ${text}`,
+  /**
    * Opening a lesson by its link, keyed by what services/motion-api answered.
    * An unknown job_id reads as "queued" there, not 404, so a mistyped link lands
    * on `notReady` — which is why that line does not promise the lesson exists.

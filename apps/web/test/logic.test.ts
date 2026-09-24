@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { REVEAL_DURATION_MS, easeInOutCubic, revealAzimuth } from "../lib/reveal";
 import { isJobStatus, timeRemaining } from "../lib/jobStatus";
 import { lessonIdFromLink, lessonSource, parseCredit } from "../lib/lessons";
+import { lesson as lessonCopy } from "../lib/copy";
 import type { MotionResult } from "../lib/motion";
 
 test("the reveal is one full orbit that settles back at the front", () => {
@@ -102,8 +103,18 @@ test("lessonIdFromLink takes a lesson or processing link, never a fixture", () =
 });
 
 test("parseCredit keeps an https credit and drops anything else", () => {
-  const tiktok = { url: "https://www.tiktok.com/@jonraydybuco/video/7672198121417444628", host: "TikTok", creator: "@jonraydybuco" };
+  const tiktok = { url: "https://www.tiktok.com/@jonraydybuco/video/7672198121417444628", host: "TikTok", creator: "@jonraydybuco",
+    choreo: null, track: null, artist: null };
   assert.deepEqual(parseCredit(tiktok), tiktok);
+  // An older credit without the caption fields reads them as null; non-strings are dropped.
+  const { choreo: _c, track: _t, artist: _a, ...old } = tiktok;
+  assert.deepEqual(parseCredit(old), tiktok);
+  assert.deepEqual(parseCredit({ ...tiktok, choreo: "@kyle", track: 3 }), { ...tiktok, choreo: "@kyle" });
+  // The line under the credit shows only what was found.
+  assert.equal(lessonCopy.postCredit(tiktok), null);
+  assert.equal(lessonCopy.postCredit({ ...tiktok, choreo: "@kyle" }), "Choreo @kyle");
+  assert.equal(lessonCopy.postCredit({ ...tiktok, track: "APT." }), "♪ APT.");
+  assert.equal(lessonCopy.postCredit({ choreo: "@a, @b", track: "APT.", artist: "ROSÉ" }), "Choreo @a, @b · ♪ APT. · ROSÉ");
   assert.deepEqual(parseCredit({ ...tiktok, creator: null }), { ...tiktok, creator: null });
   assert.equal(parseCredit({ ...tiktok, url: "javascript:alert(1)" }), null);
   assert.equal(parseCredit({ detail: "No source link for this lesson." }), null);
