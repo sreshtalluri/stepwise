@@ -647,11 +647,106 @@ gltf_image = (
 
 # CPU-only image for the retention sweeper: it moves no arrays, it only lists
 # and deletes Volume paths, so it has no business loading torch.
+#
+# boto3 + r2.py because retention.delete_clip now deletes the R2 copies too.
+# The sweeper and the takedown endpoint must delete exactly the same set --
+# that is retention.py's whole reason to exist as one module -- so the sweeper
+# needs the same R2 reach the API has, or expiry would quietly leave delivered
+# bytes behind that a takedown removes.
 sweeper_image = (
     modal.Image.debian_slim(python_version="3.12")
+    .pip_install("boto3")
     .add_local_file(os.path.join(os.path.dirname(__file__), "retention.py"),
                     "/app/retention.py")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "r2.py"),
+                    "/app/r2.py")
 )
+
+
+# --- the HTTP layer, hosted on Modal ----------------------------------------
+#
+# Decision 1 of docs/research/infrastructure.md: api.py already holds Modal
+# Volume and Function handles, so hosting it anywhere else means a second
+# platform, a second deploy pipeline and a Modal API token sitting in someone
+# else's secret store. Here it is one account, one `modal deploy`, and the
+# Volume/Function calls become in-cluster round trips.
+#
+# This is one decorator deep on purpose. api.py is a plain FastAPI app with no
+# Modal-specific web code, so `uvicorn api:app` still runs it unchanged on a
+# laptop, a Railway container or a Hetzner box if this host ever turns out
+# wrong. Do not let Modal-isms leak into api.py.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Deliberately no CUDA, torch or pymomentum: this container serves HTTP and
+# talks to Modal's control plane, nothing else. Keeping it that way is what
+# lets it boot in seconds and scale to zero between clips.
+api_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    # The ffmpeg/ffprobe BINARIES, for the upload fingerprint that skips a
+    # GPU reconstruction on a re-upload (fingerprint.py). Invoked as a
+    # subprocess, never linked, so no ffmpeg licence term reaches this repo.
+    # Without it dedupe silently degrades to exact-sha256 only, so it is
+    # installed rather than left to chance.
+    .apt_install("ffmpeg")
+    .pip_install_from_requirements(os.path.join(_HERE, "requirements-api.txt"))
+    # Mounted, not baked: the whole point of the layer split above is that
+    # editing a handler does not rebuild the dependency layer.
+    #
+    # The remote layout mirrors the repo, because api.py locates the contract
+    # package with `__file__.parent.parent.parent / "packages" / ...`. Mirror
+    # it and that line needs no deployment-specific special case.
+    .add_local_file(os.path.join(_HERE, "api.py"), "/app/services/motion-api/api.py")
+    .add_local_file(os.path.join(_HERE, "fingerprint.py"), "/app/services/motion-api/fingerprint.py")
+    .add_local_file(os.path.join(_HERE, "motion_result.py"), "/app/services/motion-api/motion_result.py")
+    .add_local_file(os.path.join(_HERE, "grounding.py"), "/app/services/motion-api/grounding.py")
+    .add_local_file(os.path.join(_HERE, "retention.py"), "/app/services/motion-api/retention.py")
+    .add_local_file(os.path.join(_HERE, "r2.py"), "/app/services/motion-api/r2.py")
+    .add_local_file(os.path.join(_HERE, "store.py"), "/app/services/motion-api/store.py")
+    .add_local_file(os.path.join(_HERE, "mhr_joint_hierarchy.json"),
+                    "/app/services/motion-api/mhr_joint_hierarchy.json")
+    .add_local_dir(os.path.join(REPO_ROOT, "packages", "motion-contract"),
+                   remote_path="/app/packages/motion-contract")
+)
+
+# Same graceful-degradation pattern as HF_SECRET above: Modal resolves every
+# Secret referenced anywhere in the app at load time, so a missing one would
+# block functions that never touch it.
+try:
+    R2_SECRET = [modal.Secret.from_name("stepwise-r2")]
+except Exception:  # noqa: BLE001 -- not configured yet
+    R2_SECRET = []
+
+try:
+    DB_SECRET = [modal.Secret.from_name("stepwise-db")]
+except Exception:  # noqa: BLE001 -- Neon does not exist yet; see docs/DEPLOYMENT.md
+    DB_SECRET = []
+
+
+# Volumes are declared even though api.py reaches them through the client API
+# rather than the mount: Volume.listdir/read_file_into_fileobj/remove_file are
+# @live_method, so the objects must be HYDRATED, and naming them here is what
+# guarantees Modal resolves them in this container. Same reason sweep_expired
+# declares them.
+@app.function(
+    image=api_image,
+    volumes={RESULTS_DIR: results, UPLOADS_DIR: uploads, CLIPS_DIR: eval_clips},
+    secrets=R2_SECRET + DB_SECRET,
+    timeout=600,
+)
+# One container serves many requests: the work here is IO-bound (Volume reads,
+# a Function.spawn, an R2 presign), so serialising it across containers would
+# burn money to no purpose. 100 matches the decision record's sizing.
+@modal.concurrent(max_inputs=100)
+@modal.asgi_app()
+def web():
+    import sys
+    # api.py imports its siblings (fingerprint, retention, r2, ...) as
+    # top-level modules, exactly as it does when run with `uvicorn api:app`
+    # from its own directory.
+    sys.path.insert(0, "/app/services/motion-api")
+    from api import app as fastapi_app
+    return fastapi_app
 
 
 # glTF sampler interpolation, fixed up after pymomentum writes the file.

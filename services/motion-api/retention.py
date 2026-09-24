@@ -117,6 +117,16 @@ def delete_clip(uploads_volume, results_volume, clip_id: str, job_id: str | None
             except FileNotFoundError:
                 missing.append(path)
 
+    # Delivered copies live in R2 once it is configured (see r2.py), and they
+    # are the copies a browser can actually reach -- deleting only the Volume
+    # originals would leave the dancer's video and motion publicly fetchable
+    # while reporting the lesson gone. Deliberately NOT wrapped in a
+    # try/except: if R2 deletion fails, this must fail loudly rather than
+    # write a tombstone claiming bytes are gone that are not.
+    import r2
+    if r2.enabled():
+        deleted += [f"r2:{k}" for k in r2.delete_lesson(clip_id)]
+
     remove_fingerprint(results_volume, clip_id)
 
     # Written last, on purpose: if anything above raised, there is no tombstone

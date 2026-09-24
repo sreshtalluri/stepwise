@@ -62,11 +62,12 @@ from typing import Optional
 
 import modal
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 
 import fingerprint
 import motion_result
+import r2
 import retention
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "packages" / "motion-contract" / "python"))
@@ -390,21 +391,42 @@ def _touch(clip_id: str) -> None:
 def get_asset(asset_id: str) -> Response:
     if asset_id.startswith("video:"):
         clip_id = asset_id[len("video:"):]
-        _refuse_if_removed(clip_id)
-        video = _volume_read_bytes(uploads_volume, f"/{clip_id}.mp4") or _volume_read_bytes(eval_volume, f"/{clip_id}.mp4")
-        if video is None:
-            raise HTTPException(404, "No video for this asset id.")
-        return Response(content=video, media_type="video/mp4")
-    if asset_id.endswith(".glb"):
-        # `{clip_id}_track{n}.glb`, per modal_app.export_clip_gltf. Checked
-        # against the tombstone too: the GLB is the dancer's motion, and a
-        # removal that left it individually fetchable would not be a removal.
-        _refuse_if_removed(asset_id.rsplit("_track", 1)[0])
-        glb = _volume_read_bytes(results_volume, f"/{asset_id}")
-        if glb is None:
-            raise HTTPException(404, "No GLB for this asset id.")
-        return Response(content=glb, media_type="model/gltf-binary")
-    raise HTTPException(404, "Unrecognized asset id.")
+        content_type = "video/mp4"
+        missing = "No video for this asset id."
+
+        def load():
+            return (_volume_read_bytes(uploads_volume, f"/{clip_id}.mp4")
+                    or _volume_read_bytes(eval_volume, f"/{clip_id}.mp4"))
+    elif asset_id.endswith(".glb"):
+        # `{clip_id}_track{n}.glb`, per modal_app.export_clip_gltf.
+        clip_id = asset_id.rsplit("_track", 1)[0]
+        content_type = "model/gltf-binary"
+        missing = "No GLB for this asset id."
+
+        def load():
+            return _volume_read_bytes(results_volume, f"/{asset_id}")
+    else:
+        raise HTTPException(404, "Unrecognized asset id.")
+
+    # Checked for both kinds, before anything is served or copied anywhere: the
+    # GLB is the dancer's motion, and a removal that left it individually
+    # fetchable would not be a removal.
+    _refuse_if_removed(clip_id)
+
+    # R2 when it is configured, Volume byte-proxy when it is not. The redirect
+    # is what buys HTTP range requests (and therefore video scrubbing), CDN
+    # cacheability and $0 egress -- see r2.py. The asset_id itself is
+    # unchanged and still opaque; only where it resolves to has moved.
+    if r2.enabled():
+        url = r2.ensure(r2.key_for(clip_id, asset_id), content_type, load)
+        if not url:
+            raise HTTPException(404, missing)
+        return RedirectResponse(url, status_code=302)
+
+    data = load()
+    if data is None:
+        raise HTTPException(404, missing)
+    return Response(content=data, media_type=content_type)
 
 
 # ---------------------------------------------------------------------------
