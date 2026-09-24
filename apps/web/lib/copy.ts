@@ -65,7 +65,7 @@ export const marketing = {
   // What happens after you add a clip. Steps, not times: the only honest
   // time is the processing screen's, extrapolated from the live job.
   wait: {
-    heading: "Your clip plays while the lesson builds.",
+    heading: "Your clip plays while we build the 3D.",
     body: "Slow it down or mirror it while you wait. You can close the tab and come back: the link keeps working.",
     steps: [
       { label: "Clip", body: "Your video plays straight away." },
@@ -76,7 +76,7 @@ export const marketing = {
     // In the lesson today: the On video view, the 3D view's orbit (estimated
     // off the camera axis), loop handles under Counts and parts, the 0.5x to
     // 1x transport, Build up, Mirror, and the dancer picker.
-    featuresLabel: "In the lesson",
+    featuresLabel: "While you learn",
     features: [
       ["3D body on your video", ""],
       ["Turn to any angle", "estimated"],
@@ -109,7 +109,7 @@ export const upload = {
   link: {
     label: "TikTok or YouTube link",
     placeholder: "Paste a TikTok or YouTube link",
-    submit: "Build the lesson",
+    submit: "Learn the dance",
     busy: "Fetching the video",
     inviteLabel: "Invite code",
     // Says who it is open to and what still works for everyone else. Not
@@ -197,9 +197,9 @@ export const upload = {
 export const processing = {
   title: "Building your lesson.",
   subtitle: "Your clip plays here while it builds. Slow it down or mirror it if you like.",
-  readyTitle: "Your lesson is ready.",
+  readyTitle: "Ready to learn.",
   readySubtitle: "Open it to loop any part, slow it down, and see the 3D body on your video.",
-  open: "Open the lesson",
+  open: "Start learning",
 
   // The big numeral is a heartbeat, not the song: it ticks at a steady rate
   // that has nothing to do with the music, and the page says so.
@@ -267,8 +267,8 @@ export const lesson = {
    * on `notReady` — which is why that line does not promise the lesson exists.
    */
   load: {
-    loading: "Getting your lesson ready",
-    jobTitle: "Your lesson",
+    loading: "Getting the dance ready",
+    jobTitle: "Your dance",
     notReady: "This lesson is not ready yet.",
     notReadyBody: "Its processing page shows how it is going.",
     notReadyLink: "See how it is going",

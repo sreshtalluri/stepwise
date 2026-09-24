@@ -101,7 +101,7 @@ export default function CountOff() {
         </button>
         <button
           type="button"
-          className="fd-chip"
+          className="fd-chip fd-chip-speed"
           aria-pressed={speed !== 1}
           onClick={() => {
             setBuild(false);
@@ -111,7 +111,7 @@ export default function CountOff() {
         >
           {copy.speed(speed)}
         </button>
-        <button type="button" className="fd-chip" aria-pressed={mirror} onClick={() => setMirror(!mirror)}>
+        <button type="button" className="fd-chip fd-chip-mirror" aria-pressed={mirror} onClick={() => setMirror(!mirror)}>
           {mirror ? copy.mirrorOn : copy.mirrorOff}
         </button>
       </div>
