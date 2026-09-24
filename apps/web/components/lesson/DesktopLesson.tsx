@@ -21,8 +21,10 @@ import {
 
 /**
  * Desktop and tablet, in the original viewer's restraint: one bar of view toggles
- * on top, every view that is on tiled below it, one thin transport and the full-width
- * timeline under them. Everything else is under More.
+ * on top, every view that is on tiled below it (up to four, in a grid that fits them),
+ * one thin transport and the full-width timeline under them. The counts sit over a
+ * single view, and in a band of their own under the tiles once there are more.
+ * Everything else is under More.
  */
 export default function DesktopLesson({ l }: { l: Lesson }) {
   useLessonKeys(l);
@@ -46,7 +48,7 @@ export default function DesktopLesson({ l }: { l: Lesson }) {
           </div>
         }
       />
-      <Panels l={l}>
+      <Panels l={l} grid>
         <div className="ls-stage-counts">
           <CountBar l={l} select />
         </div>

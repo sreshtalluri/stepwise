@@ -32,6 +32,7 @@ import {
   type LoopSpan,
 } from "../../../../packages/navigation/src/core";
 import { footContact, type FootContact } from "../../lib/footContact";
+import { tileGrid } from "../../lib/tiles";
 import { dancerBox, firstWellObserved, markerPoint, sideWord, stillCrop } from "../../lib/dancers";
 import {
   countLoop,
@@ -688,46 +689,75 @@ export function ViewBar({ l, start, end }: { l: Lesson; start?: React.ReactNode;
         {CLOSE_BAR.map(toggle)}
       </nav>
       {end}
+      <span className="ls-vnote" role="status">
+        {l.bumped && copy.views.bumped(l.maxPanels, [...VIEW_BAR, ...CLOSE_BAR].find((v) => v.id === l.bumped)!.label)}
+      </span>
     </header>
   );
 }
 
 /**
- * Every view that is on, tiled side by side (a phone in portrait: the second as an
- * inset over the first). `children` sit over the tiles — the counts, the phone's
- * overlays. With no camera panel on, the `<video>` stays mounted off-screen: it is
- * the clock and the sound.
+ * Every view that is on, tiled. With `grid` (desktop) the tiles take the grid
+ * lib/tiles.ts picks for their count, their shapes and the space: 2 side by side or
+ * stacked, 3 across or one big and two small, 4 a 2×2 — never four slivers. Without
+ * it (phone) they sit side by side, or in portrait the second as an inset over the
+ * first. `children` sit over the tiles — the counts, the phone's overlays. With no
+ * camera panel on, the `<video>` stays mounted off-screen: it is the clock and the sound.
  */
-export function Panels({ l, children, ...rest }: { l: Lesson; children?: React.ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
+export function Panels({
+  l,
+  grid = false,
+  children,
+  ...rest
+}: { l: Lesson; grid?: boolean; children?: React.ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
   const cam = l.panels.find((p): p is "overlay" | "video" => p === "overlay" || p === "video");
   const others = l.panels.filter((p) => p !== cam);
   // The first 3D angle frames the video crop (useVideoCrop).
   const firstAngle = others.find((p) => p !== "hands" && p !== "feet");
   const stage = <MainStage l={l} view={cam ?? "overlay"} hidden={!cam} />;
   const tiles: string[] = [...(cam ? ["cam"] : []), ...others];
-  // The panels' own height as `--ph`, for lesson.css to size a wide video's column to it.
+  // The panels' own content size, for the grid (rounded, so a resize settles).
   const box = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<[number, number]>([0, 0]);
   useEffect(() => {
     const el = box.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(([e]) => el.style.setProperty("--ph", `${e.contentRect.height}px`));
+    if (!el || !grid || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setSize([Math.round(e.contentRect.width), Math.round(e.contentRect.height)]));
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [grid]);
+  // Each tile's shape: the camera the clip's, the close-ups two squares, a 3D angle 3:4.
+  const shape = (t: string) => (t === "cam" ? l.aspect : t === "hands" || t === "feet" ? 2 : 3 / 4);
+  const layout = grid && size[0] > 0 ? tileGrid(tiles.map(shape), size[0], size[1]) : null;
+  const fr = (w: number[]) => w.map((x) => `minmax(0, ${x.toFixed(3)}fr)`).join(" ");
   return (
-    <div ref={box} className="ls-panels" data-n={tiles.length} data-cam={cam ? "" : undefined} {...rest}>
+    <div
+      ref={box}
+      className="ls-panels"
+      data-n={tiles.length}
+      data-cam={cam ? "" : undefined}
+      style={layout ? { gridTemplateColumns: fr(layout.cols), gridTemplateRows: fr(layout.rows) } : undefined}
+      {...rest}
+    >
       {!cam && stage}
-      {tiles.map((t, i) => (
-        <div key={t} className={`ls-tile${t === "cam" ? " ls-cam" : ""}${i === 1 ? " ls-second" : ""}`}>
-          {t === "cam" ? (
-            stage
-          ) : t === "hands" || t === "feet" ? (
-            <CropPanel l={l} kind={t} />
-          ) : (
-            <AnglePane l={l} angle={t as ViewId} focus={t === firstAngle} />
-          )}
-        </div>
-      ))}
+      {tiles.map((t, i) => {
+        const a = layout?.areas[i];
+        return (
+          <div
+            key={t}
+            className={`ls-tile${t === "cam" ? " ls-cam" : ""}${i === 1 ? " ls-second" : ""}`}
+            style={a ? { gridArea: `${a[1]} / ${a[0]} / span ${a[3]} / span ${a[2]}` } : undefined}
+          >
+            {t === "cam" ? (
+              stage
+            ) : t === "hands" || t === "feet" ? (
+              <CropPanel l={l} kind={t} />
+            ) : (
+              <AnglePane l={l} angle={t as ViewId} focus={t === firstAngle} />
+            )}
+          </div>
+        );
+      })}
       {children}
     </div>
   );

@@ -95,12 +95,14 @@ const isCamera = (p: PanelId) => p === "overlay" || p === "video";
 /** A phone shows a main panel and one inset; a desktop tiles up to four. */
 const MAX_PANELS = { phone: 2, desk: 4 };
 
-/** Toggle a panel: camera views swap, the oldest pick drops when full, never zero panels. */
-export function togglePanel(panels: readonly PanelId[], id: PanelId, max: number): PanelId[] {
-  if (panels.includes(id)) return panels.length > 1 ? panels.filter((p) => p !== id) : [...panels];
-  const next = [...panels.filter((p) => !(isCamera(id) && isCamera(p))), id];
-  while (next.length > max) next.splice(next.findIndex((p) => p !== id), 1);
-  return PANELS.filter((p) => next.includes(p));
+/**
+ * Toggle a panel in the picks, which are kept in the order they were picked: camera
+ * views swap, the oldest pick drops when full, never zero panels. (They are drawn in
+ * PANELS order; this order only says which goes first.)
+ */
+export function togglePanel(picks: readonly PanelId[], id: PanelId, max: number): PanelId[] {
+  if (picks.includes(id)) return picks.length > 1 ? picks.filter((p) => p !== id) : [...picks];
+  return [...picks.filter((p) => !(isCamera(id) && isCamera(p))), id].slice(-max);
 }
 
 const DANCER_KEY = (id: string) => `stepwise.lesson-dancer.v1.${id}`;
@@ -226,13 +228,23 @@ function useLesson(
   const maxPanels = phone ? MAX_PANELS.phone : MAX_PANELS.desk;
   const [panelPicks, setPanels] = useState<PanelId[]>(phone && !wide ? ["overlay"] : ["overlay", "front"]);
   // Rotating a desktop-sized pick onto a phone keeps the picks, just draws the first two.
-  const panels = panelPicks.slice(0, maxPanels);
+  const picks = panelPicks.slice(0, maxPanels);
+  const panels = PANELS.filter((p) => picks.includes(p));
+  // The view a full grid just turned off to make room, said for a moment under the bar.
+  const [bumped, setBumped] = useState<PanelId | null>(null);
+  useEffect(() => {
+    if (!bumped) return;
+    const t = setTimeout(() => setBumped(null), 2600);
+    return () => clearTimeout(t);
+  }, [bumped]);
   const toggleView = useCallback(
     (id: PanelId) => {
-      track("view_toggled", { view: id, on: !panels.includes(id) }, lessonId);
-      setPanels((p) => togglePanel(p.slice(0, maxPanels), id, maxPanels));
+      track("view_toggled", { view: id, on: !picks.includes(id) }, lessonId);
+      const next = togglePanel(picks, id, maxPanels);
+      setPanels(next);
+      setBumped(picks.find((p) => !next.includes(p) && p !== id && !(isCamera(id) && isCamera(p))) ?? null);
     },
-    [maxPanels, panels, lessonId],
+    [maxPanels, picks, lessonId],
   );
   const [mirrored, setMirrored] = useState(false);
   const [follow, setFollow] = useState(true);
@@ -479,7 +491,7 @@ function useLesson(
     speed, speedPick, setSpeed, cycleSpeed, buildUp, setBuildUp, passes, setHoldSlow,
     clickOn, setClickOn, clickMode, setClickMode, clickVol, setClickVol, musicVol, setMusicVol,
     multi, selected, chooseDancer, pickerOpen, setPickerOpen, showEveryone, setShowEveryone,
-    panels, toggleView, mirrored, setMirrored, follow, setFollow,
+    panels, maxPanels, bumped, toggleView, mirrored, setMirrored, follow, setFollow,
     absent, setAbsent, focusRef, crop,
     onRemoveFromMyLessons, onReportOrRemove,
   };
