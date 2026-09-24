@@ -309,6 +309,18 @@
   font-weight: 700;
   font-size: 15px;
 }
+/* The toy's labels change as you press them ("1×" → "0.75×", "Mirror off" →
+   "Mirror on"). Fixed widths so the row, and the page around it, never shift. */
+.fd .fd-chip {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.fd .fd-chip-speed {
+  min-width: 5.6em;
+}
+.fd .fd-chip-mirror {
+  min-width: 8.4em;
+}
 .fd .fd-chip[aria-pressed="true"] {
   background: var(--ink);
   color: var(--paper);
