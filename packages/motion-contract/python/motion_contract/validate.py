@@ -50,14 +50,10 @@ def _check_invariants(doc: dict[str, Any]) -> list[str]:
             )
         if len(person["samples"]) != n:
             errors.append(f"persons[{pi}].samples length {len(person['samples'])} != sample_times_s length {n}")
-        if len(person["crop_rects"]["hands"]) != n:
-            errors.append(
-                f"persons[{pi}].crop_rects.hands length {len(person['crop_rects']['hands'])} != sample_times_s length {n}"
-            )
-        if len(person["crop_rects"]["feet"]) != n:
-            errors.append(
-                f"persons[{pi}].crop_rects.feet length {len(person['crop_rects']['feet'])} != sample_times_s length {n}"
-            )
+        # Every crop track present (the per-side ones are optional) is one rect per sample.
+        for region, rects in person["crop_rects"].items():
+            if len(rects) != n:
+                errors.append(f"persons[{pi}].crop_rects.{region} length {len(rects)} != sample_times_s length {n}")
         for si, sample in enumerate(person["samples"]):
             if len(sample["joints"]) != joint_count:
                 errors.append(

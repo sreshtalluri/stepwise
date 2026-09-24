@@ -57,6 +57,10 @@ from grounding import camera_intrinsics_from_clip, solve_grounding_camera_space
 # modal_app mounts it (and skeleton_constraints.py, which it needs) alongside
 # grounding.py and this file for the same reason.
 import world_placement_probe as wp
+# hand_crops lives in vendor/fast-sam-3d-body/tools, which world_placement_probe
+# has just put on sys.path (and which both Modal images mount, next to
+# skeleton_constraints -- see modal_app.py). Pure numpy.
+import hand_crops as hc  # noqa: E402
 
 JOINT_HIERARCHY = json.loads(
     (Path(__file__).resolve().parent / "mhr_joint_hierarchy.json").read_text()
@@ -219,6 +223,10 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
         except Exception as e:  # noqa: BLE001
             print(f"[world-placement] {clip_id} track {track_id}: not placed ({e})")
             placements[track_id] = None
+
+    width = int(data["frame_width"]) if "frame_width" in data else 0
+    height = int(data["frame_height"]) if "frame_height" in data else 0
+    raw_detections = data["raw_detections"] if "raw_detections" in data else []
 
     persons = []
     for pi, track_id in enumerate(confident_track_ids):
@@ -431,11 +439,15 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
             },
             "root_trajectory": root_traj,
             "samples": samples_out,
-            "crop_rects": {"hands": hand_rects, "feet": foot_rects},
+            # Per-side crops are derived HERE, from the detector keypoints the
+            # npz already stores, rather than in the GPU stage -- so any lesson
+            # whose npz still exists gets them by rebuilding this document, no
+            # re-reconstruction. Omitted (not all-null) when the npz predates
+            # frame_width/frame_height: absent means "fall back to hands/feet".
+            "crop_rects": {"hands": hand_rects, "feet": foot_rects,
+                           **(hc.side_crop_rects(raw_detections, track_id, width, height)
+                              if width and height else {})},
         })
-
-    width = int(data["frame_width"]) if "frame_width" in data else 0
-    height = int(data["frame_height"]) if "frame_height" in data else 0
 
     # One floor per clip, from every dancer's foot contacts pooled, in the
     # same camera space `placements` above solved translation in (real per-

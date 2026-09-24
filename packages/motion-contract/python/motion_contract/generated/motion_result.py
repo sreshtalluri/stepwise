@@ -446,10 +446,24 @@ class CropRects(BaseModel):
     )
     hands: list[CropRect1 | None] = Field(
         ...,
-        description='Length matches `sample_times_s`. One rectangle covering both hands when both are localized closely enough to share a crop, otherwise null for that sample — v1 does not split left/right (PRD §5 MVP scope).',
+        description='Length matches `sample_times_s`. One rectangle covering both hands when both are localized closely enough to share a crop, otherwise null for that sample. The per-side `left_hand`/`right_hand` below supersede it where present; it stays for lessons exported before they existed.',
     )
     feet: list[CropRect1 | None] = Field(
         ..., description='Length matches `sample_times_s`.'
+    )
+    left_hand: list[CropRect1 | None] | None = Field(
+        None,
+        description="The dancer's LEFT hand alone (the dancer's side, not the viewer's). Centred on that side's own wrist keypoint and sized from that side's own forearm length, not the body box. OPTIONAL and additive, so no schema_version bump (README): lessons exported before per-side crops do not carry it, and a consumer detects it by presence and falls back to `hands`. When present, length matches `sample_times_s`; null per sample exactly as CropRect describes.",
+    )
+    right_hand: list[CropRect1 | None] | None = Field(
+        None, description="The dancer's RIGHT hand alone. Same rules as `left_hand`."
+    )
+    left_foot: list[CropRect1 | None] | None = Field(
+        None,
+        description="The dancer's LEFT foot alone, centred on that side's ankle keypoint and sized from that side's shank (knee-ankle) length. Same presence/fallback rules as `left_hand` (fallback: `feet`).",
+    )
+    right_foot: list[CropRect1 | None] | None = Field(
+        None, description="The dancer's RIGHT foot alone. Same rules as `left_foot`."
     )
 
 

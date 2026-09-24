@@ -31,7 +31,21 @@ export function sampleIndexAt(times: readonly number[], t: number): number {
   return lo;
 }
 
-export type CropRegion = "hands" | "feet";
+export type CropRegion = "hands" | "feet" | "left_hand" | "right_hand" | "left_foot" | "right_foot";
+
+/**
+ * Which close-ups to show for one dancer, in screen order. Per-side rects when the
+ * lesson carries them (the contract's optional `left_hand`..`right_foot`), else the
+ * combined `hands`/`feet` older lessons have. Left/right are the DANCER's, so they
+ * are ordered as they sit on screen for a dancer facing the camera: their right
+ * hand is on screen-left, unless the video is mirrored.
+ */
+export function cropRegions(doc: MotionResult, personIndex: number, mirrored: boolean): CropRegion[] {
+  if (!doc.persons[personIndex]?.crop_rects.left_hand) return ["hands", "feet"];
+  return mirrored
+    ? ["left_hand", "right_hand", "left_foot", "right_foot"]
+    : ["right_hand", "left_hand", "right_foot", "left_foot"];
+}
 
 /**
  * The `CropRect` in effect for one region at time `t`, or `null` when the
@@ -45,7 +59,7 @@ export type CropRegion = "hands" | "feet";
 export function cropRectAt(doc: MotionResult, personIndex: number, region: CropRegion, t: number): CropRect {
   const person = doc.persons[personIndex];
   if (!person) return null;
-  return person.crop_rects[region][sampleIndexAt(doc.sample_times_s, t)] ?? null;
+  return person.crop_rects[region]?.[sampleIndexAt(doc.sample_times_s, t)] ?? null;
 }
 
 /**

@@ -62,6 +62,9 @@ like `skeleton_constraints.constrain_clip` attaches `bone_length_confidence`:
     foot_crop_rect   contract CropRect (normalized [0,1]) or None
     hand_confidence  (2,) float32, [left, right], in [0, 1]
 
+and, separately, `side_crop_rects`: one rect per hand and per foot, computed
+at MotionResult assembly from the npz's stored detections (see SIDE_LIMBS).
+
 Rectangles come from the DETECTOR's wrist/ankle keypoints, not from MHR's
 reprojected ones. That is a measured choice too: MHR's reprojected ankles sit
 51.8 px (p90 106 px) from the detector's ankles on solo-01 and 33.5 px
@@ -181,6 +184,73 @@ def hand_pose_confidence(wrist_conf: float, crop_px: float, chain_conf: float = 
     resolution = min(max(resolution, 0.0), 1.0)
     chain = chain_conf if np.isfinite(chain_conf) else 0.0
     return float(HAND_POSE_CEILING * min(localization, resolution, chain))
+
+
+# ---- per-side crops ----------------------------------------------------------
+# One rect per hand and per foot, sized from THAT limb, not the body box. RTMO
+# is COCO-17, so the detector has no finger or toe points; the nearest honest
+# measure of a hand's pixel extent is its own forearm (elbow->wrist), and of a
+# foot's its own shank (knee->ankle). Anthropometric ratios (Drillis & Contini
+# segment lengths as fractions of stature): hand 0.108 / forearm 0.146 ~= 0.75,
+# foot 0.152 / shank 0.246 ~= 0.62. The square is centred on the wrist/ankle
+# with a half-side of one hand/foot length, so the hand fits whichever way it
+# points; `_rect` then adds PAD.
+#
+# Foreshortening (forearm pointed at the camera) shrinks the measured length,
+# so it is floored at half the vendor's body-box hand size -- a floor, not the
+# size. The viewer sizes its steady crop off the p90 of these per clip anyway
+# (apps/web/lib/motion.ts steadyCropTrack), so a foreshortened frame does not
+# zoom the close-up in.
+# ponytail: MHR's own 2D finger/toe keypoints (pred_keypoints_2d) would give a
+# per-frame extent, but they reproject 30-50 px off the detector at 576x1024
+# (see the header) -- about a whole hand -- so they are not used for this.
+COCO_L_ELBOW, COCO_R_ELBOW, COCO_L_KNEE, COCO_R_KNEE = 7, 8, 13, 14
+SIDE_LIMBS = {
+    # region: (end keypoint, proximal keypoint, limb-end length / proximal segment)
+    "left_hand": (L_WRIST, COCO_L_ELBOW, 0.75),
+    "right_hand": (R_WRIST, COCO_R_ELBOW, 0.75),
+    "left_foot": (L_ANKLE, COCO_L_KNEE, 0.62),
+    "right_foot": (R_ANKLE, COCO_R_KNEE, 0.62),
+}
+
+
+def side_rect(kpts: np.ndarray, body_box: Optional[np.ndarray], region: str,
+              frame_w: int, frame_h: int) -> Optional[dict]:
+    """One hand's or foot's CropRect from COCO-17 keypoints (x, y, conf), or None.
+
+    None when the wrist/ankle itself is not confidently seen -- same gate as the
+    combined rects, for the same reason (below it there is nothing to centre on).
+    """
+    end, prox, ratio = SIDE_LIMBS[region]
+    if kpts[end, 2] <= MIN_KEYPOINT_CONF:
+        return None
+    floor = _box_side(body_box) / 2 if body_box is not None else 0.0
+    half = floor
+    if kpts[prox, 2] > MIN_KEYPOINT_CONF:
+        half = max(ratio * float(np.hypot(*(kpts[end, :2] - kpts[prox, :2]))), floor)
+    cx, cy = float(kpts[end, 0]), float(kpts[end, 1])
+    return _rect([np.array([cx - half, cy - half, cx + half, cy + half])], frame_w, frame_h)
+
+
+def side_crop_rects(raw_detections: Sequence[dict], track_id: int,
+                    frame_w: int, frame_h: int) -> dict:
+    """{region: [CropRect | None] per sample} for the four SIDE_LIMBS regions.
+
+    Pure numpy off the detector output the npz already stores, so it runs at
+    MotionResult assembly (motion_result.py) for new and already-reconstructed
+    lessons alike -- no GPU, no re-reconstruction, as long as the npz exists.
+    """
+    out = {region: [] for region in SIDE_LIMBS}
+    for det in raw_detections:
+        kpts = box = None
+        if isinstance(det, dict):
+            m = np.nonzero(np.asarray(det["track_ids"]) == track_id)[0]
+            if len(m):
+                kpts = np.asarray(det["keypoints"][m[0]])
+                box = np.asarray(det["boxes"][m[0]]) if "boxes" in det else None
+        for region in SIDE_LIMBS:
+            out[region].append(None if kpts is None else side_rect(kpts, box, region, frame_w, frame_h))
+    return out
 
 
 def annotate_clip(

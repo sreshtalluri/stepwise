@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import {
   sampleIndexAt,
   cropRectAt,
+  cropRegions,
   steadyCropTrack,
   steadyCropAt,
   regionVisibility,
@@ -125,6 +126,19 @@ test("steadyCropTrack: one zoom for the clip, smoothed centre, nulls stay null a
   assert.ok(Math.abs(cx(mid) - (cx(track[10]!) + cx(track[11]!)) / 2) < 1e-9);
   assert.deepEqual(steadyCropAt(times, track, (times[29] + times[30]) / 2), track[29]);
   assert.equal(steadyCropAt(times, track, times[31]), null);
+});
+
+test("cropRegions: per-side insets when the lesson has them, combined for older lessons", () => {
+  assert.deepEqual(cropRegions(good, 0, false), ["hands", "feet"]);
+  const doc = structuredClone(good);
+  const nulls = doc.sample_times_s.map(() => null);
+  Object.assign(doc.persons[0].crop_rects, { left_hand: nulls, right_hand: nulls, left_foot: nulls, right_foot: nulls });
+  // Dancer facing camera: their right hand is on screen-left; mirroring swaps it.
+  assert.deepEqual(cropRegions(doc, 0, false), ["right_hand", "left_hand", "right_foot", "left_foot"]);
+  assert.deepEqual(cropRegions(doc, 0, true), ["left_hand", "right_hand", "left_foot", "right_foot"]);
+  assert.deepEqual(cropRegions(doc, 9, false), ["hands", "feet"]);
+  // A per-side track steadies on its own, like any other region.
+  assert.equal(steadyCropTrack(doc, 0, "left_hand").every((r) => r === null), true);
 });
 
 test("failure fixture: feet go absent, left arm goes uncertain, and the shin stays drawn", () => {

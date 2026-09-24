@@ -7,6 +7,7 @@ import {
   viewLabel,
   projectBoxToFrame,
   cropTransform,
+  cropRegions,
   steadyCropTrack,
   steadyCropAt,
   STEADY_CROP_SIGMA_S,
@@ -480,6 +481,7 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
   // transform to the overlay canvas if both are ever wanted at once).
   const overlay = view === "overlay";
   const crop = useVideoCrop(video, doc, focusRef, follow && !overlay, mirrored);
+  const peekRegions = cropRegions(doc, selected, mirrored);
   const travels = travelsMeaningfully(doc, selected);
 
   useEffect(() => {
@@ -653,9 +655,10 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
               absolutely positioned inside a fixed-height box) the count strip
               below the stages. */}
           {showCrops && promoted !== "3d" && !overlay && (
-            <div className="crop-peek-group">
-              <CropPeek video={video} doc={doc} timeRef={timeRef} personIndex={selected} region="hands" mirrored={mirrored} />
-              <CropPeek video={video} doc={doc} timeRef={timeRef} personIndex={selected} region="feet" mirrored={mirrored} />
+            <div className={`crop-peek-group${peekRegions.length > 2 ? " sides" : ""}`}>
+              {peekRegions.map((region) => (
+                <CropPeek key={region} video={video} doc={doc} timeRef={timeRef} personIndex={selected} region={region} mirrored={mirrored} />
+              ))}
             </div>
           )}
         </section>

@@ -19,6 +19,7 @@ from hand_crops import (
     MIN_KEYPOINT_CONF,
     annotate_clip,
     hand_pose_confidence,
+    side_crop_rects,
 )
 
 W, H = 576, 1024  # the real source size (evaluation/clips.yaml RESOLUTION FINDING)
@@ -130,3 +131,27 @@ if __name__ == "__main__":
         t()
         print(f"ok  {t.__name__}")
     print(f"\n{len(tests)} passed")
+
+
+def test_side_rects_are_sized_from_their_own_limb_and_gated_on_their_own_joint():
+    """Each side's rect is centred on its own wrist/ankle and sized from its own
+    forearm/shank, not the body box; an unseen wrist nulls only its own side."""
+    d = _det(lw=(80, 300, 0.9), rw=(490, 920, 0.2))
+    k = d["keypoints"][0]
+    k[7] = (80, 420, 0.9)    # left elbow 120 px below the left wrist -> hand ~90 px
+    k[8] = (490, 800, 0.9)   # right elbow fine, but the right wrist itself is unseen
+    k[13] = (240, 800, 0.1)  # left knee unseen -> left foot falls back to the floor size
+    out = side_crop_rects([d, {"keypoints": k[None], "boxes": d["boxes"], "track_ids": np.array([9])}], 4, W, H)
+    assert set(out) == {"left_hand", "right_hand", "left_foot", "right_foot"}
+    assert all(len(v) == 2 for v in out.values())
+    assert all(v[1] is None for v in out.values())  # other track only on frame 2
+    lh = out["left_hand"][0]
+    _in_unit(lh)
+    assert out["right_hand"][0] is None  # no wrist, no rect
+    # Half-side = 0.75 * 120 = 90 px, padded 1.25x -> 225 px square around (80, 300),
+    # clipped at the frame's left edge, so width = 80 + 112.5.
+    assert abs(lh["height"] * H - 225) < 1 and abs(lh["width"] * W - 192.5) < 1
+    # Left foot: knee unseen -> floor = body-box hand size / 2 = ((250+750)/2/3)/2.
+    lf = out["left_foot"][0]
+    assert abs(lf["height"] * H - 2 * 1.25 * (500 / 3 / 2)) < 1
+    _in_unit(out["right_foot"][0])

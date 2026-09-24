@@ -265,6 +265,10 @@ export const lesson = {
   crop: {
     hands: "Hands",
     feet: "Feet",
+    left_hand: "L hand",
+    right_hand: "R hand",
+    left_foot: "L foot",
+    right_foot: "R foot",
     unavailable: "Not confidently located here.",
     toggleOn: "Close-up on",
     toggleOff: "Close-up off",

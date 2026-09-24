@@ -176,3 +176,14 @@ def test_job_status_rejects_unknown_state():
         }
     )
     assert result.valid is False
+
+
+def test_per_side_crop_tracks_are_optional_and_length_checked(good_lesson):
+    doc = copy.deepcopy(good_lesson)
+    n = len(doc["sample_times_s"])
+    doc["persons"][0]["crop_rects"]["right_foot"] = [None] * n
+    assert validate_motion_result(doc).errors == []
+    doc["persons"][0]["crop_rects"]["right_foot"].pop()
+    result = validate_motion_result(doc)
+    assert result.valid is False
+    assert any("crop_rects.right_foot length" in e for e in result.errors)

@@ -664,6 +664,16 @@ button {
   background: var(--stage-deep);
   border: 1px solid rgba(242, 239, 233, 0.22);
 }
+/* Per-side close-ups: four insets as a 2x2 (hands over feet) at a smaller size,
+ * so the group takes about the footprint the two combined insets did. */
+.lesson .crop-peek-group.sides {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+}
+.lesson .crop-peek-group.sides .crop-peek {
+  width: 56px;
+  height: 56px;
+}
 .lesson .crop-peek canvas { display: block; width: 100%; height: 100%; }
 .lesson .crop-peek-label {
   position: absolute;

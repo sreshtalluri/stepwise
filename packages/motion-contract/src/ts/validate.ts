@@ -53,11 +53,11 @@ function checkInvariants(doc: MotionResult): string[] {
     if (person.samples.length !== n) {
       errors.push(`persons[${pi}].samples length ${person.samples.length} !== sample_times_s length ${n}`);
     }
-    if (person.crop_rects.hands.length !== n) {
-      errors.push(`persons[${pi}].crop_rects.hands length ${person.crop_rects.hands.length} !== sample_times_s length ${n}`);
-    }
-    if (person.crop_rects.feet.length !== n) {
-      errors.push(`persons[${pi}].crop_rects.feet length ${person.crop_rects.feet.length} !== sample_times_s length ${n}`);
+    // Every crop track present (the per-side ones are optional) is one rect per sample.
+    for (const [region, rects] of Object.entries(person.crop_rects)) {
+      if (rects && rects.length !== n) {
+        errors.push(`persons[${pi}].crop_rects.${region} length ${rects.length} !== sample_times_s length ${n}`);
+      }
     }
     person.samples.forEach((sample, si) => {
       if (sample.joints.length !== jointCount) {

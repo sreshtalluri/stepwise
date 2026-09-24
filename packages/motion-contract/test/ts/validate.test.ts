@@ -31,6 +31,17 @@ test("failure-lesson.json actually exercises observed+interpolated+suppressed si
   assert.equal(triple, true, "fixture must contain at least one joint sample with all three provenance flags active at once");
 });
 
+test("per-side crop tracks are optional, and length-checked when present", () => {
+  const doc = clone(loadFixture("good-lesson.json"));
+  const n = doc.sample_times_s.length;
+  doc.persons[0].crop_rects.left_hand = Array(n).fill(null);
+  assert.deepEqual(validateMotionResult(doc).errors, []);
+  doc.persons[0].crop_rects.left_hand.pop();
+  const result = validateMotionResult(doc);
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => e.includes("crop_rects.left_hand length")));
+});
+
 test("rejects a document missing schema_version", () => {
   const doc = clone(loadFixture("good-lesson.json"));
   delete doc.schema_version;

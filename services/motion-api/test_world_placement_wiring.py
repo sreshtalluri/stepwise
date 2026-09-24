@@ -314,3 +314,14 @@ def test_a_declined_track_is_counted_in_the_diagnostics():
 
     d = g.solve_grounding_camera_space([placement, None], times, n).diagnostics
     assert (d["n_placements"], d["n_placed"], d["n_pooled"]) == (2, 1, 1)
+
+
+def test_per_side_crops_are_built_from_the_npz_detections():
+    """Assembly derives left/right hand/foot crops from the stored detections,
+    so an already-reconstructed npz gets them with no GPU re-run."""
+    doc, _ = _build(travel_m=0.0)
+    crops = doc["persons"][0]["crop_rects"]
+    n = len(doc["sample_times_s"])
+    for region in ("left_hand", "right_hand", "left_foot", "right_foot"):
+        assert len(crops[region]) == n, region
+    assert any(r is not None for r in crops["left_hand"]), "synthetic wrists are confident"

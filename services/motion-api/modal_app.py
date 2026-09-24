@@ -768,6 +768,11 @@ gltf_image = (
     .add_local_file(os.path.join(os.path.dirname(__file__),
                                   "vendor/fast-sam-3d-body/tools/skeleton_constraints.py"),
                     "/app/skeleton_constraints.py")
+    # motion_result derives the per-side hand/foot crops from the npz's
+    # detector keypoints (hand_crops.side_crop_rects). Pure numpy.
+    .add_local_file(os.path.join(os.path.dirname(__file__),
+                                  "vendor/fast-sam-3d-body/tools/hand_crops.py"),
+                    "/app/hand_crops.py")
 )
 
 BEAT_DETECT_DIR = os.path.join(
@@ -1817,6 +1822,10 @@ api_image = (
     .add_local_file(os.path.join(MOTION_API_DIR, "vendor", "fast-sam-3d-body",
                                  "tools", "skeleton_constraints.py"),
                     "/app/services/motion-api/vendor/fast-sam-3d-body/tools/skeleton_constraints.py")
+    # Same trap, same fix: motion_result imports hand_crops (per-side crops).
+    .add_local_file(os.path.join(MOTION_API_DIR, "vendor", "fast-sam-3d-body",
+                                 "tools", "hand_crops.py"),
+                    "/app/services/motion-api/vendor/fast-sam-3d-body/tools/hand_crops.py")
     .add_local_dir(os.path.join(REPO_ROOT, "packages", "motion-contract", "python"),
                    remote_path="/app/packages/motion-contract/python",
                    ignore=["**/__pycache__/**", "*.pyc", ".venv/**"])
