@@ -95,6 +95,8 @@ export interface Focus {
   body: THREE.Box3;
   hands: THREE.Box3;
   feet: THREE.Box3;
+  /** The root joint's world position this frame — what the rig follows rigidly when there is no floor. */
+  root: THREE.Vector3;
 }
 
 /* -------------------------------------------------------------------- dancer */
@@ -371,6 +373,7 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
         body: box.current.clone(),
         hands: boneBox(bonesByName, doc, HAND_JOINTS, 0.1),
         feet: boneBox(bonesByName, doc, FOOT_JOINTS, 0.1),
+        root: rootBone ? rootBone.getWorldPosition(new THREE.Vector3()) : box.current.getCenter(new THREE.Vector3()),
       };
     }
   });
@@ -655,6 +658,15 @@ function ViewRig({
   const delta = useRef(new THREE.Vector3());
   const offset = useRef(new THREE.Vector3());
   const extent = useRef(new THREE.Vector3());
+  const anchor = useRef(new THREE.Vector3());
+  // No floor: follow in the DANCER's frame, not the room's — the root is held rigidly
+  // and only body-relative motion goes through the deadzone. With no floor there is
+  // nothing to see travel against, and on a moving camera (job_a10682e7, a follow-cam:
+  // grounding "none") the "travel" is camera motion plus monocular depth noise — root
+  // z jitter 0.16 m std, 4x its x — which is exactly Side's screen-horizontal: the
+  // deadzone let the body slide half out of a narrow pane, or all the way on a 1 m
+  // depth spike. Grounded clips keep world follow, unchanged.
+  const pinned = follow && doc.grounding.status === "none";
   // Every estimated view orbits the FLOOR's up, not the phone's (see `stageBasis`);
   // "camera" keeps the source camera's own axes. The follow and orbit code below is
   // direction-agnostic, so this basis and `camera.up` are all that change.
@@ -671,7 +683,10 @@ function ViewRig({
     // distances for the same "hands" preset.
     const bounds = focus[preset.focus].isEmpty() ? focus.body : focus[preset.focus];
     const cam = camera as THREE.PerspectiveCamera;
-    bounds.getCenter(subject.current);
+    anchor.current.set(0, 0, 0);
+    if (pinned) anchor.current.copy(focus.root);
+    // `subject` and `aim` live in the anchor's frame (the world's when not pinned).
+    bounds.getCenter(subject.current).sub(anchor.current);
     const radius = frameRadius(bounds, cam, preset.distance);
 
     // DESIGN.md §7a2: switching dancer is one tap and the lesson re-anchors. How it
@@ -694,14 +709,15 @@ function ViewRig({
       aim.current = [subject.current.x, subject.current.y, subject.current.z];
       autoDist.current = radius;
       lastDist.current = radius * zoomBias.current;
-      camera.position.set(...orbitPosition(basis, aim.current, preset.azimuth, preset.elevation, lastDist.current));
+      const at = anchor.current;
+      camera.position.set(...orbitPosition(basis, [aim.current[0] + at.x, aim.current[1] + at.y, aim.current[2] + at.z], preset.azimuth, preset.elevation, lastDist.current));
       // drei's OrbitControls is three-stdlib's, whose update() re-reads `camera.up` on
       // every call, so orbit, the polar clamp ("never under the floor") and lookAt all
       // follow this with nothing else to patch. (three's own OrbitControls caches it at
       // construction instead; writing its private `_quat` here threw on stdlib, which
       // left the target stale and turned "side" into a near-frontal view in 4ba6fcc.)
       camera.up.set(...basis.up);
-      controls.target.copy(subject.current);
+      controls.target.copy(subject.current).add(anchor.current);
       controls.update();
       return;
     }
@@ -727,7 +743,7 @@ function ViewRig({
     // Translate the whole rig: moving target and camera by the same vector leaves
     // `camera.position - target` — which is all OrbitControls stores an orbit as —
     // completely unchanged. This is why follow and orbit compose instead of fighting.
-    delta.current.set(aim.current[0], aim.current[1], aim.current[2]).sub(controls.target);
+    delta.current.set(aim.current[0], aim.current[1], aim.current[2]).add(anchor.current).sub(controls.target);
     controls.target.add(delta.current);
     camera.position.add(delta.current);
 

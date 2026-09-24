@@ -44,8 +44,9 @@ export const copy = {
 
   counts: {
     editor: "Counts and parts",
-    summary: (total: number, perMinute: number, countOneS: string) =>
-      `${total} counts, ${perMinute} a minute, count 1 at ${countOneS}.`,
+    /** `firstOneS`: the first 1 inside the clip (count 1 of the dance may be before it starts). */
+    summary: (total: number, perMinute: number, firstOneS: string) =>
+      `${total} counts, ${perMinute} a minute, first 1 at ${firstOneS}.`,
     /**
      * Where the grid came from, said plainly — one of these always follows the
      * summary above.
@@ -66,7 +67,7 @@ export const copy = {
      */
     byHand: "Set by hand — nothing here came from the music.",
     byMusic:
-      "Proposed from the music. Count 1 is the first beat in the clip, not necessarily the first count of the dance.",
+      "Proposed from the music. The beats are usually right; which of them is a 1 is a guess.",
     setOne: "Set count 1 here",
     tap: (taps: number) => `Tap the counts (${taps})`,
     tapping: (perMinute: number) => `Tapping at ${perMinute} a minute`,

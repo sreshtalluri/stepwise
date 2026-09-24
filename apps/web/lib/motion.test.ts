@@ -492,10 +492,25 @@ test("stageBasis keeps up head-side when the phone rests on the floor (job_b8223
   assert.ok(up[0] * normal[0] + up[1] * normal[1] + up[2] * normal[2] > 0.99);
 });
 
-test("stageBasis is the camera's own axes on a level floor, with no floor, and for the camera view", () => {
+test("stageBasis is the camera's own axes on a level floor and for the camera view", () => {
   const axes = { right: [1, 0, 0], up: [0, 1, 0], back: [0, 0, 1] };
-  for (const [doc, level] of [[good, true], [failure, true], [good, false]] as const) {
+  for (const [doc, level] of [[good, true], [good, false]] as const) {
     const b = stageBasis(doc, level);
     for (const k of ["right", "up", "back"] as const) b[k].forEach((c, i) => assert.ok(Math.abs(c - axes[k][i]) < 1e-12, `${k}`));
   }
+  // No floor and no travel to read a slope from: level, to within the in-place sway.
+  assert.ok(stageBasis(failure).up[1] > Math.cos((1 * Math.PI) / 180));
+});
+
+test("stageBasis levels a no-floor (moving-camera) clip to its feet, not the phone (job_a10682e7)", () => {
+  // A follow-cam never grounds, and its orbit used to be the phone's own axes: Side
+  // slanted by the camera's pitch. Pitch the travelling-no-floor room by 8 degrees —
+  // the ground rises toward the camera — and the orbit must come back level with it.
+  const doc = load("travelling-no-floor");
+  const tilt = Math.tan((8 * Math.PI) / 180);
+  for (const s of doc.persons[0].root_trajectory) s.position[1] += s.position[2] * tilt;
+  const up = stageBasis(doc).up;
+  const deg = (Math.acos(up[1]) * 180) / Math.PI;
+  assert.ok(deg > 7 && deg < 8.5, `up is ${deg.toFixed(2)} deg off the phone's, want ~8`);
+  assert.ok(up[2] < 0 && Math.abs(up[0]) < 0.01);
 });
