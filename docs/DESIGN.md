@@ -38,11 +38,13 @@ Base is warm but **greyer than cream** — deliberately avoiding the cream + ter
 Fallback and dancer colors, when sampling fails or there is more than one dancer — chosen to differ in **both hue and lightness** so they survive color-vision differences and sunlight:
 
 ```css
---dancer-1: #E8952F;  /* marigold */
+--dancer-1: #F2891D;  /* marigold, A2 (was #E8952F) */
 --dancer-2: #1E7A6F;  /* teal */
 --dancer-3: #C2417E;  /* magenta */
 --dancer-4: #3F51B5;  /* indigo */
 ```
+
+**A2 "Count off" (owner-approved 2026-09-23):** the fallback/front-door accent is `#F2891D`, one step warmer and brighter than `#E8952F`, and on the landing it may fill large decorative shapes (the count-off numeral, the headline's second line). It is still the one accent. The lesson keeps its clip-sampled accent and falls back to the same token.
 
 Rules: **one accent on screen at a time** (the current dancer's). Never a second saturated color for UI state — use weight, size, and the paper/sunk contrast instead. No purple-blue gradients, no glows, no `#000000` anywhere.
 
@@ -64,14 +66,14 @@ Non-front camera presets carry a small `--ink-faint` label: "estimated view". Th
 
 ## 5. Typography
 
-Both faces are from Indian Type Foundry via Fontshare, free for commercial use — which matters for an open-source repo, and is a quiet fit for a product launching into a South Asian dance community.
+**Changed with A2 "Count off" (owner-approved 2026-09-23).** Display moved from Cabinet Grotesk, which looked too polite at hero size, to Bricolage Grotesque. Both faces are free for commercial use, which matters for an open-source repo. Bricolage loads from Google Fonts (SIL OFL), Switzer from Fontshare; /privacy names both hosts.
 
-- **Display / counts:** **Cabinet Grotesk** — 700/800. Slightly condensed, warm, has character without being decorative. Used for the count numerals, the lesson title, and the landing headline.
+- **Display / counts:** **Bricolage Grotesque** — 700/800, a variable face with width and optical-size axes. On the front door it runs condensed and heavy (`font-variation-settings: "wdth" 75–85, "opsz" 48–96`); the lesson uses it at its default width. Used for the count numerals, the lesson title, and the landing headline. The lesson reads the family from the same `--font-display` token as the front door (`apps/web/app/globals.css`), so the two never drift.
 - **UI / body:** **Switzer** — 400/500/600. Neo-grotesque, extremely legible at small sizes and at distance, has **tabular figures** (essential — count numbers must not shift width as they change).
 - **No monospace anywhere.** Timecode is not the coordinate people think in; counts are. If a raw timestamp must appear, set it in Switzer with tabular figures.
 
 ```css
---font-display: 'Cabinet Grotesk', 'Switzer', system-ui, sans-serif;
+--font-display: 'Bricolage Grotesque', 'Switzer', system-ui, sans-serif;
 --font-ui:      'Switzer', system-ui, sans-serif;
 ```
 
@@ -85,6 +87,8 @@ Scale (fluid, clamped — the app is used at arm's length *and* at 3 metres):
 | Part name | `1.125rem` | 600 | -0.01em |
 | UI label | `0.9375rem` | 500 | 0 |
 | Meta / legend | `0.8125rem` | 400 | 0 |
+
+Front-door scale (A2, `apps/web/app/front.css`): hero headline `clamp(3rem, 7.4vw, 7rem)`, section headings `clamp(2.2rem, 5vw, 4.4rem)`, the count-off numeral sized to its own cell with container units. Spacing tightened to `--s1..--s5` = 8 / 12 / 20 / 32 / `clamp(48px, 7vw, 96px)` and a `clamp(16px, 4vw, 56px)` gutter. Every front-door size is fluid (clamp, container queries, `dvh`), and the big numerals sit in their own grid cell: nothing readable or tappable is ever layered over them, at any window size.
 
 **Sentence case everywhere.** No ALL-CAPS eyebrows, no tracked-out labels, no "WORD — fragment" constructions, no middle-dot meta strings. Body copy max 65 characters.
 
@@ -215,7 +219,11 @@ Rules: maximum two 3D angles at once, ever — three panels means none of them a
 
 ## 7c. Processing — make the wait usable (A1)
 
-The job takes 2–4 minutes. The design principle: **there is no dead time, because the video is already useful.**
+The job's length is not stated anywhere without a job to measure: the old "2–4 minutes" came from an FPS figure that could not be re-verified, and "about three minutes" on the A2 mockup was never measured. The processing screen extrapolates time remaining from the live job's own progress (`lib/jobStatus.ts timeRemaining`); the landing states no time. The design principle: **there is no dead time, because the video is already useful.**
+
+**As built (A2 "Count off", with the owner's change of 2026-09-23):** the page waits for the whole analysis, then hands off to the full lesson. It shows the clip playing (muted, with speed, mirror and sound), the service's own `stage_message` and `progress` on a rail, the milestones that are true (dancers found, frame N of M built), the detector's 2D skeleton on the clip once `/detections` exists, and at success one button, "Open the lesson", carrying the speed. The count-off numeral stays as a heartbeat: 1 to 8 at a steady 60 a minute, captioned as not the music's beat, landing on 8 when the lesson is ready. **No counts on this page.** The early `milestones.counts` were often off the beat and put count 1 on the intro before the dancer starts; the early 8-count practice ("Practice counts 1 to 8 at half speed", Earlier 8 / Loop / Next 8) was removed. The backend milestone is left as-is. *Future: early 8-count practice once count 1 is reliable.*
+
+The original A1 spec follows; its step names ("Found the dancer in every frame", "Building the body — count 9 of 32") are superseded by the service's stage messages and the three steps Clip / Dancers / 3D body.
 
 - The learner's own clip **plays immediately** in the stage, with speed, mirror, and loop already working on it. Those are 2D operations that need no GPU. A learner can begin working on the dance the second they upload.
 - Below it, honest stage-by-stage progress in **plain language**: "Found the dancer in every frame", "Building the body — count 9 of 32", "Working out the floor", "Finding the counts". Never "Detection complete" or a bare percentage. The count-based progress is meaningful to a dancer in a way a percentage is not.
@@ -251,7 +259,9 @@ The strongest asset is a **finished lesson a stranger can use before uploading a
 
 They have different jobs and different rules, and conflating them is why the first landing draft felt flat.
 
-**Marketing site** (`/`) — loud. Big display type at 60px+, the accent used boldly, a dark full-bleed proof band for contrast, and a **live demo lesson in the hero that a stranger can drag and spin before signing up for anything**. Sections: hero with demo → proof band (one real before/after) → three steps as an asymmetric list, never three equal cards → closing call to action. Primary action is "Try it free"; "No account. Works in your browser." sits underneath.
+**Marketing site** (`/`) — loud. Big display type at 60px+, the accent used boldly. **As built (A2 "Count off", 2026-09-23):** hero = headline "Learn any dance, step by step." with the two doors (paste a link, which needs an invite code during the beta and says so; add a video file, which works for everyone) beside **the count-off toy**: a screen-sized numeral calling 1 to 8 while a drawn figure, labelled as a drawing, hits each count, with working Build up, speed and mirror chips. Below: **the on-video demo**, then the wait as steps (no times), what the lesson can do, and what works best plus both rights lines. The calls to action are the same words on every page: "Build the lesson" (link), "Add a video file" (file), "Add a clip" (nav).
+
+**The demo clip.** No cleared clip exists yet (the testing clips are `rights: untested`; `solo-02.mp4` and the fixture test cards must never ship), so the demo stage is an empty placeholder labelled "Demo clip coming soon". A real clip drops in through one constant, `DEMO` in `apps/web/components/front/Demo.tsx` (src, poster, lessonId, and the lesson's checked counts); the component already plays it muted, looped, `playsinline`, only while on screen (IntersectionObserver), poster first with `preload="none"`, with the count ticking from the clip's own counts, and under reduced motion shows the poster and a play button. No sound control until the music is cleared.
 
 **The app** (`/lesson/...`) — calm. Everything in §6–§7d. The learner is here for forty minutes repeating an 8-count; energy here is fatigue.
 
@@ -332,6 +342,8 @@ Tactile feedback on `:active` — `scale(0.98)` and `translateY(1px)`. No ripple
 
 `MOTION_INTENSITY: 3` — this is a tool people stare at for forty minutes, not a landing page. Almost nothing moves on its own.
 
+**Exception, A2 (2026-09-23): motion level 6 on the landing and processing screens only** — the count-off numeral, the drawn figure, the count pulse and the heartbeat. They stop when scrolled off screen, and `prefers-reduced-motion` freezes them (numeral and figure hold on count 1; the heartbeat shows a still dot until the lesson is ready).
+
 **The one exception, and it is the signature:** the **contact shadow under the figure swings as you orbit**. No competitor exposes any affordance for "you can rotate this" (Sportsbox has none at all). A shadow that moves with the camera is a self-explaining depth cue that teaches the interaction without a tooltip. It is also the thing that makes the body read as standing in a room rather than floating in space.
 
 Everything else: `transition: 160ms cubic-bezier(0.16, 1, 0.3, 1)` on hover and state changes. Respect `prefers-reduced-motion` — the shadow still moves (it is information, not decoration), the transitions stop.
@@ -348,6 +360,9 @@ Everything else: `transition: 160ms cubic-bezier(0.16, 1, 0.3, 1)` on hover and 
 ## 11. Writing
 
 Plain, active, sentence case. The interface's voice, not a person's.
+
+- **Steps and parts, not 8-counts as a rule** (A2). "Step by step" is the name; a loop is as long as the learner sets it under Counts and parts. Never "8 counts at a time". `test/copy.test.ts` sweeps the entry flow for it.
+- **Every sentence true today.** No "app" (it is a website). No processing-time promise without a job to measure. A link needs an invite code during the beta, a file works for everyone, and both are said where the doors are.
 
 - "Upload a clip" not "Get started"
 - "Feet not visible in this clip" not "Warning: incomplete data"
