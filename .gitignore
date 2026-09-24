@@ -36,6 +36,7 @@ outputs/
 *.mp4
 *.mov
 !docs/**/*.mp4
+!packages/beat-detect/python/tests/fixtures/*.mp4
 
 # Tooling
 .pytest_cache/

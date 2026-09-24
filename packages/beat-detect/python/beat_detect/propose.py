@@ -17,6 +17,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import imageio_ffmpeg
 import librosa
 import numpy as np
 
@@ -74,10 +75,17 @@ class ProposedGrid:
 
 
 def _extract_audio(source: Path) -> Path:
-    """Extract mono 22.05kHz audio from a video via ffmpeg. Returns a temp wav path."""
+    """Extract mono 22.05kHz audio from a video via ffmpeg. Returns a temp wav path.
+
+    The ffmpeg is imageio-ffmpeg's pinned static build (7.x), never the system
+    one. TikTok audio is HE-AAC with an edit list trimming the encoder
+    priming; Debian bookworm's ffmpeg 5.1 (what `apt install ffmpeg` gave the
+    Modal beat image) trims it twice, so the whole track -- and count 1 --
+    came out 115 ms early on solo-02 (1.789 s on Modal vs 1.905 s locally).
+    """
     tmp = Path(tempfile.mkstemp(suffix=".wav")[1])
     subprocess.run(
-        ["ffmpeg", "-y", "-v", "error", "-i", str(source), "-vn", "-ac", "1", "-ar", "22050", str(tmp)],
+        [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-v", "error", "-i", str(source), "-vn", "-ac", "1", "-ar", "22050", str(tmp)],
         check=True,
     )
     return tmp

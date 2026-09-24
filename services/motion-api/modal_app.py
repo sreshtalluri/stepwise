@@ -790,13 +790,14 @@ BEAT_DETECT_DIR = os.path.join(
 # gltf_image was the other candidate and is a non-starter for a simpler reason:
 # it has neither ffmpeg nor the source video mounted.
 #
-# So: debian_slim + ffmpeg + librosa, no GPU. A 20 s clip is seconds of CPU,
+# So: debian_slim + librosa + a pinned static ffmpeg, no GPU. A 20 s clip is seconds of CPU,
 # which at Modal's CPU rate rounds to nothing against the $0.076 the L40S pass
 # costs. It rebuilds on its own and can break nothing else.
 beat_image = (
     modal.Image.debian_slim(python_version="3.12")
-    .apt_install("ffmpeg")  # propose_grid shells out to it to pull the audio track
-    .pip_install("librosa>=0.10", "numpy>=1.26", "soundfile>=0.12")
+    # No apt ffmpeg: bookworm's 5.1 double-trims HE-AAC priming (count 1 115 ms
+    # early on solo-02). propose_grid runs imageio-ffmpeg's pinned 7.x build.
+    .pip_install("librosa>=0.10", "numpy>=1.26", "soundfile>=0.12", "imageio-ffmpeg==0.6.0")
     .add_local_dir(BEAT_DETECT_DIR, remote_path="/app/beat_detect")
 )
 
