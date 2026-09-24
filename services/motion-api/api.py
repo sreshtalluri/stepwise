@@ -29,6 +29,21 @@ chains export_clip_gltf.remote() internally once reconstruction succeeds
 (modal_app.py), so "dispatch run_clip, then export only if it succeeds" is
 enforced inside the one spawned worker, not by this service polling and
 re-dispatching.
+
+Dedupe, retention and removal (this branch): every upload is perceptually
+fingerprinted (fingerprint.py) and looked up in a content index
+(retention.py). A clip that matches one already reconstructed reuses that
+reconstruction instead of spending $0.06-0.08 of GPU on it again, and -- the
+part that matters more -- a dancer who wants their reconstruction gone has one
+canonical entry to remove rather than fifty scattered copies.
+
+**Dedupe-on-upload only.** Every user still uploads their own clip; the only
+thing skipped is the recompute. Nothing here lists, searches or exposes the
+index, and nothing should: "storage at the direction of a user" and a
+browsable catalogue of other people's dances are different products with
+different legal postures (docs/research/rights-and-privacy.md §3d). The
+technical distance between them is small enough that the restraint has to be
+deliberate. See retention.py's own note.
 """
 from __future__ import annotations
 
@@ -37,6 +52,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -45,6 +61,9 @@ import modal
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
+
+import fingerprint
+import retention
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "packages" / "motion-contract" / "python"))
 from motion_contract import validate_job_status, validate_motion_result  # noqa: E402
@@ -85,6 +104,16 @@ def _volume_read_bytes(volume: modal.Volume, path: str) -> Optional[bytes]:
     return buf.getvalue()
 
 
+def _volume_write_json(volume: modal.Volume, path: str, doc: dict) -> None:
+    tmp = Path(tempfile.mkstemp(suffix=".json")[1])
+    tmp.write_text(json.dumps(doc))
+    try:
+        with volume.batch_upload(force=True) as batch:
+            batch.put_file(str(tmp), path)
+    finally:
+        tmp.unlink()
+
+
 # ---------------------------------------------------------------------------
 # POST /clips -- upload, store, dispatch. Returns immediately (spec item 2:
 # .spawn(), never .remote()).
@@ -93,12 +122,13 @@ def _volume_read_bytes(volume: modal.Volume, path: str) -> Optional[bytes]:
 class DispatchResponse(BaseModel):
     clip_id: str
     job_id: str
+    reused: bool = False
 
 
 @app.post("/clips", response_model=DispatchResponse)
 async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
-    clip_id = uuid.uuid4().hex
-    job_id = f"job_{clip_id}"  # resumable: DESIGN.md §7c's copyable link is just this job_id
+    job_clip_id = uuid.uuid4().hex
+    job_id = f"job_{job_clip_id}"  # resumable: DESIGN.md §7c's copyable link is just this job_id
 
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
         total = 0
@@ -111,23 +141,51 @@ async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
         tmp_path = tmp.name
 
     try:
+        try:
+            fp_record = fingerprint.fingerprint(tmp_path)
+        except Exception as exc:  # noqa: BLE001 -- unreadable video, not a dedupe problem
+            raise HTTPException(400, "We could not read this video. Try a different file.") from exc
+
+        idx = retention.index()
+        # ponytail: linear scan of the index. See fingerprint.find_duplicate --
+        # fine for the invite-only cohort, LSH banding when it is not.
+        known = {cid: rec["fingerprint"] for cid, rec in idx.items() if rec.get("fingerprint")}
+        match = fingerprint.find_duplicate(fp_record, known)
+
+        if match is not None:
+            record = idx.get(match)
+            if record.get("removed_reason") == "takedown":
+                # Stay-down. The fingerprint outlives the artifacts precisely so
+                # that a removal cannot be undone by uploading the clip again.
+                raise HTTPException(
+                    451,
+                    "Someone in this clip asked us to remove it, so we cannot make a lesson from it.",
+                )
+            if not record.get("removed_at"):
+                record["job_ids"] = list(dict.fromkeys(record["job_ids"] + [job_id]))
+                record["last_accessed"] = time.time()
+                idx.put(match, record)
+                # No bytes stored, no GPU spawned. The job points at the
+                # canonical reconstruction; get_job_status mirrors its state.
+                _volume_write_json(results_volume, f"/{job_id}.job-meta.json",
+                                   {"clip_id": match, "canonical_job_id": record["job_ids"][0]})
+                print(f"[dedupe] {job_id} reuses {match} (no GPU, no second copy of the video)")
+                return DispatchResponse(clip_id=match, job_id=job_id, reused=True)
+            # Expired: the record is a tombstone with no artifacts left. Fall
+            # through and reconstruct under a fresh clip_id.
+
         with uploads_volume.batch_upload() as batch:
-            batch.put_file(tmp_path, f"/{clip_id}.mp4")
+            batch.put_file(tmp_path, f"/{job_clip_id}.mp4")
     finally:
         os.unlink(tmp_path)
 
+    idx.put(job_clip_id, retention.new_record(job_clip_id, fp_record, job_id))
     # job_id -> clip_id is needed later (retry, result-building) without
     # parsing it back out of the job_id string -- write it once, here.
-    meta_path = Path(tempfile.mkstemp(suffix=".json")[1])
-    meta_path.write_text(json.dumps({"clip_id": clip_id}))
-    try:
-        with results_volume.batch_upload() as batch:
-            batch.put_file(str(meta_path), f"/{job_id}.job-meta.json")
-    finally:
-        meta_path.unlink()
+    _volume_write_json(results_volume, f"/{job_id}.job-meta.json", {"clip_id": job_clip_id})
 
-    _run_clip_fn().spawn(clip_id=clip_id, job_id=job_id)
-    return DispatchResponse(clip_id=clip_id, job_id=job_id)
+    _run_clip_fn().spawn(clip_id=job_clip_id, job_id=job_id)
+    return DispatchResponse(clip_id=job_clip_id, job_id=job_id, reused=False)
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +198,24 @@ async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
 def get_job_status(job_id: str) -> dict:
     doc = _volume_read_json(results_volume, f"/{job_id}.job-status.json")
     if doc is None:
+        # Removed is checked before "not written yet", because purge_clip
+        # deletes the job-status file: without this branch a taken-down lesson
+        # would poll as `queued` forever, which is a false statement about our
+        # own data (DESIGN.md §7h applies to plumbing, not just copy).
+        marker = retention.removal_marker(results_volume, job_id)
+        if marker is not None:
+            raise HTTPException(410, "This lesson was removed, and the link no longer works.")
+
+        # A deduped job never runs its own reconstruction -- it mirrors the
+        # canonical job's status under its own job_id, so the client's polling
+        # contract is unchanged and the share link stays the caller's own.
+        meta = _volume_read_json(results_volume, f"/{job_id}.job-meta.json")
+        canonical = (meta or {}).get("canonical_job_id")
+        if canonical and canonical != job_id:
+            mirrored = dict(get_job_status(canonical))
+            mirrored["job_id"] = job_id
+            return mirrored
+
         # Not a 404: a job that was just spawned and hasn't written its first
         # "queued" doc yet is a real, valid state, not a missing job. Distinct
         # from "job_id never existed" only by convention -- this service does
@@ -249,7 +325,6 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
         samples_out = []
         root_traj = []
         n_observed = 0
-        shape_vec = None
 
         for i in range(n_samples):
             frame = per_frame[i]
@@ -258,8 +333,6 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
             if observed:
                 held = np.asarray(person["skel_state"], dtype=np.float64)
                 n_observed += 1
-                if shape_vec is None:
-                    shape_vec = person["shape_params"].tolist()
 
             if held is None:
                 # Leading gap: never reconstructed yet at all for this track.
@@ -312,9 +385,28 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
             "person_id": f"person_{track_id}",
             "track_id": int(track_id),
             "animation": {"clip_id": f"{clip_id}_track{track_id}", "glb_asset_id": glb_name},
+            # The 45-dim MHR shape vector is the most person-specific number in
+            # the system (body proportions), it was broadcast to every browser
+            # that opened a lesson, and nothing consumed it -- the rendered mesh
+            # is the stock lod3.fbx character driven by pose, not a fitted body
+            # (docs/research/rights-and-privacy.md §2, §6.2). It is now neither
+            # persisted (tools/process_clip.py's keep-set) nor served: the
+            # server genuinely does not hold it any more, so this vector is the
+            # MHR default and saying so is the truth, not a redaction.
+            #
+            # `source` keeps its real meaning -- whether this track was ever
+            # observed well enough to fit a shape at all -- which is the honesty
+            # signal the field exists for, and is exactly what the old
+            # `shape_vec is not None` test computed.
+            #
+            # OPEN: motion-result.schema.json marks `vector` required with
+            # minItems 1, so a constant zero vector is what keeps this
+            # contract-valid without unilaterally bumping a frozen schema.
+            # Dropping the field belongs in a 1.1.0 change made by whoever owns
+            # the contract -- see the report and OPEN-DECISIONS D6/D7.
             "shape_params": {
-                "vector": shape_vec if shape_vec is not None else [0.0] * 45,
-                "source": "well_observed_frames" if shape_vec is not None else "default_assumed",
+                "vector": [0.0] * 45,
+                "source": "well_observed_frames" if n_observed > 0 else "default_assumed",
             },
             "root_trajectory": root_traj,
             "samples": samples_out,
@@ -385,6 +477,10 @@ def get_job_result(job_id: str) -> dict:
     result = validate_motion_result(doc)
     if not result.valid:
         raise HTTPException(500, f"Assembled MotionResult failed contract validation: {result.errors}")
+    # Opening a lesson is what keeps it alive (retention.TTL_DAYS). A dance
+    # people are still learning stays warm; a one-off ages out. Debounced to
+    # one index write an hour -- see retention.touch.
+    retention.touch(retention.index(), clip_id)
     return doc
 
 
@@ -396,20 +492,96 @@ def get_job_result(job_id: str) -> dict:
 # to presign against yet, see the storage-decision docstring above).
 # ---------------------------------------------------------------------------
 
+def _refuse_if_removed(clip_id: str) -> None:
+    """A removed clip must stop serving bytes even if a file survived a partial
+    purge. The index tombstone is the authority, not the filesystem."""
+    record = retention.index().get(clip_id)
+    if record is not None and record.get("removed_at"):
+        raise HTTPException(410, "This lesson was removed, and the link no longer works.")
+
+
 @app.get("/assets/{asset_id:path}")
 def get_asset(asset_id: str) -> Response:
     if asset_id.startswith("video:"):
         clip_id = asset_id[len("video:"):]
+        _refuse_if_removed(clip_id)
         video = _volume_read_bytes(uploads_volume, f"/{clip_id}.mp4") or _volume_read_bytes(eval_volume, f"/{clip_id}.mp4")
         if video is None:
             raise HTTPException(404, "No video for this asset id.")
+        retention.touch(retention.index(), clip_id)
         return Response(content=video, media_type="video/mp4")
     if asset_id.endswith(".glb"):
+        _refuse_if_removed(asset_id.split("_track")[0])
         glb = _volume_read_bytes(results_volume, f"/{asset_id}")
         if glb is None:
             raise HTTPException(404, "No GLB for this asset id.")
         return Response(content=glb, media_type="model/gltf-binary")
     raise HTTPException(404, "Unrecognized asset id.")
+
+
+# ---------------------------------------------------------------------------
+# POST /jobs/{job_id}/removal -- the takedown path. The highest-value item in
+# docs/research/rights-and-privacy.md §6.1: the likely bad outcome is not a
+# lawsuit, it is a dancer finding their own body reconstructed on a site they
+# never heard of with no way to ask for it to stop.
+#
+# Keyed on job_id because that is what a lesson link actually contains
+# (DESIGN.md §7c) -- the person asking has a link, not a clip_id, and will not
+# have an account (D5 is open).
+#
+# **Removes first, asks later.** The alternative is a review queue with an
+# acknowledged/removed/declined state machine; "declined" only exists if you
+# hold the lesson up while you decide, and holding a dancer's reconstruction
+# online while you deliberate is the thing being complained about. Removing
+# immediately is both less code and a stronger promise, and it is what the
+# recommended upload copy commits to ("anyone in a clip can ask us to take it
+# down, and we will").
+#
+# The cost of that, stated rather than hidden: anyone holding a share link can
+# delete that lesson, and restoring it needs the operator. That is the D5
+# dependency §6.1 names, not something this endpoint can resolve alone. It is
+# the cheaper failure -- a lesson wrongly removed can be re-uploaded by the
+# person who made it; a reconstruction wrongly left up cannot be un-seen.
+# ---------------------------------------------------------------------------
+
+class RemovalRequest(BaseModel):
+    reason: Optional[str] = None     # free text, kept only in the log
+    contact: Optional[str] = None    # so the operator can reply; never stored in the index
+
+
+class RemovalResponse(BaseModel):
+    removed: bool
+    clip_id: str
+    links_disabled: int
+    artifacts_deleted: int
+
+
+@app.post("/jobs/{job_id}/removal", response_model=RemovalResponse)
+def request_removal(job_id: str, body: Optional[RemovalRequest] = None) -> RemovalResponse:
+    meta = _volume_read_json(results_volume, f"/{job_id}.job-meta.json")
+    if meta is None:
+        if retention.removal_marker(results_volume, job_id) is not None:
+            raise HTTPException(410, "This lesson was already removed.")
+        raise HTTPException(404, "Unknown lesson link.")
+    clip_id = meta["clip_id"]
+
+    # Deduping is what makes this genuinely better than chasing copies: every
+    # job that resolved to this content is in one record, so one removal
+    # disables all of their links at once.
+    outcome = retention.purge_clip(
+        clip_id, "takedown",
+        uploads_volume=uploads_volume,
+        results_volume=results_volume,
+        extra_job_ids=[job_id],
+    )
+    print(f"[takedown] {clip_id} via {job_id}; reason={(body.reason if body else None)!r} "
+          f"contact={(body.contact if body else None)!r}")
+    return RemovalResponse(
+        removed=True,
+        clip_id=clip_id,
+        links_disabled=len(outcome["job_ids"]),
+        artifacts_deleted=len(outcome["files_deleted"]),
+    )
 
 
 @app.get("/health")

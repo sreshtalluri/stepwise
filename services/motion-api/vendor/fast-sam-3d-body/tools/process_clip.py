@@ -290,11 +290,70 @@ def process_clip(
     }
 
 
+# Everything the estimator hands back per person per frame gets pickled into
+# the npz by default, because `save_clip_result` used to write the whole dict.
+# Measured on solo-01 (19.7 s, 291 reconstructed frames): 61.13 MB, of which
+# `pred_vertices` alone -- an 18 439-vertex point cloud per person per frame --
+# is 93.9%, and nothing anywhere reads it. Exactly two consumers read this file
+# (`modal_app.py::export_clip_gltf` and `api.py::_build_motion_result`) and
+# between them they touch `skel_state` and nothing else.
+#
+# So: whitelist, not blacklist. A field that is not named here is not stored,
+# which means a new estimator output cannot silently start accumulating.
+#
+#   skel_state    the animation. Both consumers read it. The whole point.
+#   bbox          where this dancer is in frame. Milestone B's crop_rects
+#   lhand_bbox    (motion-result.schema.json, currently [None]*n) need these
+#   rhand_bbox    three, and they are 52 bytes a frame; dropping them would
+#                 break a planned feature to save nothing.
+#   pred_cam_t    the two values api.py's root-trajectory comment names as the
+#   focal_length  open world-placement item. 16 bytes a frame.
+#
+# Deliberately dropped, with what each was:
+#   pred_vertices      18 439x3 floats/person/frame, 93.9% of the file, unread.
+#   expr_params        72 facial expression coefficients. Unread. The most
+#                      face-shaped artifact in the store, and it existed only
+#                      because the whole dict was pickled
+#                      (docs/research/rights-and-privacy.md §6.2).
+#   shape_params       45 body-proportion coefficients -- the most
+#                      person-specific number in the system. Unread, and no
+#                      longer served either (see api.py's shape_params note).
+#   pred_global_rots, pred_joint_coords, pred_pose_raw, pred_keypoints_2d/3d,
+#   body_pose_params, hand_pose_params, scale_params, global_rot, mask
+#                      all derivable from or redundant with skel_state, none
+#                      read by anything.
+#
+# `faces` (the 36 874-triangle MHR topology, 0.885 MB) is dropped from the
+# top level for the same reason: it is a constant of the model, identical in
+# every clip, and the export path builds geometry from lod3.fbx instead.
+#
+# Measured effect: solo-01 61.13 MB -> 0.99 MB, solo-07 (4 dancers) 91.53 MB
+# -> 1.49 MB. 61.6x on both.
+PERSON_FIELDS_KEPT = ("skel_state", "bbox", "lhand_bbox", "rhand_bbox",
+                      "pred_cam_t", "focal_length")
+
+
+def _strip_person_fields(per_frame: list) -> list:
+    out = []
+    for frame in per_frame:
+        if not isinstance(frame, dict):
+            out.append({})
+            continue
+        out.append({
+            tid: {k: v for k, v in person.items() if k in PERSON_FIELDS_KEPT}
+            for tid, person in frame.items()
+        })
+    return out
+
+
 def save_clip_result(result: dict, out_path: str) -> None:
     """Pack process_clip's output into one npz (object arrays for the
     per-frame dict list -- pickled, but this stays inside numpy's own npz
     container so the export stage doesn't need to trust an arbitrary pickle
-    file on its own)."""
+    file on its own).
+
+    Only PERSON_FIELDS_KEPT survives per person per frame -- see the note above
+    for what was dropped, why, and the measured 61.6x it is worth."""
     if result.get("refused"):
         np.savez_compressed(
             out_path,
@@ -312,10 +371,13 @@ def save_clip_result(result: dict, out_path: str) -> None:
         out_path,
         refused=False,
         sample_times_s=result["sample_times_s"],
-        per_frame=np.array(result["per_frame"], dtype=object),
+        per_frame=np.array(_strip_person_fields(result["per_frame"]), dtype=object),
         raw_detections=np.array(result["raw_detections"], dtype=object),
         confident_track_ids=np.array(result["confident_track_ids"], dtype=np.int64),
-        faces=result["faces"],
+        # elapsed_s / peak_vram_bytes / n_frames_* stay: they are a few bytes,
+        # and run_clip reads them off the in-memory result rather than this
+        # file only because it happens to still hold it. Keeping them means the
+        # npz is still a complete record of the run.
         elapsed_s=result["elapsed_s"],
         peak_vram_bytes=result["peak_vram_bytes"],
         frame_width=result.get("frame_width", 0),

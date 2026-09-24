@@ -890,6 +890,38 @@ def export_clip_gltf(clip_id: str):
     return {"clip_id": clip_id, "glb_paths": out_paths, "n_dancers": len(confident_track_ids)}
 
 
+# ---------------------------------------------------------------------------
+# Retention. Before this there was no deletion, expiry or retention code
+# anywhere in the service (docs/research/rights-and-privacy.md §2), so the
+# landing mockup's "we keep the clip while the lesson exists"
+# (docs/OPEN-DECISIONS.md D6) was untrue in both directions. This is the half
+# that makes "and no longer than that" true; api.py's removal endpoint is the
+# other half. Both call retention.purge_clip -- one definition of "deleted".
+#
+# CPU-only and cheap: it reads one modal.Dict and removes files. No GPU is
+# requested, so it runs for cents and is unaffected by the GPU billing gate
+# that blocks the rest of this file.
+# ---------------------------------------------------------------------------
+
+retention_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .add_local_python_source("retention")
+)
+
+
+@app.function(
+    image=retention_image,
+    schedule=modal.Period(days=1),
+    volumes={UPLOADS_DIR: uploads, RESULTS_DIR: results},
+    timeout=900,
+)
+def sweep_expired():
+    """Delete every lesson nobody has opened in retention.TTL_DAYS."""
+    import retention
+
+    return retention.sweep(uploads, results)
+
+
 @app.local_entrypoint()
 def main():
     """Run the stages in order, stopping at the first failure."""
