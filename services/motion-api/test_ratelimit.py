@@ -103,6 +103,37 @@ def test_dispatch_endpoint_answers_429_but_a_dedupe_hit_is_free(api, store, db, 
     assert api._spawned == [] and set(api.uploads_volume.files) == {"/abc.mp4"}
 
 
+@needs_pg
+def test_removals_are_capped_per_ip_and_answer_429(api, store, db, monkeypatch):  # noqa: F811
+    """5 removals a day per IP by default; the 6th is a 429 that deletes
+    nothing. The events rows hold a hashed IP and the category, never the
+    typed reason; an already-removed lesson is not charged."""
+    import types
+    from test_retention import _removal
+    monkeypatch.setenv("STEPWISE_LIMIT_REMOVALS_IP_DAY", "2")
+    me = types.SimpleNamespace(headers={}, client=types.SimpleNamespace(host="203.0.113.7"))
+    for c in ("a", "b", "c"):
+        _seed_lesson(api, c, f"job_{c}")
+    api.remove_lesson("a", _removal(api, reason="that is me, jo@example.com"), me)
+    api.remove_lesson("a", _removal(api), me)  # already gone: free
+    api.remove_lesson("b", _removal(api, "other"), me)
+    with pytest.raises(HTTPException) as e:
+        api.remove_lesson("c", _removal(api), me)
+    assert e.value.status_code == 429 and e.value.detail["error"]["code"] == "too_many_removals"
+    assert int(e.value.headers["Retry-After"]) >= 60
+    assert "/c.mp4" in api.uploads_volume.files, "a refused removal must delete nothing"
+
+    rows = db.execute("SELECT clip_id, props FROM events WHERE name = 'removal' ORDER BY id").fetchall()
+    assert rows == [("a", {"relationship": "i_am_in_it"}), ("b", {"relationship": "other"})]
+    dump = str(db.execute("SELECT * FROM events").fetchall())
+    assert "203.0.113.7" not in dump and "jo@example.com" not in dump
+
+    # Someone else, and dispatches, are unaffected.
+    other = types.SimpleNamespace(headers={}, client=types.SimpleNamespace(host="198.51.100.1"))
+    api.remove_lesson("c", _removal(api), other)
+    ratelimit.charge("203.0.113.7", "job_d", "d")
+
+
 def test_no_postgres_means_allow_and_say_so_once(monkeypatch, capsys):
     monkeypatch.delenv("STEPWISE_JOB_BACKEND", raising=False)
     monkeypatch.setattr(ratelimit, "_warned", False)

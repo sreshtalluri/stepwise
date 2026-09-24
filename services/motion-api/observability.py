@@ -156,3 +156,20 @@ def capture(exc: BaseException, component: str, level: str = "error", **tags) ->
                 scope.set_tag(k, str(v))
         sentry_sdk.capture_exception(exc)
     sentry_sdk.flush(timeout=5)
+
+
+def message(text: str, component: str, level: str = "warning", **tags) -> None:
+    """An alert rather than an error: a plain message, same scrubber, same
+    flush, same no-op without a DSN. Callers pass ids and categories only --
+    nothing a person typed goes into the event at all."""
+    if not init(component):
+        return
+    import sentry_sdk
+
+    with sentry_sdk.new_scope() as scope:
+        scope.set_level(level)
+        for k, v in tags.items():
+            if v is not None:
+                scope.set_tag(k, str(v))
+        sentry_sdk.capture_message(text)
+    sentry_sdk.flush(timeout=5)

@@ -67,17 +67,18 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import modal
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import fingerprint
 import ingest
 import jobstore
 import motion_result
+import observability
 import ratelimit
 import retention
 import storage
@@ -251,8 +252,12 @@ def _limited(http: Request, charge_as: tuple[str, str] | None = None) -> None:
         else:
             ratelimit.check(ip)
     except ratelimit.Limited as e:
-        raise HTTPException(429, headers={"Retry-After": str(e.retry_after)}, detail={"error": {
-            "code": e.code, "message": e.message, "retryable": True}}) from None
+        raise _too_many(e) from None
+
+
+def _too_many(e: ratelimit.Limited) -> HTTPException:
+    return HTTPException(429, headers={"Retry-After": str(e.retry_after)}, detail={"error": {
+        "code": e.code, "message": e.message, "retryable": True}})
 
 
 def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict, http: Request,
@@ -857,10 +862,15 @@ def get_asset(asset_id: str) -> Response:
 # ---------------------------------------------------------------------------
 
 class RemovalRequest(BaseModel):
-    # Free text, and deliberately not a fixed enum of legal categories: a
-    # dancer saying "that's me and I don't want it up" must not have to find
-    # the right box to tick. Stored on the tombstone as a category only.
-    reason: str = "requested"
+    # Three plain boxes, none of them a legal category: the dancer (no
+    # copyright claim, the person most likely to ask -- rights-and-privacy.md
+    # 6.1), the rights holder, and everyone else. Required, because the owner
+    # alert is only useful if it says which kind of request this was.
+    relationship: Literal["i_am_in_it", "i_own_the_rights", "other"]
+    # Optional free text. Kept on the tombstone only (so whoever restores or
+    # disputes a removal can read why); never sent to Sentry or the events
+    # table, where it could carry a name or a handle.
+    reason: str = Field("", max_length=500)
 
 
 class RemovalResponse(BaseModel):
@@ -869,15 +879,24 @@ class RemovalResponse(BaseModel):
     already_absent: list[str]
 
 
+@app.post("/jobs/{job_id}/removal", response_model=RemovalResponse)
+def remove_lesson_by_job(job_id: str, request: RemovalRequest, http: Request) -> RemovalResponse:
+    """The same takedown, addressed the way the web knows a lesson: its job_id
+    (the /lesson/{job_id} link). Resolved through job-meta like every other
+    /jobs route, so a deduplicated upload removes the one canonical lesson."""
+    return remove_lesson(_clip_id_for(job_id), request, http)
+
+
 @app.post("/lessons/{clip_id}/removal", response_model=RemovalResponse)
-def remove_lesson(clip_id: str, request: RemovalRequest | None = None) -> RemovalResponse:
+def remove_lesson(clip_id: str, request: RemovalRequest, http: Request) -> RemovalResponse:
     """Delete every stored byte of one lesson, now.
 
     Goes away: the source video, every dancer's GLB, the materialised
     MotionResult, the npz if one still exists, the export manifest, the
     performance record, the last-access marker, the job status and job meta,
     and the content fingerprint. What is left is a tombstone holding a
-    timestamp and a reason word -- nothing derived from the person.
+    timestamp, the relationship category and whatever reason the requester
+    chose to type (500 chars max) -- nothing derived from the video.
 
     Because uploads are deduplicated, there is exactly one canonical copy of a
     given clip, so this removes it for everyone who uploaded it rather than for
@@ -897,11 +916,23 @@ def remove_lesson(clip_id: str, request: RemovalRequest | None = None) -> Remova
                 job_id = entry["job_id"]
                 break
 
-    reason = (request.reason if request else "requested")[:200]
-    outcome = retention.delete_clip(uploads_volume, results_volume, clip_id, job_id, reason)
+    # Charged only for a removal that is about to happen: an already-removed
+    # lesson above costs nothing, so a repeat click is never what locks you out.
+    ip = ratelimit.client_ip(http.headers, http.client and http.client.host)
+    try:
+        ratelimit.charge_removal(ip, clip_id, request.relationship)
+    except ratelimit.Limited as e:
+        raise _too_many(e) from None
+
+    outcome = retention.delete_clip(uploads_volume, results_volume, clip_id, job_id,
+                                    request.reason.strip(), request.relationship)
     jobstore.forget(job_id)
     _TOUCHED.pop(clip_id, None)
-    print(f"[removal] {clip_id}: deleted {len(outcome['deleted'])} artifacts ({reason})")
+    print(f"[removal] {clip_id}: deleted {len(outcome['deleted'])} artifacts ({request.relationship})")
+    # The owner's alert. Ids and the category only -- the free-text reason is
+    # on the tombstone and deliberately not here.
+    observability.message("lesson removed", "web", level="warning",
+                          relationship=request.relationship, clip_id=clip_id)
     return RemovalResponse(clip_id=clip_id, removed=outcome["deleted"],
                            already_absent=outcome["already_absent"])
 

@@ -133,16 +133,18 @@ def _delete_r2_objects(clip_id: str, results_listing: list[str]) -> list[str]:
 
 
 def delete_clip(uploads_volume, results_volume, clip_id: str, job_id: str | None,
-                reason: str) -> dict:
+                reason: str, relationship: str | None = None) -> dict:
     """Remove every artifact of one lesson and leave a tombstone.
 
     Returns what was actually deleted, so the caller can report it rather than
     claim it -- "we deleted your lesson" is a promise, and DESIGN.md section 7h
     applies to promises about data exactly as it applies to copy.
 
-    The tombstone (`{clip_id}.removed.json`) holds a timestamp and a reason
-    category and nothing else: no hashes, no pose, no frames, nothing derived
-    from the person. It exists so that `GET /jobs/{job_id}` can answer 410 Gone
+    The tombstone (`{clip_id}.removed.json`) holds a timestamp, a reason and,
+    for a takedown, the requester's relationship category -- nothing else: no
+    hashes, no pose, no frames, nothing derived from the video. The reason is
+    "expired" for the sweeper and the requester's own optional words for a
+    takedown; it is the one field a person typed, and it stays here only. It exists so that `GET /jobs/{job_id}` can answer 410 Gone
     ("this was removed") instead of 404 ("never existed"), which is both more
     honest and more useful to whoever is holding the link.
     """
@@ -176,11 +178,10 @@ def delete_clip(uploads_volume, results_volume, clip_id: str, job_id: str | None
     # inside a container" -- which here would mean a 500 returned to someone
     # after their lesson had, in fact, been deleted. Verified against the real
     # client, not assumed.
-    write_json(results_volume, f"/{clip_id}.removed.json", {
-        "clip_id": clip_id,
-        "removed_at": time.time(),
-        "reason": reason,
-    })
+    tomb = {"clip_id": clip_id, "removed_at": time.time(), "reason": reason}
+    if relationship:
+        tomb["relationship"] = relationship
+    write_json(results_volume, f"/{clip_id}.removed.json", tomb)
     return {"clip_id": clip_id, "deleted": deleted, "already_absent": missing}
 
 

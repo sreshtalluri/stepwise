@@ -42,6 +42,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import hmac
+import json
 import os
 
 import jobstore
@@ -112,15 +113,28 @@ def check(ip: str) -> None:
     download. charge() still decides at dispatch; this only stops an IP that
     is already over from making us fetch a video first.
     """
-    _guarded(ip, None, None)
+    _guarded(lambda: _charge(ip, None, None))
 
 
 def charge(ip: str, job_id: str, clip_id: str) -> None:
     """Record one dispatch for `ip`, or raise Limited without recording it."""
-    _guarded(ip, job_id, clip_id)
+    _guarded(lambda: _charge(ip, job_id, clip_id))
 
 
-def _guarded(ip: str, job_id: str | None, clip_id: str | None) -> None:
+def charge_removal(ip: str, clip_id: str, relationship: str) -> None:
+    """Record one takedown for `ip`, or raise Limited without recording it.
+
+    A removal deletes a lesson for everyone holding its link, and with no
+    accounts anyone holding the link can ask (OPEN-DECISIONS D5/D7). One
+    person clearing out every lesson they were shared is the abuse this caps:
+    STEPWISE_LIMIT_REMOVALS_IP_DAY (default 5). Same `events` table, same
+    daily-salted day_hash, name 'removal'; `props` holds the relationship
+    category only -- never the free-text reason.
+    """
+    _guarded(lambda: _charge_removal(ip, clip_id, relationship))
+
+
+def _guarded(fn) -> None:
     global _warned
     if not jobstore.postgres_enabled():
         if not _warned:
@@ -128,7 +142,7 @@ def _guarded(ip: str, job_id: str | None, clip_id: str | None) -> None:
             _warned = True
         return
     try:
-        _charge(ip, job_id, clip_id)
+        fn()
     except Limited:
         raise
     except Exception as e:  # noqa: BLE001
@@ -185,3 +199,23 @@ def _charge(ip: str, job_id: str, clip_id: str) -> None:
             return  # check(): nothing to record
         conn.execute("INSERT INTO events (name, clip_id, job_id, day_hash) "
                      "VALUES ('dispatch', %s, %s, %s)", (clip_id, job_id, ip_hash))
+
+
+def _charge_removal(ip: str, clip_id: str, relationship: str) -> None:
+    now = dt.datetime.now(dt.timezone.utc)
+    ip_hash = _ip_hash(ip, now.date())
+    midnight = dt.datetime.combine(now.date() + dt.timedelta(days=1), dt.time(), dt.timezone.utc)
+    cap = _limit("STEPWISE_LIMIT_REMOVALS_IP_DAY", 5)
+    with jobstore.connection() as conn, conn.transaction():
+        conn.execute("SELECT pg_advisory_xact_lock(%s)", (_LOCK_KEY,))
+        n = conn.execute("SELECT count(*) FROM events WHERE name = 'removal' AND day_hash = %s "
+                         "AND occurred_at > now() - interval '24 hours'", (ip_hash,)).fetchone()[0]
+        if n >= cap:
+            # The salt rotates at midnight, so that is when this IP's count resets.
+            s = max(60, int((midnight - now).total_seconds()))
+            raise Limited("too_many_removals",
+                          f"You have removed {cap} lessons today, which is the limit. "
+                          f"Try again {_loosely(s)}.", s)
+        conn.execute("INSERT INTO events (name, clip_id, day_hash, props) "
+                     "VALUES ('removal', %s, %s, %s::jsonb)",
+                     (clip_id, ip_hash, json.dumps({"relationship": relationship})))

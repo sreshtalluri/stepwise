@@ -30,7 +30,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_retention import NO_REQUEST, FakeVolume  # noqa: E402 -- same harness, same volumes
+from test_retention import NO_REQUEST, FakeVolume, _removal  # noqa: E402 -- same harness, same volumes
 
 TIKTOK_SHORT = "https://www.tiktok.com/t/ZP83Enx4b/"
 TIKTOK_FULL = "https://www.tiktok.com/@jonraydybuco/video/7672198121417444628"
@@ -198,7 +198,7 @@ def test_a_removed_link_lesson_is_rebuilt_not_resurrected(api, fake_ytdlp):
     """D7: removed content that comes back is reconstructed afresh."""
     first = _paste(api)
     _succeed(api, first)
-    api.remove_lesson(first.clip_id, None)
+    api.remove_lesson(first.clip_id, _removal(api), NO_REQUEST)
 
     again = _paste(api)
     assert again.clip_id != first.clip_id, "must not reuse the tombstoned id"
