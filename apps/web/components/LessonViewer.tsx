@@ -7,7 +7,10 @@ import {
   viewLabel,
   projectBoxToFrame,
   cropTransform,
-  cropRectAt,
+  steadyCropTrack,
+  steadyCropAt,
+  STEADY_CROP_SIGMA_S,
+  STEADY_CROP_SIGMA_REDUCED_S,
   followStep,
   damp,
   travelExtent,
@@ -23,6 +26,7 @@ import {
 } from "../lib/motion";
 import { lesson as lessonCopy } from "../lib/copy";
 import { load, openingStructure, save } from "../lib/structure";
+import { prefersReducedMotion } from "../lib/reveal";
 // Relative, same as lib/motion.ts reaches into motion-contract — there is no
 // workspace root and no node_modules link between these packages.
 import { LessonNavigator } from "../../../packages/navigation/src/LessonNavigator";
@@ -235,7 +239,8 @@ function useVideoCrop(
 
 /**
  * One region's close-up: real pixels from the SAME `<video>` element this page
- * already has, cropped to `crop_rects[region]` and drawn onto a canvas — no
+ * already has, cropped to a steadied `crop_rects[region]` (`steadyCropTrack`:
+ * fixed zoom, zero-phase smoothed pan) and drawn onto a canvas — no
  * second `<video>`, no second decode, no second clock. Reads `timeRef` on its
  * own rAF loop exactly like `useVideoCrop` above, and only touches React state
  * when a sample flips between having a rect and not having one.
@@ -279,10 +284,13 @@ function CropPeek({
     if (!canvas || !ctx) return;
     let handle = 0;
     let reported = false;
+    // Steadied once per dancer/region, not per frame — see `steadyCropTrack`.
+    const sigma = prefersReducedMotion() ? STEADY_CROP_SIGMA_REDUCED_S : STEADY_CROP_SIGMA_S;
+    const track = steadyCropTrack(doc, personIndex, region, sigma);
 
     const tick = () => {
       handle = requestAnimationFrame(tick);
-      const rect = cropRectAt(doc, personIndex, region, timeRef.current);
+      const rect = steadyCropAt(doc.sample_times_s, track, timeRef.current);
       if (!rect) {
         if (reported) {
           reported = false;
@@ -305,9 +313,8 @@ function CropPeek({
       const sy = rect.y * vh;
       const sw = rect.width * vw;
       const sh = rect.height * vh;
-      // Contain-fit inside the fixed canvas so the crop only ever scales up,
-      // never stretches — the rect's own aspect ratio drifts slightly frame to
-      // frame as a hand opens or a foot lifts.
+      // Contain-fit inside the fixed canvas so the crop never stretches. The
+      // steadied rect is square in source pixels, so this fills the canvas.
       const scale = Math.min(canvas.width / sw, canvas.height / sh);
       const dw = sw * scale;
       const dh = sh * scale;

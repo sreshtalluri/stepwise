@@ -48,6 +48,80 @@ export function cropRectAt(doc: MotionResult, personIndex: number, region: CropR
   return person.crop_rects[region][sampleIndexAt(doc.sample_times_s, t)] ?? null;
 }
 
+/**
+ * Fraction of a region's own rects the steady crop is sized to hold. See `steadyCropTrack`.
+ * 0.9, measured on a real 33 s solo clip: holds >= 70% of the raw hands rect on every
+ * frame (p75 drops below that on 3%); the cost is ~1.2x less magnification than p75.
+ */
+export const STEADY_CROP_SIZE_QUANTILE = 0.9;
+/** Gaussian sigma, seconds, on the crop centre. Reduced motion pans half as fast. */
+export const STEADY_CROP_SIGMA_S = 0.3;
+export const STEADY_CROP_SIGMA_REDUCED_S = 0.6;
+
+/**
+ * The raw `crop_rects` are unwatchable as a close-up: `hands` is ONE rect around
+ * BOTH hands, so its size swings ~9x as the arms open and close (p95 frame-to-frame
+ * zoom change 52% on a real clip) and its centre jumps half a crop width per sample
+ * at p95. So the peek is steadied offline — the whole track is known up front:
+ *
+ *  - ONE square size per person per region for the whole clip (the
+ *    `STEADY_CROP_SIZE_QUANTILE` of the rects' longer sides), so the zoom never moves.
+ *  - The centre is a zero-phase Gaussian average over time (no lag, unlike any
+ *    causal damper), taken only WITHIN a contiguous run of real rects: a `null`
+ *    stays `null` and nothing is averaged across it (DESIGN.md §7h).
+ *  - The square is clamped inside the frame, never padded past it.
+ *
+ * Measured result: centre step p95 0.52 -> 0.05 of the crop size, zoom change 0.
+ */
+export function steadyCropTrack(
+  doc: MotionResult,
+  personIndex: number,
+  region: CropRegion,
+  sigmaS: number = STEADY_CROP_SIGMA_S,
+): CropRect[] {
+  const rects = doc.persons[personIndex]?.crop_rects[region] ?? [];
+  const times = doc.sample_times_s;
+  const { width_px: W, height_px: H } = doc.source_video;
+  const sides = rects.flatMap((r) => (r ? [Math.max(r.width * W, r.height * H)] : [])).sort((a, b) => a - b);
+  if (!sides.length) return rects.map(() => null);
+  const side = Math.min(sides[Math.floor(STEADY_CROP_SIZE_QUANTILE * (sides.length - 1))], W, H);
+  const out: CropRect[] = rects.map(() => null);
+  for (let i = 0; i < rects.length; i++) {
+    if (!rects[i]) continue;
+    let sw = 0, sx = 0, sy = 0;
+    // Walk out both ways from i until a null or ~3 sigma — never across a gap.
+    for (const dir of [-1, 1]) {
+      for (let j = dir < 0 ? i : i + 1; j >= 0 && j < rects.length; j += dir) {
+        const r = rects[j];
+        const dt = times[j] - times[i];
+        if (!r || Math.abs(dt) > 3 * sigmaS) break;
+        const w = sigmaS > 0 ? Math.exp(-0.5 * (dt / sigmaS) ** 2) : j === i ? 1 : 0;
+        sw += w;
+        sx += w * (r.x + r.width / 2) * W;
+        sy += w * (r.y + r.height / 2) * H;
+      }
+    }
+    const cx = Math.min(Math.max(sx / sw, side / 2), W - side / 2);
+    const cy = Math.min(Math.max(sy / sw, side / 2), H - side / 2);
+    out[i] = { x: (cx - side / 2) / W, y: (cy - side / 2) / H, width: side / W, height: side / H };
+  }
+  return out;
+}
+
+/**
+ * A steadied track at time `t`, linearly interpolated between two real samples so
+ * the pan is smooth at display rate instead of stepping at the sample rate. Next to a
+ * `null` it steps exactly like `cropRectAt` — never blends into a gap.
+ */
+export function steadyCropAt(times: readonly number[], track: readonly CropRect[], t: number): CropRect {
+  const i = sampleIndexAt(times, t);
+  const a = track[i] ?? null;
+  const b = track[i + 1] ?? null;
+  if (!a || !b || t <= times[i]) return a;
+  const k = Math.min((t - times[i]) / (times[i + 1] - times[i]), 1);
+  return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, width: a.width, height: a.height };
+}
+
 /* ---------------------------------------------------------------- visibility */
 
 const RANK: Record<Visibility, number> = { observed: 0, uncertain: 1, absent: 2 };
