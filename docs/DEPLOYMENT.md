@@ -165,7 +165,7 @@ developer-machine copy only; the Modal Secrets are the deployed source of truth.
 | `stepwise-origin` | `STEPWISE_ORIGIN_KEY` (same value as the Worker secret) | `web` (origin lock) | **yes** |
 | `stepwise-sentry` | `SENTRY_DSN_BACKEND` (+ `SENTRY_DSN_WEB`, ignored by Modal) | every function | **yes** — §5.3 |
 | `stepwise-invite` | `STEPWISE_INVITE_CODES`, comma-separated | `web` (`POST /clips/link`) | **yes** |
-| `stepwise-posthog` | `POSTHOG_KEY` (project key, `phc_…`), *(optional)* `POSTHOG_HOST` | `web` (`analytics.forward`) | no — §3.2 |
+| `stepwise-posthog` | `POSTHOG_KEY` (project key, `phc_…`), *(optional)* `POSTHOG_HOST` | `web` (`analytics.forward`) | **yes** — created 2026-09-23 (§3.2) |
 
 To add or revoke an invite code: rewrite the whole list (`--force` replaces,
 it does not merge), then redeploy and stop the warm container (§7.1) — the
