@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import os
 import sys
 import tempfile
@@ -49,7 +50,21 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "packages" / "motion-contract" / "python"))
 from motion_contract import validate_job_status, validate_motion_result  # noqa: E402
 
-from grounding import solve_grounding_for_clip  # noqa: E402 -- same directory, pure numpy
+from grounding import solve_grounding, solve_grounding_for_clip  # noqa: E402 -- same directory, pure numpy
+from world_placement import place_clip  # noqa: E402 -- same directory, pure numpy
+
+
+def _placed_position(placement, track_id: int, sample: int):
+    """World position for this track on this sample, or None if unplaced."""
+    if placement is None:
+        return None
+    positions = placement.root_positions.get(int(track_id))
+    if positions is None or sample >= len(positions):
+        return None
+    row = [float(v) for v in positions[sample]]
+    # NaN marks a frame the solve declined to place (reconstructed but not
+    # tracked, so no independent 2D measurement to place it against).
+    return row if all(math.isfinite(v) for v in row) else None
 
 APP_NAME = "stepwise-motion"
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # generous; PRD's real limit is 60s of video, not a byte count
@@ -245,9 +260,21 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
     rest_rotations = [tuple(j["rest_rotation"]) for j in joints_def]
     root_idx = JOINT_HIERARCHY["root_joint_index"]
 
+    # E6: where in the room is each dancer. Runs before the per-person loop
+    # because it needs the whole clip at once (a planted foot links consecutive
+    # frames, so the frames cannot be solved one at a time), and because its
+    # foot tracks are what the floor solve below is fed. None when the clip has
+    # nothing to place, in which case every position below stays at the
+    # character-local origin and grounding will say "none" -- the honest
+    # pre-E6 behaviour, kept as the fallback rather than replaced by a guess.
+    placement = place_clip(data, [j["name"] for j in joints_def])
+    if placement is not None:
+        print(f"[placement] {clip_id}: {json.dumps(placement.diagnostics)}")
+
     persons = []
     for pi, track_id in enumerate(data["confident_track_ids"].tolist()):
         held = None  # most recent observed skel_state (127, 8) for this track
+        last_placed = None  # most recent world position for this track
         samples_out = []
         root_traj = []
         n_observed = 0
@@ -295,14 +322,22 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
                         "visibility": visibility,
                     })
                 root_pos_cm = held[root_idx, 0:3]
+                # World placement (world_placement.py) when the clip yielded
+                # one, else skel_state's own character-local frame -- which is
+                # the same eight numbers on every frame, so the figure stands
+                # still. Held frames reuse the last placed position for the same
+                # reason the pose is held: a frozen value is disclosed by
+                # `provenance`, an extrapolated one would not be.
+                placed = _placed_position(placement, track_id, i)
+                if placed is None:
+                    placed = last_placed
+                else:
+                    last_placed = placed
                 root_traj.append({
                     # cm -> meters, same scale factor verified against
                     # joint_hierarchy.rest_translation (see dump_joint_hierarchy).
-                    # ponytail: this is skel_state's own (character-local)
-                    # frame, NOT composed with camera extrinsics/pred_cam_t
-                    # into true world space -- see report's open item on
-                    # root-trajectory world placement.
-                    "position": [float(root_pos_cm[0]) / 100.0, float(root_pos_cm[1]) / 100.0, float(root_pos_cm[2]) / 100.0],
+                    "position": placed if placed is not None else
+                    [float(root_pos_cm[0]) / 100.0, float(root_pos_cm[1]) / 100.0, float(root_pos_cm[2]) / 100.0],
                     "rotation": list(tuple(float(v) for v in held[root_idx, 3:7])),
                     "provenance": provenance,
                 })
@@ -331,7 +366,14 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
     # additionalProperties: false, and they are engineering numbers, not a
     # product claim) -- they go to the log so a "none" is explainable without
     # re-running the job.
-    solved = solve_grounding_for_clip(data, [j["name"] for j in joints_def])
+    # Fed from world placement when there is one: the same solve, on foot
+    # positions that are finally in a frame where a single floor can be right
+    # for a whole clip. Without placement the feet move while the pelvis is
+    # pinned, which is what forced "none" on every real clip before E6.
+    if placement is not None:
+        solved = solve_grounding(placement.foot_tracks, np.asarray(sample_times_s, dtype=np.float64))
+    else:
+        solved = solve_grounding_for_clip(data, [j["name"] for j in joints_def])
     grounding = solved.grounding
     print(f"[grounding] {clip_id}: {grounding['status']} -- {json.dumps(solved.diagnostics)}")
 
@@ -350,12 +392,19 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
         "sample_times_s": sample_times_s,
         "camera": {
             "model": "pinhole",
-            # ponytail: NOT a real calibration -- Milestone A hasn't built
-            # camera-intrinsics estimation. A plausible-looking but unverified
-            # focal length would be a confidently-wrong claim (DESIGN.md §7h),
-            # so this is deliberately a naive, clearly-placeholder guess
-            # (fx=fy=max(w,h), centered principal point), not a measurement.
-            "intrinsics": {
+            # `camera_to_world` IS now measured -- the floor the dancer's own
+            # feet trace out fixes which way is up and how high the camera sits
+            # (0.16 m on solo-01: a phone on the ground, which is what the clip
+            # shows). `intrinsics` is NOT, and still is not: the focal length is
+            # the prior the reconstruction itself assumed, because the clip does
+            # not contain the information to do better -- measured, by re-running
+            # the whole solve across a 3x focal sweep and watching the
+            # reprojection error refuse to pick a winner (10.2 vs 11.2 px).
+            # world_placement.py's module docstring has the numbers and states
+            # exactly what that costs: the world is right up to an unknown
+            # stretch along the view axis. Reported here rather than dressed up,
+            # per DESIGN.md §7h.
+            "intrinsics": placement.intrinsics if placement is not None else {
                 "fx": float(max(width, height, 1)),
                 "fy": float(max(width, height, 1)),
                 "cx": width / 2.0,
@@ -363,7 +412,8 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
                 "reference_width_px": width or 1,
                 "reference_height_px": height or 1,
             },
-            "camera_to_world": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+            "camera_to_world": placement.camera_to_world if placement is not None
+            else [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
         },
         # Real floor solve (grounding.py). Still returns "none" whenever the
         # evidence does not earn a plane -- DESIGN.md §10 forbids faking one,
