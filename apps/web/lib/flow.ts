@@ -1,86 +1,36 @@
 /**
- * The processing screen's arithmetic: "practice while it builds" (flow
- * redesign, direction B with A's step results).
+ * The processing screen's arithmetic, pure so `test/flow.test.ts` covers it
+ * without a DOM.
  *
- * Pure, so `test/flow.test.ts` covers it without a DOM. Everything here works
- * on the RAW video's own timeline, before any MotionResult exists.
+ * No count grid lives here any more. The screen used to turn
+ * `milestones.counts` into an early 8-count practice on the raw video; the
+ * owner removed it (2026-09-23) because those early counts were often off the
+ * beat and put count 1 on the intro. The helpers for it (gridFromCounts,
+ * eightAt, eightTimes, the count strip) are in git history before the A2
+ * build, for when count 1 is reliable enough to bring the practice back.
  */
-import type { CountGrid, LoopSpan } from "../../../packages/navigation/src/core";
-import { countAtTime, timeOfCount } from "../../../packages/navigation/src/core";
+import type { LoopSpan } from "../../../packages/navigation/src/core";
 import type { JobStatus } from "./jobStatus";
 import { processing as copy } from "./copy";
-
-export type Counts = NonNullable<NonNullable<JobStatus["milestones"]>["counts"]>;
-
-/**
- * The milestone's beat proposal as a grid on this clip. Same derivation as
- * services/motion-api/motion_result.py `_proposed_counts` (count 1 clamped to
- * the start, total re-derived against the timeline end) so the counts a
- * learner practises here are the counts the lesson opens on. The end here is
- * the video's duration rather than the last sample slot; the two differ by
- * under one sample, which can move the last count by one at most.
- */
-export function gridFromCounts(counts: Counts, durationS: number): CountGrid {
-  const countOneS = Math.max(0, counts.count_one_s);
-  const spc = counts.seconds_per_count;
-  return {
-    countOneS,
-    secondsPerCount: spc,
-    countTotal: Math.max(1, Math.floor((durationS - countOneS) / spc) + 1),
-  };
-}
-
-export const eightTotal = (grid: CountGrid) => Math.ceil(grid.countTotal / 8);
-
-/** 1-based eight-count under the playhead, clamped to the dance. */
-export function eightAt(grid: CountGrid, t: number): number {
-  const count = Math.floor(countAtTime(grid, t));
-  return Math.min(eightTotal(grid), Math.max(1, Math.floor((count - 1) / 8) + 1));
-}
-
-export function eightSpan(grid: CountGrid, n: number): LoopSpan {
-  return { startCount: n * 8 - 7, endCount: Math.min(grid.countTotal, n * 8) };
-}
-
-/** [start, end) seconds of eight-count n, kept inside the clip. */
-export function eightTimes(grid: CountGrid, n: number, durationS: number): [number, number] {
-  const { startCount, endCount } = eightSpan(grid, n);
-  return [Math.max(0, timeOfCount(grid, startCount)), Math.min(durationS, timeOfCount(grid, endCount + 1))];
-}
-
-/** 0–7 for the count strip, or -1 in the lead-in before count 1. */
-export function stripIndex(grid: CountGrid, t: number): number {
-  const count = Math.floor(countAtTime(grid, t));
-  if (count < 1) return -1;
-  return (Math.min(count, grid.countTotal) - 1) % 8;
-}
-
-/** Where the dot sits along the eight ticks, 0..1: across the active count's own tick. */
-export function stripPosition(grid: CountGrid, t: number): number {
-  const c = countAtTime(grid, t) - 1;
-  if (c < 0) return 0;
-  return (((c % 8) + 8) % 8) / 8;
-}
-
-export const perMinute = (counts: Counts) => Math.round(60 / counts.seconds_per_count);
 
 // ------------------------------------------------------------------ steps
 
 export type StepState = "done" | "now" | "wait";
 export interface Step {
-  key: "clip" | "dancers" | "counts" | "body";
+  key: "clip" | "dancers" | "body";
   label: string;
   state: StepState;
   note: string;
 }
 
 /**
- * A's four steps, each with the real result it produced. Every "done" here is
- * driven by a milestone the service actually sent; `progress` only decides
- * which unfinished step is "now". process_clip's fractions: detecting is
- * 0.10–0.25, building the body 0.25–0.95, the 3D file 0.97.
+ * Three steps, each with the real result it produced. Every "done" here is
+ * driven by a milestone the service actually sent (or by success itself);
+ * `progress` only decides which unfinished step is "now". process_clip's
+ * fractions: detecting is 0.10–0.25, building the body 0.25–0.95, the 3D file
+ * 0.97.
  */
-export function flowSteps(status: JobStatus | null, grid: CountGrid | null): Step[] {
+export function flowSteps(status: JobStatus | null): Step[] {
   const m = status?.milestones ?? {};
   const state = status?.state ?? "queued";
   const p = status?.progress ?? 0;
@@ -90,42 +40,21 @@ export function flowSteps(status: JobStatus | null, grid: CountGrid | null): Ste
   const dancers: Step =
     m.dancers != null
       ? { key: "dancers", label: s.dancers, state: "done", note: s.dancersFound(m.dancers) }
-      : state === "processing" && p >= 0.1
-        ? { key: "dancers", label: s.dancers, state: "now", note: s.looking }
-        : { key: "dancers", label: s.dancers, state: done ? "done" : "wait", note: "" };
-
-  const counts: Step = m.counts
-    ? {
-        key: "counts",
-        label: s.counts,
-        state: "done",
-        note: grid ? s.countsFound(perMinute(m.counts), eightTotal(grid)) : s.countsTempo(perMinute(m.counts)),
-      }
-    : done
-      ? { key: "counts", label: s.counts, state: "done", note: s.countsInLesson }
-      : { key: "counts", label: s.counts, state: "now", note: m.frames_done != null ? s.noneYet : s.listening };
+      : done
+        ? { key: "dancers", label: s.dancers, state: "done", note: "" }
+        : state === "processing" && p >= 0.1
+          ? { key: "dancers", label: s.dancers, state: "now", note: s.looking }
+          : { key: "dancers", label: s.dancers, state: "wait", note: s.waiting };
 
   let body: Step;
   if (done) body = { key: "body", label: s.body, state: "done", note: s.ready };
   else if (m.frames_done != null && m.frames_total) {
-    body = { key: "body", label: s.body, state: "now", note: builtNote(m.frames_done, m.frames_total, grid) };
+    body = { key: "body", label: s.body, state: "now", note: s.frames(m.frames_done, m.frames_total) };
   } else if (state === "processing" && p >= 0.95) {
     body = { key: "body", label: s.body, state: "now", note: s.finishing };
-  } else body = { key: "body", label: s.body, state: "wait", note: "" };
+  } else body = { key: "body", label: s.body, state: "wait", note: s.waiting };
 
-  return [{ key: "clip", label: s.clip, state: "done", note: s.playing }, dancers, counts, body];
-}
-
-/**
- * "3 of 8 eight-counts" when the counts are known, else frames. Built frames
- * span the clip evenly (15 fps sampling), so the fraction of frames done is
- * the fraction of the clip's timeline built.
- */
-export function builtNote(framesDone: number, framesTotal: number, grid: CountGrid | null): string {
-  if (!grid) return copy.steps.frames(framesDone, framesTotal);
-  const eights = eightTotal(grid);
-  const lastCount = Math.floor((framesDone / framesTotal) * grid.countTotal);
-  return copy.steps.eights(Math.min(eights, Math.floor(lastCount / 8)), eights);
+  return [{ key: "clip", label: s.clip, state: "done", note: s.playing }, dancers, body];
 }
 
 // ---------------------------------------------------------------- handoff

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { privacy } from "../lib/copy";
 import "./globals.css";
+import "./front.css";
 
 // Every clause is true today (DESIGN.md §7h): clips up to 60 s, one to six
 // dancers, loops of any length under Counts and parts, 0.5x to 1x, mirror, and

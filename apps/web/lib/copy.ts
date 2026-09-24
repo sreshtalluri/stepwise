@@ -18,114 +18,108 @@ export const PRODUCT_NAME = "stepwise"; // working name; OPEN-DECISIONS.md D10
 
 export const marketing = {
   nav: {
-    examples: "Examples",
-    howItWorks: "How it works",
-    openApp: "Add a clip",
+    myLessons: "My lessons",
+    add: "Add a clip",
   },
 
   hero: {
-    // Flow redesign (direction A's paste-in-hero landing), replacing §7d's
-    // "Every angle, from the one video you have." The claim is the count
-    // structure plus a synthesised VIEWPOINT of a tracked body, both honest
-    // under §7h. No processing time: see steps[1] below.
+    // A2 "Count off". "Step by step" is the name, not a rule about length:
+    // a loop is as long as the learner sets it (Counts and parts), never
+    // "8 counts at a time". No processing time: nothing here has a job to
+    // measure (see test/copy.test.ts).
     headlineLead: "Learn any dance,",
-    headlineAccent: "count by count.",
+    headlineAccent: "step by step.",
     lede:
-      "Add a dance video up to 60 seconds long. You get each dancer as a 3D body you can walk around, split into 8-counts.",
-    primary: "Try it free",
-    // DESIGN.md §7e, verbatim.
-    noAccount: "No account. Works in your browser.",
+      "Loop the part that trips you up, as short or as long as you like. Slow it down, then build back up to full speed.",
+    // Each one enforced in code: MAX_SECONDS in lib/submit.ts and the service,
+    // process_clip.MAX_DANCERS = 6, no accounts (OPEN-DECISIONS D5).
+    facts: ["Up to 60 seconds", "1 to 6 dancers", "Free, no account"],
   },
 
-  // The paste box in the hero. Same endpoint and same invite gate as /upload.
-  paste: {
-    label: "Video link",
-    placeholder: "Paste a TikTok or YouTube link",
-    submit: "Build the lesson",
-    busy: "Fetching the video",
-    orFile: "or add a video file",
-    inviteLabel: "Invite code",
-    // Says what still works for everyone, like upload.link.gated (§11).
-    inviteNote: "Links need an invite code while we test. A video file works for everyone.",
-    // The stage beside it is an abstract figure, not a clip: no cleared demo
-    // clip exists (see app/page.tsx), so it says what it is showing.
-    stageLabel: "Every lesson is counted in eights",
+  // The count-off toy beside the headline. A drawn figure at a fixed tempo,
+  // not a clip and not anyone's counts, and it says so.
+  toy: {
+    caption: "A drawn figure, not a real dancer. Try the controls.",
+    build: "Build up",
+    speed: (rate: number) => `${rate}×`,
+    mirrorOn: "Mirror on",
+    mirrorOff: "Mirror off",
   },
 
-  proof: {
-    // Both lines are the corrected forms recorded in DESIGN.md §7h. The second
-    // correction there was flagged as over-cautious about case 1; this wording
-    // keeps the tracked-through-a-turn claim, which is legitimate and is the
-    // best thing the product does.
-    heading: "Filmed from the front. Watch it from the side.",
+  // The on-video demo. No cleared clip exists yet (evaluation/clips.yaml's
+  // demo-public slot is empty; the testing clips are rights: untested), so the
+  // stage is an empty placeholder that says so. components/front/Demo.tsx
+  // holds the one constant a cleared clip drops into.
+  demo: {
+    heading: "Your video, with the body on top.",
+    // DESIGN.md §7h case 1: tracked through a turn is the honest claim, and
+    // the other angles are labelled estimated in the lesson.
     body:
-      "A phone films one angle. The step you need is often side-on or from above. When the dancer turns away the body is still tracked, so you can orbit round and see what their arms were doing.",
-    leftLabel: "The clip, front only",
-    rightLabel: "Same moment, from the side",
-    caveat:
-      "What the camera could not see is marked instead of invented: solid means seen, sketchy means unsure, dotted means out of frame.",
+      "The real clip plays underneath, so the timing and style stay the dancer's own, with the 3D body drawn on top. When the dancer turns away the body is still tracked, so you can turn to another angle, estimated from that body, and see what their arms were doing.",
+    onVideo: "On video",
+    placeholder: "Demo clip coming soon",
+    play: "Play the demo",
+    open: "Open this lesson",
   },
 
-  steps: {
-    heading: "Three steps.",
-    items: [
-      {
-        title: "Paste a link or add a file",
-        // Reconciled against PRD §5 "Multi-dancer, revised 2026-09-18".
-        // Deliberately not "one dancer" — that cap was removed.
-        body:
-          "Filmed on one camera, held still. Up to 60 seconds, no cuts. One to six dancers.",
-      },
-      {
-        title: "We build the body",
-        // No processing-time number here on purpose: the 2–4 minute figure
-        // derives from an FPS claim the PRD says could not be re-verified
-        // (PRD §3, §7). The processing screen states time remaining from the
-        // live job, not from a constant.
-        body:
-          "Your video plays the whole time it is working, so you can slow it, mirror it, and loop it straight away.",
-      },
-      {
-        title: "Learn it count by count",
-        body:
-          "The dance splits into parts. Loop the one that is fighting you until it is not.",
-      },
+  // What happens after you add a clip. Steps, not times: the only honest
+  // time is the processing screen's, extrapolated from the live job.
+  wait: {
+    heading: "Your clip plays while the lesson builds.",
+    body: "Slow it down or mirror it while you wait. You can close the tab and come back: the link keeps working.",
+    steps: [
+      { label: "Clip", body: "Your video plays straight away." },
+      { label: "Dancers", body: "Each dancer is found and marked, frame by frame." },
+      { label: "3D body", body: "A body is built for each dancer." },
+      { label: "Lesson", body: "Loop any part, at any length. Your speed carries over." },
     ],
+    // In the lesson today: the On video view, the 3D view's orbit (estimated
+    // off the camera axis), loop handles under Counts and parts, the 0.5x to
+    // 1x transport, Build up, Mirror, and the dancer picker.
+    featuresLabel: "In the lesson",
+    features: [
+      ["3D body on your video", ""],
+      ["Turn to any angle", "estimated"],
+      ["Loop one part, a run of parts, or all of it", ""],
+      ["0.5× to 1×", ""],
+      ["Build up", "faster each loop"],
+      ["Mirror", ""],
+      ["Switch dancers", ""],
+    ] as [string, string][],
   },
 
-  close: {
-    heading: "Put a dance in.",
-    body: "It costs nothing to try.",
-    primary: "Try it free",
+  foot: {
+    worksHeading: "Works best with",
   },
 };
 
 export const upload = {
   title: "Add a clip",
-  choose: "Choose a video file",
+  choose: "Add a video file",
   drop: "or drop it here. Works for everyone.",
   or: "or",
 
-  // The pasted-link door. PRD §5 listed paste-a-link as out of v1; the scope
-  // note there was updated when this shipped, rather than left contradicting
-  // the screen.
+  // The pasted-link door, shared by the landing hero and /upload
+  // (components/front/LinkDoor.tsx) so the two cannot drift.
   //
   // Read docs/research/link-ingestion.md before touching the rights line
   // below. It is not the upload rights line with a word changed: a pasted
   // link is a weaker claim than a file, and the copy must not pretend
   // otherwise.
   link: {
+    label: "TikTok or YouTube link",
     placeholder: "Paste a TikTok or YouTube link",
-    submit: "Get the lesson",
+    submit: "Build the lesson",
+    busy: "Fetching the video",
     inviteLabel: "Invite code",
     // Says who it is open to and what still works for everyone else. Not
-    // "coming soon" — that names a date we have not got.
+    // "coming soon": that names a date we have not got.
     gated:
-      "Links are open to invited testers while we try this out. Adding a video file works for everyone.",
+      "Links are open to invited testers while we try this out. A video file works for everyone.",
 
     // The rights line for links, and deliberately NOT the upload one.
     //
-    // DESIGN.md §7d's line — "Only upload video you have the right to use." —
+    // DESIGN.md §7d's line ("Only upload video you have the right to use.")
     // is addressed to someone holding a file, who at least might hold the
     // right to it. Pasting a link is a weaker claim: you are asking us to
     // fetch someone else's post, and almost nobody pasting a TikTok has any
@@ -140,7 +134,7 @@ export const upload = {
     // /privacy has the same form for anyone holding only the link.
     //
     // It does not say "we check", "we verify" or "we have permission" (§7h bans all three, and §12.13 lists them), and it
-    // does not ask for a tick — docs/research/rights-and-privacy.md §7a found
+    // does not ask for a tick: docs/research/rights-and-privacy.md §7a found
     // that a checkbox collects an attestation from the wrong person, since the
     // consent that matters is the dancer's and the person pasting cannot give
     // it.
@@ -150,14 +144,14 @@ export const upload = {
 
   // Failures on the link path, in the vocabulary the service actually returns
   // (services/motion-api/ingest.py). Each says what happened and what to do
-  // next, and none of them states a reason we did not observe — where the
+  // next, and none of them states a reason we did not observe: where the
   // platform's own answer is ambiguous, the copy stops at "we could not get
   // it" rather than guessing at private, deleted or blocked.
   linkErrors: {
     unreachable: "That did not go through. Check your connection and try again.",
   },
 
-  // Framed as what works, not what we reject — DESIGN.md §7d.
+  // Framed as what works, not what we reject (DESIGN.md §7d).
   worksBestHeading: "Works best with",
   worksBest: [
     "Filmed from the front, on one camera held still.",
@@ -165,11 +159,11 @@ export const upload = {
     "One to six dancers. You pick whose body you learn from.",
   ],
 
-  // The rights line appears here, once, plainly — DESIGN.md §7d,
-  // OPEN-DECISIONS.md D8.
+  // The rights line appears here, once, plainly (DESIGN.md §7d,
+  // OPEN-DECISIONS.md D8).
   rights: "Only upload video you have the right to use.",
 
-  // Errors say what happened and what to do, and never apologise — §11.
+  // Errors say what happened and what to do, and never apologise (§11).
   errors: {
     tooLong:
       "That clip is longer than 60 seconds. Trim it to the part you want to learn and try again.",
@@ -179,66 +173,44 @@ export const upload = {
 };
 
 /**
- * The processing screen: "practice while it builds" (flow redesign, direction
- * B, with A's per-step results). The page turns into a warm-up the moment the
- * counts land, so its title changes with what is actually known.
+ * The processing screen (A2, with the owner's change of 2026-09-23): the clip
+ * plays, the job reports honestly, and at success one button opens the lesson.
+ *
+ * No counts here. The early `milestones.counts` were often off the beat and
+ * landed count 1 on the intro before the dancer starts, so practising them
+ * taught the wrong 1. The counts wait for the lesson, where the learner can
+ * set them. (Future: early 8-count practice once count 1 is reliable.)
  */
 export const processing = {
-  // Before the counts. "Hear the beat" is literal: they come from the audio.
-  title: "Start on the video while the 3D is built.",
-  subtitle: "Slow it down and mirror it. If the music has a clear beat, the counts show up here.",
-  // Once `milestones.counts` has landed.
-  countsTitle: "The counts are in. Learn the first 8.",
-  countsSubtitle: "This is how the lesson is split. Loop a few counts until they stick, then move on.",
-  // At success: the handoff, carrying speed and loop into the lesson.
-  readyTitle: "Ready. Same counts, now in 3D.",
-  readySubtitle: "Your loop and speed carry over.",
-  readyPlain: "Your lesson is ready.",
+  title: "Building your lesson.",
+  subtitle: "Your clip plays here while it builds. Slow it down or mirror it if you like.",
+  readyTitle: "Your lesson is ready.",
+  readySubtitle: "Open it to loop any part, slow it down, and see the 3D body on your video.",
   open: "Open the lesson",
+
+  // The big numeral is a heartbeat, not the song: it ticks at a steady rate
+  // that has nothing to do with the music, and the page says so.
+  heartbeat: "A steady count to wait by. It is not the music's beat.",
+  heartbeatDone: "Counted in.",
 
   videoLabel: "Your clip, playing now",
   paused: "Paused. Tap to play.",
-  listening: "Listening for the beat",
-  part: (from: number, to: number) => `Counts ${from} to ${to}`,
-  // The counts are a PROPOSAL from the music, the same one the lesson opens
-  // on and labels as a guess (lesson.counts). Tempo is "a minute", never BPM.
-  tempo: (perMinute: number) => `${perMinute} a minute, from the music`,
-  tempoWeak: (perMinute: number) => `${perMinute} a minute, a rough guess from the music`,
-  practice: "Practice counts 1 to 8 at half speed",
-  earlier: "Earlier 8",
-  next: "Next 8",
-  loopEight: (from: number, to: number) => `Loop ${from}–${to}`,
   soundOn: "Sound on",
   soundOff: "Sound off",
 
-  // One at a time, rotated while the counts are up (direction B).
-  tipLabel: "While you wait",
-  tips: [
-    "Say the counts out loud. The 5, 6, 7, 8 before a part is your cue to start.",
-    "Mirror on flips the clip, so their right hand is on your right.",
-    "Get the feet first. Add the arms once the steps feel automatic.",
-    "Half speed is for learning the shape. Go back to full speed to learn the timing.",
-  ],
-
-  // A's steps, each with the result it produced. Every "done" note is a
-  // milestone the service sent, never a guess from the progress fraction.
+  // Each step with the result it produced. Every "done" note is a milestone
+  // the service sent, never a guess from the progress fraction.
   steps: {
     clip: "Clip",
     playing: "Playing now",
     dancers: "Dancers",
     looking: "Looking frame by frame",
     dancersFound: (n: number) => (n === 1 ? "1 dancer" : `${n} dancers`),
-    counts: "Counts",
-    listening: "Listening",
-    noneYet: "None yet. You can set them in the lesson.",
-    countsInLesson: "Set in the lesson",
-    countsTempo: (perMinute: number) => `${perMinute} a minute`,
-    countsFound: (perMinute: number, eights: number) => `${perMinute} a minute, ${eights} eight-counts`,
     body: "3D body",
     frames: (done: number, total: number) => `Frame ${done} of ${total}`,
-    eights: (done: number, total: number) => `${done} of ${total} eight-counts built`,
     finishing: "Finishing up",
     ready: "Ready",
+    waiting: "Waiting",
   },
   waiting: "Waiting in the queue",
   unreachable: "We cannot reach the job right now. It keeps running, and this page will catch up.",
@@ -249,7 +221,8 @@ export const processing = {
   copied: "Link copied",
 
   queued: "Still in the queue.",
-  // Loose, never a false-precision countdown — DESIGN.md §7c.
+  // Loose, never a false-precision countdown (DESIGN.md §7c), and only ever
+  // extrapolated from this job's own progress (lib/jobStatus.ts).
   remaining: (minutes: number) =>
     minutes <= 1 ? "About a minute left." : `About ${minutes} minutes left.`,
   almostDone: "Nearly there.",
@@ -257,7 +230,6 @@ export const processing = {
   speed: (rate: number) => `${rate}× speed`,
   mirrorOn: "Mirror on",
   mirrorOff: "Mirror off",
-  loopOff: "Loop off",
 
   failedTitle: "This clip did not make it through",
   retry: "Try again",
