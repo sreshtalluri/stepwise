@@ -333,6 +333,139 @@ export const lesson = {
 };
 
 /**
+ * /lessons. There are no accounts (OPEN-DECISIONS D5), so "my" lessons are the
+ * ones this browser opened, kept in localStorage (lib/myLessons.ts). The page
+ * says so in its subtitle rather than implying a synced library.
+ */
+export const myLessons = {
+  title: "My lessons",
+  subtitle: "Saved on this device. Lessons you open here are listed here, and nowhere else.",
+  empty: "No lessons on this device yet. Add a clip to make one, or open a lesson link.",
+  emptyLink: "Add a clip",
+  remove: "Remove from my lessons",
+  removeNote: "This only takes it off this list. The lesson itself stays up.",
+  dancers: (n: number) => (n === 1 ? "1 dancer" : `${n} dancers`),
+  duration: (s: number) => `${Math.round(s)} s`,
+  opened: "Last opened",
+  examplesHeading: "Examples",
+  examplesNote: "Built-in samples made from generated test data, not from anyone's video.",
+};
+
+/**
+ * The takedown dialog (components/RemoveLessonDialog.tsx). The body line is
+ * the owner's wording, and every word of it is what
+ * services/motion-api `POST /jobs/{job_id}/removal` does: it deletes the source
+ * video and every 3D artifact at once, for the one shared lesson, and leaves
+ * only a tombstone. It cannot be undone because nothing is kept to undo from.
+ */
+export const removal = {
+  menuItem: "Report or remove this video",
+  title: "Report or remove this video",
+  body: "This deletes the video and the 3D lesson for everyone who has the link. It can't be undone.",
+  relationshipLegend: "Which is closest?",
+  relationships: {
+    i_am_in_it: "I am in this video",
+    i_own_the_rights: "I own the rights to this video",
+    other: "Something else",
+  },
+  reasonLabel: "Anything else to add (optional)",
+  submit: "Delete for everyone",
+  submitting: "Deleting",
+  cancel: "Cancel",
+  close: "Close",
+  pickOne: "Pick the option that fits best, then delete.",
+  failed: "The removal did not go through. Check your connection and try again.",
+  doneTitle: "Removed",
+  done: "The video and the 3D lesson are deleted. Anyone opening the link now sees that it was removed.",
+};
+
+/**
+ * /privacy. Every sentence here is checked against code; the file and line
+ * that backs each one is listed next to it. If the code changes, the sentence
+ * changes in the same commit (DESIGN.md §7h). No legal terms of use here —
+ * that is a lawyer's text, not ours to invent.
+ */
+export const privacy = {
+  title: "Privacy",
+  intro:
+    "What stepwise keeps, where it lives, and how it goes away. There are no accounts: we never ask for your name or email address.",
+  sections: [
+    {
+      heading: "When you add a clip, we store",
+      items: [
+        // uploads Volume /{clip_id}.mp4 and R2 video key — api._store_and_dispatch, storage.py
+        "The video you uploaded, or the video we fetched from the link you pasted.",
+        // {clip_id}_track{n}.glb, motion-result.json.gz, beats.json — retention.clip_artifact_paths
+        "What we build from it: a 3D body for each dancer, and the lesson data the viewer plays — timings, poses, hand and foot close-up areas, and counts proposed from the music.",
+        // performance.json, job-status/job-meta, jobs table — modal_app.py, jobstore.py
+        "Processing records: how the job went and how long each step took.",
+        // fingerprints/index.json: sha256 + frame hashes, source_key — fingerprint.py, api._store_and_dispatch
+        "A fingerprint of the video (a checksum and small frame hashes) and, for a pasted link, which post it came from. This is how the same video added twice becomes one lesson.",
+        // {clip_id}.last-access.json — api._touch
+        "When the lesson was last opened.",
+      ],
+    },
+    {
+      heading: "One lesson per video",
+      items: [
+        // api.upload_clip / ingest_clip_link dedupe hits return the existing clip_id
+        "If a video is recognised as one that is already a lesson, whoever adds it gets that same lesson and link. So there is one copy, and removing it removes it for everyone who has the link.",
+      ],
+    },
+    {
+      heading: "Kept only in your browser",
+      items: [
+        // lib/myLessons.ts, lib/structure.ts, lib/reveal.ts — localStorage, never sent
+        "My lessons (with a small picture from each video's first frame), the counts and parts you set, and whether a lesson has already done its opening turn. These are stored by your browser on this device and are never sent to us. Clearing this site's data in your browser deletes them.",
+        // LessonLoader 410 -> forgetLesson
+        "If a lesson is removed, its entry leaves My lessons the next time its link is opened on this device.",
+      ],
+    },
+    {
+      heading: "No accounts, and how limits work",
+      items: [
+        // ratelimit._ip_hash, 001_init.sql events has no ip column
+        "To stop one person using up the day's processing, each new lesson and each removal is counted against a keyed hash of your IP address. The key changes every day, so one day's counts cannot be matched to the next. The address itself is not written to our database, and these counts are kept after a lesson is deleted.",
+        // wrangler.jsonc (Cloudflare Worker), modal_app.py, storage.py (R2), layout.tsx (Fontshare)
+        "The site runs on Cloudflare, processing runs on Modal, and files are stored on Modal and Cloudflare. Fonts load from Fontshare. Like any web host, these services see your requests, including your IP address.",
+      ],
+    },
+    {
+      heading: "Error reports",
+      items: [
+        // observability.py scrub(), lib/scrub.ts, instrumentation-client.ts
+        "When something breaks, an error report goes to Sentry, our error tracker. Before it leaves, links, email addresses and @handles in it are replaced with placeholders. Addresses of pages on this site are kept, without anything after the question mark, so we can tell which lesson broke.",
+        // api.remove_lesson -> observability.message("lesson removed", relationship, clip_id)
+        "When a lesson is removed we get an alert with the lesson's id and which option was picked. The words you typed are not in it.",
+      ],
+    },
+    {
+      heading: "How long we keep it",
+      items: [
+        // retention.TTL_DAYS == 180, modal_app.sweep_expired daily
+        "We keep the clip while the lesson exists. Lessons nobody opens for six months are deleted, and a removal request deletes one straight away.",
+        // retention.delete_clip tombstone {clip_id, removed_at, reason, relationship}
+        "After a deletion we keep a short note that the lesson was removed — when, the option picked and anything typed — so the link can say it was removed instead of pretending it never existed.",
+      ],
+    },
+    {
+      heading: "Removing a lesson",
+      items: [
+        // components/RemoveLessonDialog.tsx -> POST /jobs/{job_id}/removal
+        "Use Report or remove this video on the lesson, or paste the lesson's link below. It deletes the video and the 3D lesson for everyone, straight away. Anyone with the link can do it; you do not have to be the person who added the clip.",
+        // no contact address exists
+        "You need the lesson's link. There is no email address for requests yet.",
+      ],
+    },
+  ],
+  linkLabel: "Lesson link",
+  linkPlaceholder: "Paste the link to a lesson",
+  linkSubmit: "Continue",
+  linkInvalid: "That is not a lesson link from this site. It looks like /lesson/ followed by an id.",
+  footer: "Privacy",
+};
+
+/**
  * The navigation surface's strings, swept by the same §11 lint as everything
  * above. `packages/navigation/src/copy.ts` asked for this line in its own
  * header; it is here now that the package is actually mounted in this app.
