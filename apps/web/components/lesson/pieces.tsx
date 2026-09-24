@@ -53,6 +53,7 @@ const P = {
   video: "M251.77,73a8,8,0,0,0-8.21.39L208,97.05V72a16,16,0,0,0-16-16H32A16,16,0,0,0,16,72V184a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V159l35.56,23.71A8,8,0,0,0,248,184a8,8,0,0,0,8-8V80A8,8,0,0,0,251.77,73ZM192,184H32V72H192V184Zm48-22.95-32-21.33V116.28L240,95Z",
   cube: "M223.68,66.15,135.68,18a15.88,15.88,0,0,0-15.36,0l-88,48.17a16,16,0,0,0-8.32,14v95.64a16,16,0,0,0,8.32,14l88,48.17a15.88,15.88,0,0,0,15.36,0l88-48.17a16,16,0,0,0,8.32-14V80.18A16,16,0,0,0,223.68,66.15ZM128,32l80.34,44L128,120,47.66,76ZM40,90l80,43.78v85.79L40,175.82Zm96,129.57V133.82L216,90v85.78Z",
   stack: "M230.91,172A8,8,0,0,1,228,182.91l-96,56a8,8,0,0,1-8.06,0l-96-56A8,8,0,0,1,36,169.09l92,53.65,92-53.65A8,8,0,0,1,230.91,172ZM220,121.09l-92,53.65L36,121.09A8,8,0,0,0,28,134.91l96,56a8,8,0,0,0,8.06,0l96-56A8,8,0,1,0,220,121.09ZM24,80a8,8,0,0,1,4-6.91l96-56a8,8,0,0,1,8.06,0l96,56a8,8,0,0,1,0,13.82l-96,56a8,8,0,0,1-8.06,0l-96-56A8,8,0,0,1,24,80Zm23.88,0L128,126.74,208.12,80,128,33.26Z",
+  dots: "M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128Zm56-12a12,12,0,1,0,12,12A12,12,0,0,0,196,116ZM60,116a12,12,0,1,0,12,12A12,12,0,0,0,60,116Z",
   plus: "M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z",
   question: "M140,180a12,12,0,1,1-12-12A12,12,0,0,1,140,180ZM128,72c-22.06,0-40,16.15-40,36v4a8,8,0,0,0,16,0v-4c0-11,10.77-20,24-20s24,9,24,20-10.77,20-24,20a8,8,0,0,0-8,8v8a8,8,0,0,0,16,0v-.72c18.24-3.35,32-17.9,32-35.28C168,88.15,150.06,72,128,72Zm104,56A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z",
   eye: "M247.31,124.76c-.35-.79-8.82-19.58-27.65-38.41C194.57,61.26,162.88,48,128,48S61.43,61.26,36.34,86.35C17.51,105.18,9,124,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208s66.57-13.26,91.66-38.34c18.83-18.83,27.3-37.61,27.65-38.4A8,8,0,0,0,247.31,124.76ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.47,133.47,0,0,1,25,128,133.33,133.33,0,0,1,48.07,97.25C70.33,75.19,97.22,64,128,64s57.67,11.19,79.93,33.25A133.46,133.46,0,0,1,231.05,128C223.84,141.46,192.43,192,128,192Zm0-112a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Z",
@@ -382,7 +383,8 @@ export function CloseUps({ l, className = "", onRegion }: { l: Lesson; className
   if (!l.showCrops) return null;
   const regions = cropRegions(l.doc, l.selected, l.mirrored);
   return (
-    <div className={`ls-closeups ${regions.length > 2 ? "ls-sides" : ""} ${className}`}>
+    // Dimmed on "your turn" too: a close-up of the dancer is still the answer.
+    <div className={`ls-closeups ${regions.length > 2 ? "ls-sides" : ""} ${l.yourTurn ? "ls-dim" : ""} ${className}`}>
       {regions.map((r) => (
         <CropPeek key={r} l={l} region={r} contacts={contacts} onClick={onRegion ? () => onRegion(r) : undefined} />
       ))}
@@ -694,6 +696,30 @@ export function Help({ l, id }: { l: Lesson; id: string }) {
           onSelectPerson={() => {}}
           endS={l.endS}
         />
+      </div>
+    </>
+  );
+}
+
+/**
+ * "⋯": the two things that are about the lesson rather than the dance. The actions
+ * come in from the host (LessonViewer props); until they are wired an entry is shown
+ * disabled rather than pretending to work.
+ */
+export function LessonMenu({ l, id }: { l: Lesson; id: string }) {
+  const close = () => (document.getElementById(id) as (HTMLElement & { hidePopover?: () => void }) | null)?.hidePopover?.();
+  return (
+    <>
+      <button type="button" className="ls-icon-btn ls-menu-btn" popoverTarget={id} aria-label={copy.menu.button}>
+        <Icon name="dots" size={22} />
+      </button>
+      <div id={id} popover="auto" className="ls-menu" role="menu">
+        <button type="button" role="menuitem" disabled={!l.onRemoveFromMyLessons} onClick={() => (close(), l.onRemoveFromMyLessons?.())}>
+          {copy.menu.removeMine}
+        </button>
+        <button type="button" role="menuitem" disabled={!l.onReportOrRemove} onClick={() => (close(), l.onReportOrRemove?.())}>
+          {copy.menu.report}
+        </button>
       </div>
     </>
   );

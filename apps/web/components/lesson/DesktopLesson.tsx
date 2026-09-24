@@ -16,6 +16,7 @@ import {
   Help,
   Icon,
   learnedLine,
+  LessonMenu,
   MainStage,
   PathNav,
   PlayButton,
@@ -56,6 +57,7 @@ export default function DesktopLesson({ l }: { l: Lesson }) {
           <WhoChip l={l} shots={shots} />
           <ModeSwitch l={l} />
           <Help l={l} id="ls-help-desk" />
+          <LessonMenu l={l} id="ls-menu-desk" />
         </div>
       </header>
 

@@ -46,6 +46,9 @@ export interface LessonViewerProps {
   glbUrls: string[];
   /** Scope for the learner's counts, parts, learned 8-counts and dancer. */
   lessonId: string;
+  /** "⋯" menu entries. Wired by the host once those flows exist; absent = shown disabled. */
+  onRemoveFromMyLessons?: () => void;
+  onReportOrRemove?: () => void;
 }
 
 export type MainView = "video" | "overlay" | "3d";
@@ -61,7 +64,7 @@ export default function LessonViewer(props: LessonViewerProps) {
 
 export type Lesson = ReturnType<typeof useLesson>;
 
-function useLesson({ doc, title, videoUrl, glbUrls, lessonId }: LessonViewerProps) {
+function useLesson({ doc, title, videoUrl, glbUrls, lessonId, onRemoveFromMyLessons, onReportOrRemove }: LessonViewerProps) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const endS = useMemo(() => timelineEndS(doc.sample_times_s), [doc]);
 
@@ -340,6 +343,7 @@ function useLesson({ doc, title, videoUrl, glbUrls, lessonId }: LessonViewerProp
     multi, selected, chooseDancer, pickerOpen, setPickerOpen,
     view, setView, angle, setAngle, extras, setExtras, mirrored, setMirrored, follow, setFollow,
     showCrops, setShowCrops, absent, setAbsent, focusRef, crop,
+    onRemoveFromMyLessons, onReportOrRemove,
   };
 }
 

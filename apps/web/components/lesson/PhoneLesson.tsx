@@ -16,6 +16,7 @@ import {
   Help,
   Icon,
   learnedLine,
+  LessonMenu,
   MainStage,
   PlayButton,
   Steps,
@@ -192,6 +193,7 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
             </Link>
             <h1 className="ls-title">{l.title}</h1>
             <span className="ls-meter">{learnedLine(l)}</span>
+            <LessonMenu l={l} id="ls-menu-phone" />
           </header>
           <CloseUps l={l} className="ls-ph-closeups" />
           <nav className="ls-rail" aria-label={copy.views.group}>

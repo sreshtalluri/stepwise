@@ -746,6 +746,36 @@
   margin-top: 14px;
 }
 
+.ls-menu {
+  inset: calc(env(safe-area-inset-top) + 60px) 12px auto auto;
+  margin: 0;
+  min-width: 240px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 18px 48px rgb(28 25 23 / 0.25);
+}
+.ls-menu button {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 10px;
+  text-align: left;
+  font-weight: 500;
+}
+.ls-menu button:hover:not(:disabled) {
+  background: var(--paper-sunk);
+}
+.ls-menu button:disabled {
+  color: var(--ink-faint);
+}
+.ls-ph-head .ls-menu-btn {
+  color: var(--paper);
+}
+
 /* ================================================================== desktop */
 
 .ls-desk {
@@ -918,6 +948,21 @@
   .ls-views {
     height: clamp(360px, calc(100dvh - 470px), 640px);
   }
+  .ls-head {
+    padding: 10px 16px;
+  }
+  .ls-body {
+    padding: 4px 16px 24px;
+  }
+  .ls-head .ls-who > span:last-child {
+    display: none;
+  }
+  .ls-head .ls-who {
+    padding-right: 4px;
+  }
+}
+.ls-who {
+  white-space: nowrap;
 }
 @media (max-width: 1100px), (max-width: 767px) {
   .ls-desk .ls-path {
@@ -1512,11 +1557,7 @@
   grid-template-columns: 1fr 1fr;
 }
 .ls-land .ls-ph-transport {
-  grid-template-columns: 72px minmax(0, 1fr) 72px;
-}
-.ls-land .ls-big-btn,
-.ls-land .ls-ph-play {
-  height: 72px;
+  grid-template-columns: 1fr 1fr 1fr;
 }
 .ls-land .ls-ph-play span {
   display: none;
@@ -1528,8 +1569,39 @@
   right: 80px;
 }
 .ls-land .ls-ph-closeups {
-  top: calc(env(safe-area-inset-top) + 64px);
+  top: calc(env(safe-area-inset-top) + 88px);
   width: 64px;
+}
+.ls-land .ls-ph-stage .ls-stage-tag {
+  top: calc(env(safe-area-inset-top) + 62px);
+}
+.ls-land .ls-tile {
+  font-size: 0.875rem;
+}
+.ls-land .ls-rail-dot {
+  width: 44px;
+  height: 44px;
+}
+/* Short portrait screens (375x667): a tighter rail so it clears the title. */
+@media (max-height: 740px) {
+  /* Hung from under the title instead of stacked up from the counts, which sit
+     left of it, so the two never meet. */
+  .ls-phone:not(.ls-land) .ls-rail {
+    gap: 6px;
+    top: calc(env(safe-area-inset-top) + 70px);
+    bottom: auto;
+  }
+  .ls-rail-dot,
+  .ls-rail-item .ls-who-img {
+    width: 44px;
+    height: 44px;
+  }
+  .ls-rail-item {
+    font-size: 0.6875rem;
+  }
+}
+.ls-prop .ls-ph-stage .ls-stage-tag {
+  top: calc(env(safe-area-inset-top) + 84px);
 }
 .ls-land.ls-prop {
   grid-template-columns: minmax(0, 1fr);

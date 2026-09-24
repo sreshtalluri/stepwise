@@ -443,6 +443,12 @@ export const lesson = {
     zoneNext: "Next 8-count",
   },
 
+  menu: {
+    button: "More for this lesson",
+    removeMine: "Remove from my lessons",
+    report: "Report or remove this video",
+  },
+
   install: {
     lead: "Practising on this phone? Keep the lesson on your home screen.",
     ios: "Tap Share, then Add to Home Screen.",
