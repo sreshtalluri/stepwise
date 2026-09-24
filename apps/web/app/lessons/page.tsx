@@ -73,6 +73,7 @@ export default function MyLessonsPage() {
         </>
       )}
 
+      {Object.keys(LESSONS).length === 0 ? null : (
       <section className={s.examples}>
         <h2 className="constraints-heading">{copy.examplesHeading}</h2>
         <p className="meta">{copy.examplesNote}</p>
@@ -84,6 +85,7 @@ export default function MyLessonsPage() {
           ))}
         </ul>
       </section>
+      )}
     </main>
   );
 }

@@ -1,7 +1,18 @@
 import type { MotionResult } from "./motion";
 
-/** The dev fixtures the viewer can be pointed at. Built by `npm run assets`. */
-export const LESSONS: Record<string, { title: string }> = {
+/**
+ * The dev fixtures the viewer can be pointed at. Built by `npm run assets`.
+ *
+ * Development only. Their "videos" are generated colour-bar test cards with
+ * moving shapes, which on the public site read as a broken page, not an
+ * example. In a production build this is empty: no Examples list, no
+ * prerendered fixture routes, and /lesson/good-lesson is treated as an unknown
+ * job id. NEXT_PUBLIC_SHOW_EXAMPLES=1 turns them back on for a preview build.
+ */
+const EXAMPLES_ENABLED =
+  process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_SHOW_EXAMPLES === "1";
+
+const FIXTURES: Record<string, { title: string }> = {
   "good-lesson": { title: "Everything worked — one dancer, a full turn" },
   "failure-lesson": { title: "Cropped feet, an occluded arm, and a re-entry" },
   "two-dancers": { title: "Two dancers, with a crossing" },
@@ -18,6 +29,8 @@ export const LESSONS: Record<string, { title: string }> = {
   // One dancer travels, the other stays where their clip puts them.
   "unplaced-dancer": { title: "One dancer placed, one the pipeline could not place" },
 };
+
+export const LESSONS: Record<string, { title: string }> = EXAMPLES_ENABLED ? FIXTURES : {};
 
 /**
  * The job id out of a pasted lesson or processing link ("…/lesson/job_abc",
