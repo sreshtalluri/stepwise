@@ -209,3 +209,12 @@ test("link failure text is not duplicated client-side — §7h honesty boundary"
   // string: the one for "we never reached the service at all".
   assert.deepEqual(Object.keys(copy.upload.linkErrors), ["unreachable"]);
 });
+
+test("no em-dashes on the entry flow — flow redesign voice", () => {
+  // The landing, upload and processing surfaces were rewritten without them,
+  // and the stage messages the service sends now use commas too. The lesson's
+  // strings are not swept here: they predate the rule.
+  const entry: [string, string][] = [];
+  collect({ marketing: copy.marketing, upload: copy.upload, processing: copy.processing }, "copy", entry);
+  for (const [path, line] of entry) assert.ok(!line.includes("—"), `${path} has an em-dash: ${line}`);
+});

@@ -1,26 +1,25 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { upload as copy } from "../../lib/copy";
-import { rememberLocalClip } from "../../lib/jobStatus";
+import { PRODUCT_NAME, upload as copy } from "../../lib/copy";
+import { submitFile, submitLink, type Submitted } from "../../lib/submit";
 
 /**
- * The upload screen — docs/DESIGN.md §7d, §11.
+ * The upload screen: docs/DESIGN.md §7d, §11, laid out as the flow redesign's
+ * "Add a clip" (direction B). The link comes first because it saves the most
+ * steps; the file sits under an "or" and says it works for everyone, because
+ * links are invite-gated while we test.
  *
  * States the real constraints as *what works*, not as what is rejected, and
- * carries the rights line once, plainly (OPEN-DECISIONS.md D8).
+ * carries each rights line once, beside the door it belongs to
+ * (OPEN-DECISIONS.md D8, docs/research/link-ingestion.md).
  *
- * The constraints below were reconciled against PRD §5 "Multi-dancer, revised
- * 2026-09-18". "One dancer" is NOT a constraint any more: RTMO, ByteTrack and
- * the frozen contract's `persons` array are all multi-person, and the MVP
- * reconstructs every dancer with a picker for whose body you learn from
- * (DESIGN.md §7a2). Older copy in DESIGN.md §7d/§11 still says "one dancer" —
- * it predates the revision. Do not copy it back in.
+ * The constraints were reconciled against PRD §5 "Multi-dancer, revised
+ * 2026-09-18". "One dancer" is NOT a constraint any more. Older copy in
+ * DESIGN.md §7d/§11 still says "one dancer"; it predates the revision.
  */
-
-const MAX_SECONDS = 60;
-
 export default function UploadPage() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,168 +28,63 @@ export default function UploadPage() {
   const [url, setUrl] = useState("");
   const [invite, setInvite] = useState("");
 
-  /**
-   * The pasted-link door. Unlike a file, there is nothing to show the learner
-   * while this runs — the service has to fetch the video before there is a
-   * clip at all — so the button states what it is doing and the wait is a few
-   * seconds, not a few minutes. Measured against the builder's own clips: 1–3s
-   * when the link is already a lesson, 8–10s when it has to be fetched.
-   *
-   * Failure text comes from the service and is rendered as-is. The service is
-   * the only thing that saw the failure, and inventing a friendlier local
-   * sentence for it is exactly the §7h mistake — see lib/copy.ts's note.
-   */
-  async function handleLink() {
+  async function go(work: Promise<Submitted>) {
     setError(null);
-    if (!url.trim()) return;
     setBusy(true);
-    try {
-      const res = await fetch("/api/clips/link", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Invite-Code": invite },
-        body: JSON.stringify({ url: url.trim() }),
-      });
-      const body = (await res.json()) as {
-        job_id?: string;
-        detail?: { error?: { message?: string } };
-      };
-      if (!res.ok) {
-        setBusy(false);
-        setError(body.detail?.error?.message ?? copy.linkErrors.unreachable);
-        return;
-      }
-      // No blob URL to hand the processing screen: the clip lives on the
-      // service, and ProcessingScreen already falls back to fetching it.
-      router.push(`/job/${body.job_id}`);
-    } catch {
+    const out = await work;
+    if ("jobId" in out) router.push(`/job/${encodeURIComponent(out.jobId)}`);
+    else {
       setBusy(false);
-      setError(copy.linkErrors.unreachable);
-    }
-  }
-
-  async function handleFile(file: File) {
-    setError(null);
-    if (!file.type.startsWith("video/")) {
-      setError(copy.errors.wrongType);
-      return;
-    }
-    const seconds = await readDuration(file);
-    // A clip whose duration cannot be read is not rejected here — the service
-    // normalises with ffprobe and is the authority. Only a confidently
-    // over-long clip is stopped, to save the upload.
-    if (seconds !== null && seconds > MAX_SECONDS + 0.5) {
-      setError(copy.errors.tooLong);
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const body = new FormData();
-      // Field name and route both match services/motion-api's `POST /clips`.
-      // They did not before: this posted `video` to `/api/jobs`, which is not
-      // an endpoint the service has, so the file door has been 404ing since
-      // W7 built it against the fixture. Found while wiring the link door.
-      body.append("file", file);
-      const res = await fetch("/api/clips", { method: "POST", body });
-      if (!res.ok) {
-        // Same rule as the link door: when the service explains the failure
-        // (a 429 says when to come back), show its words, not ours.
-        const failed = (await res.json().catch(() => null)) as {
-          detail?: { error?: { message?: string } };
-        } | null;
-        setBusy(false);
-        setError(failed?.detail?.error?.message ?? copy.errors.uploadFailed);
-        return;
-      }
-      const { job_id: jobId } = (await res.json()) as { job_id: string };
-      // Not revoked: the processing screen plays this immediately, so there is
-      // no dead time while the job runs (DESIGN.md §7c).
-      rememberLocalClip(jobId, URL.createObjectURL(file));
-      router.push(`/job/${jobId}`);
-    } catch {
-      setBusy(false);
-      setError(copy.errors.uploadFailed);
+      setError(out.error);
     }
   }
 
   return (
-    <main className="wrap app-screen">
+    <main className="wrap app-screen add">
+      <nav className="site-nav" style={{ paddingLeft: 0, paddingRight: 0 }}>
+        <Link href="/" className="logo">{PRODUCT_NAME}</Link>
+      </nav>
       <h1 className="app-title">{copy.title}</h1>
-      <p className="muted">{copy.subtitle}</p>
 
-      <div
-        className="dropzone"
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
+      {/* The pasted-link door. A few seconds, not minutes: the service has to
+          fetch the video before there is a clip at all, so the button says it
+          is busy rather than routing to an empty processing screen. */}
+      <form
+        className="field"
+        onSubmit={(e) => {
           e.preventDefault();
-          const file = e.dataTransfer.files[0];
-          if (file) void handleFile(file);
+          if (url.trim()) void go(submitLink(url, invite));
         }}
       >
-        <button
-          type="button"
-          className="btn btn-lg"
-          disabled={busy}
-          onClick={() => inputRef.current?.click()}
-        >
-          {copy.choose}
-        </button>
-        <p className="meta" style={{ marginTop: 12 }}>
-          {copy.drop}
-        </p>
+        <label className="sr-only" htmlFor="clip-url">{copy.link.placeholder}</label>
         <input
-          ref={inputRef}
-          type="file"
-          accept="video/*"
-          hidden
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void handleFile(file);
-          }}
+          id="clip-url"
+          type="url"
+          inputMode="url"
+          autoComplete="off"
+          placeholder={copy.link.placeholder}
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
         />
+        <button type="submit" className="btn" disabled={busy || !url.trim()}>
+          {copy.link.submit}
+        </button>
+      </form>
+      <div className="invite">
+        <label className="sr-only" htmlFor="invite-code">{copy.link.inviteLabel}</label>
+        <input
+          id="invite-code"
+          type="text"
+          autoComplete="off"
+          placeholder={copy.link.inviteLabel}
+          value={invite}
+          onChange={(e) => setInvite(e.target.value)}
+        />
+        <span className="meta">{copy.link.gated}</span>
       </div>
-
-      <section className="link-ingest">
-        <h2 className="constraints-heading">{copy.link.heading}</h2>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void handleLink();
-          }}
-        >
-          <label className="sr-only" htmlFor="clip-url">
-            {copy.link.placeholder}
-          </label>
-          <input
-            id="clip-url"
-            type="url"
-            inputMode="url"
-            autoComplete="off"
-            placeholder={copy.link.placeholder}
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
-          <label className="sr-only" htmlFor="invite-code">
-            {copy.link.inviteLabel}
-          </label>
-          <input
-            id="invite-code"
-            type="text"
-            autoComplete="off"
-            placeholder={copy.link.invitePlaceholder}
-            value={invite}
-            onChange={(e) => setInvite(e.target.value)}
-          />
-          <button type="submit" className="btn" disabled={busy || !url.trim()}>
-            {copy.link.submit}
-          </button>
-        </form>
-        <p className="meta">{copy.link.gated}</p>
-        {/* The link rights line sits with the link field, not with the file
-            one: the two make different claims and must not be read as one.
-            See lib/copy.ts and docs/research/link-ingestion.md. */}
-        <p className="meta rights">{copy.link.rights}</p>
-      </section>
+      {/* The link rights line sits with the link field, not the file one: the
+          two make different claims and must not be read as one. */}
+      <p className="meta" style={{ marginTop: 14, maxWidth: "56ch" }}>{copy.link.rights}</p>
 
       {error && (
         <p role="alert" className="form-error">
@@ -198,33 +92,41 @@ export default function UploadPage() {
         </p>
       )}
 
-      <section className="constraints">
-        <h2 className="constraints-heading">{copy.worksBestHeading}</h2>
-        <ul>
-          {copy.worksBest.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-      </section>
+      <div className="or">{copy.or}</div>
 
-      <p className="meta rights">{copy.rights}</p>
+      <button
+        type="button"
+        className="dropzone"
+        disabled={busy}
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          const file = e.dataTransfer.files[0];
+          if (file) void go(submitFile(file));
+        }}
+      >
+        <b>{copy.choose}</b>
+        <span className="meta">{copy.drop}</span>
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="video/*"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void go(submitFile(file));
+        }}
+      />
+
+      <ul className="works" aria-label={copy.worksBestHeading}>
+        {copy.worksBest.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+
+      <p className="meta" style={{ marginTop: 22 }}>{copy.rights}</p>
     </main>
   );
-}
-
-/** Duration in seconds, or null if the browser cannot tell us. */
-function readDuration(file: File): Promise<number | null> {
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
-    const video = document.createElement("video");
-    video.preload = "metadata";
-    const done = (value: number | null) => {
-      URL.revokeObjectURL(url);
-      resolve(value);
-    };
-    video.onloadedmetadata = () =>
-      done(Number.isFinite(video.duration) ? video.duration : null);
-    video.onerror = () => done(null);
-    video.src = url;
-  });
 }

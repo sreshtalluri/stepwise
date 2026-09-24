@@ -370,54 +370,6 @@ button {
   letter-spacing: -0.02em;
 }
 
-.dropzone {
-  border: 1px dashed var(--line);
-  border-radius: 16px;
-  background: var(--paper-sunk);
-  padding: 40px 20px;
-  text-align: center;
-  margin-top: 24px;
-}
-
-/* The pasted-link door, under the dropzone. Quieter than the file control on
-   purpose: a file is the claim we can actually make something of, and DESIGN.md
-   §7d's "what works" framing puts the strongest path first. */
-.link-ingest {
-  margin-top: 28px;
-}
-
-.link-ingest form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.link-ingest input {
-  flex: 1 1 14ch;
-  min-height: 48px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--paper-sunk);
-  color: var(--ink);
-  font: inherit;
-}
-
-.link-ingest input#clip-url {
-  flex: 3 1 24ch;
-}
-
-.link-ingest input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.link-ingest .meta {
-  margin-top: 10px;
-  max-width: 60ch;
-}
-
 /* Visible to screen readers only — the two fields carry placeholders for
    sighted users, and a placeholder is not a label. */
 .sr-only {
@@ -440,46 +392,6 @@ button {
   padding: 12px 14px;
   border-radius: 0 8px 8px 0;
   max-width: 60ch;
-}
-
-.constraints {
-  margin-top: 32px;
-}
-
-.constraints-heading {
-  font-size: 0.9375rem;
-  font-weight: 600;
-}
-
-.constraints ul {
-  list-style: none;
-  margin-top: 8px;
-}
-
-.constraints li {
-  color: var(--ink-muted);
-  padding: 5px 0;
-  max-width: 60ch;
-}
-
-.rights {
-  margin-top: 28px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-
-.processing-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 20px;
-  margin-top: 24px;
-}
-
-@media (min-width: 900px) {
-  .processing-grid {
-    grid-template-columns: 1fr 1fr;
-    gap: 28px;
-  }
 }
 
 .tools {
@@ -509,41 +421,463 @@ button {
   max-width: 60ch;
 }
 
-.progress {
-  height: 3px;
-  background: var(--paper-sunk);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.progress i {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  border-radius: 2px;
-  transition: width 400ms var(--ease);
-}
-
-.stages ol {
-  list-style: none;
-  margin: 16px 0;
-  line-height: 1.9;
-}
-
-.stage-done {
-  color: var(--ink-muted);
-}
-
-.stage-now {
-  color: var(--ink);
-  font-weight: 600;
-}
-
 /* Phone: the nav is the logo and one action. The two section links collide
    with the wordmark below ~600px and are reachable by scrolling anyway. */
 @media (max-width: 599px) {
   .site-nav-link {
     display: none;
+  }
+}
+
+.tool:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.tool[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Fade-in for things that arrive while you watch (counts, a tip, the CTA).
+   Level-3 motion: one short opacity step, and nothing under reduced motion. */
+.appear {
+  animation: appear 600ms var(--ease) both;
+}
+@keyframes appear {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* --- the two front doors: a link field and a file ------------------------ */
+
+.field {
+  display: flex;
+  gap: 8px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 6px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  max-width: 560px;
+}
+.field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0 12px;
+  min-height: 52px;
+  font: inherit;
+  color: var(--ink);
+  outline: none;
+}
+.field:focus-within {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.field input::placeholder,
+.invite input::placeholder {
+  color: var(--ink-muted);
+}
+.field .btn {
+  min-height: 52px;
+  padding: 0 22px;
+  white-space: nowrap;
+}
+
+.invite {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-top: 10px;
+}
+.invite input {
+  width: 150px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--paper-sunk);
+  padding: 0 14px;
+  font: inherit;
+  font-size: 0.9375rem;
+  color: var(--ink);
+}
+.invite input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.invite .meta {
+  flex: 1 1 22ch;
+}
+
+.paste {
+  margin-top: 28px;
+}
+.paste .under {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+  margin-top: 16px;
+}
+.linkish {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-size: 0.9375rem;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+.paste-rights {
+  margin-top: 14px;
+  max-width: 52ch;
+}
+
+@media (max-width: 420px) {
+  .field {
+    flex-direction: column;
+  }
+  .field .btn {
+    width: 100%;
+  }
+}
+
+/* The hero's counting stage (components/CountingStage.tsx). */
+.counting-stage {
+  height: clamp(260px, 52vh, 460px);
+  touch-action: pan-y; /* nothing to drag here; let the page scroll */
+}
+.counting .count-strip {
+  margin-top: 18px;
+}
+
+/* The count strip, DESIGN.md §7 tier 2: weight and size carry the state.
+   No box, no pill, no second colour; one accent dot on the ticks. */
+.count-strip .counts {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  align-items: end;
+  gap: 4px;
+  min-height: clamp(2.25rem, 7vw, 3.5rem);
+}
+.count-strip .counts span {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.25rem, 4vw, 1.75rem);
+  letter-spacing: -0.02em;
+  color: var(--ink-muted);
+  text-align: center;
+  line-height: 1;
+}
+.count-strip .counts span.on {
+  font-weight: 800;
+  font-size: clamp(2rem, 7vw, 3.5rem);
+  color: var(--ink);
+}
+.count-strip .ticks {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  height: 10px;
+  margin-top: 10px;
+}
+.count-strip .ticks i {
+  height: 2px;
+  background: var(--line);
+  align-self: center;
+}
+.count-strip .ticks b {
+  position: absolute;
+  top: 0;
+  left: 6.25%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translateX(-50%);
+}
+
+/* --- add a clip (/upload) ------------------------------------------------ */
+
+.add {
+  max-width: 660px;
+  padding-top: 0;
+}
+.add .app-title {
+  margin-bottom: 24px;
+}
+.or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 26px 0;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+.or::before,
+.or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.dropzone {
+  width: 100%;
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 18px;
+  background: var(--paper-sunk);
+  border: 1.5px dashed var(--line);
+  transition: transform var(--t);
+}
+.dropzone:active {
+  transform: scale(0.99) translateY(1px);
+}
+.works {
+  list-style: none;
+  margin-top: 30px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+.works li {
+  font-size: 0.9375rem;
+  border-top: 2px solid var(--line);
+  padding-top: 10px;
+}
+@media (max-width: 700px) {
+  .works {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+}
+
+/* --- processing: practice while it builds (components/ProcessingScreen) -- */
+
+.rail {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--paper);
+}
+.rail-track {
+  height: 4px;
+  background: var(--paper-sunk);
+}
+.rail-track i {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transition: width 400ms linear;
+}
+.rail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 60px;
+}
+.rail-steps {
+  position: relative;
+  min-width: 0;
+}
+.rail-steps summary {
+  list-style: none;
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  align-content: center;
+  gap: 0 8px;
+}
+.rail-steps summary::-webkit-details-marker {
+  display: none;
+}
+.rail-steps summary b {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  text-decoration: underline dotted var(--ink-faint);
+  text-underline-offset: 4px;
+}
+.rail-steps ol {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  width: min(340px, calc(100vw - 32px));
+  list-style: none;
+  background: var(--paper);
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px var(--line), 0 12px 32px rgba(34, 30, 28, 0.12);
+  padding: 12px 16px;
+  font-size: 0.875rem;
+}
+.rail-steps li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid var(--line);
+}
+.rail-steps li span {
+  color: var(--ink-muted);
+  text-align: right;
+}
+.rail-steps li.step-done {
+  border-color: var(--accent);
+}
+.rail-steps li.step-now {
+  border-color: var(--ink);
+}
+.rail-steps li.step-wait b {
+  color: var(--ink-faint);
+  font-weight: 500;
+}
+.rail-steps li.step-close {
+  border: 0;
+  padding: 10px 0 0;
+}
+.rail .btn-sm {
+  flex: none;
+  min-height: 44px;
+}
+
+.proc-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 400px) 1fr;
+  gap: 48px;
+  align-items: start;
+  padding-top: 18px;
+  padding-bottom: 56px;
+  max-width: 1180px;
+}
+.proc-video {
+  height: min(76vh, 720px);
+  cursor: pointer;
+  touch-action: manipulation; /* .stage's `none` would trap page scroll on a phone */
+}
+.proc-mirror {
+  position: absolute;
+  inset: 0;
+}
+.proc-mirror video,
+.proc-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.proc-overlay {
+  pointer-events: none;
+}
+.proc-label {
+  z-index: 3;
+  color: #f2efe9;
+  text-shadow: 0 1px 3px rgba(18, 16, 15, 0.9);
+}
+.proc-paused {
+  top: auto;
+  bottom: 12px;
+  z-index: 3;
+  color: #f2efe9;
+}
+.proc-title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(1.75rem, 3.4vw, 2.5rem);
+  letter-spacing: -0.02em;
+  line-height: 1.02;
+}
+.proc-sub {
+  margin: 10px 0 26px;
+  color: var(--ink-muted);
+  max-width: 46ch;
+}
+.proc-part {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.proc-part b {
+  font-weight: 600;
+  font-size: 1.125rem;
+  letter-spacing: -0.01em;
+}
+.listening {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 86px;
+  color: var(--ink-muted);
+}
+.listening i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% { opacity: 0.25; }
+}
+.proc-tools {
+  margin-top: 24px;
+}
+.proc-go {
+  margin-top: 22px;
+  width: 100%;
+  max-width: 460px;
+  text-align: center;
+}
+.proc-tip {
+  margin-top: 30px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  min-height: 64px;
+}
+.proc-tip b {
+  font-weight: 600;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+.proc-tip span {
+  font-size: 0.9375rem;
+  color: var(--ink-muted);
+}
+
+@media (max-width: 900px) {
+  .proc-grid {
+    grid-template-columns: 1fr;
+    gap: 18px;
+    padding-top: 10px;
+  }
+  .proc-video {
+    height: 46vh;
+  }
+  .rail-steps summary .meta {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appear,
+  .listening i {
+    animation: none;
   }
 }
 

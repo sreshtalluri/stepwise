@@ -28,6 +28,7 @@ import {
 import { lesson as lessonCopy } from "../lib/copy";
 import { load, openingStructure, save } from "../lib/structure";
 import { prefersReducedMotion } from "../lib/reveal";
+import { parseHandoff } from "../lib/flow";
 // Relative, same as lib/motion.ts reaches into motion-contract — there is no
 // workspace root and no node_modules link between these packages.
 import { LessonNavigator } from "../../../packages/navigation/src/LessonNavigator";
@@ -476,6 +477,29 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
 
   const duration = doc.source_video.duration_s;
   const { timeRef, displayTime } = useVideoClock(video, loopTimes);
+
+  /**
+   * The processing screen's handoff (lib/flow.ts handoffHref): the learner was
+   * already practising a speed and an 8-count on the raw video, so the lesson
+   * opens on the same ones instead of starting them over. Read once, after the
+   * saved structure is restored, so the loop is clamped to the grid in use.
+   */
+  const [handoffStart, setHandoffStart] = useState<number | null>(null);
+  const handedOff = useRef(false);
+  useEffect(() => {
+    if (!restored || handedOff.current) return;
+    handedOff.current = true;
+    const h = parseHandoff(window.location.search, SPEEDS, structure.grid.countTotal);
+    if (h.speed) setSpeed(h.speed);
+    if (h.loop) {
+      setLoopSpan(h.loop);
+      setMode("loop");
+      setHandoffStart(loopTimesS(structure.grid, h.loop)[0]);
+    }
+  }, [restored, structure]);
+  useEffect(() => {
+    if (video && handoffStart !== null) video.currentTime = Math.max(0, handoffStart);
+  }, [video, handoffStart]);
   // The overlay is drawn in the frame's own coordinates, so the video under it must
   // not be cropped (ponytail: crop-follow is simply off in overlay; apply the same
   // transform to the overlay canvas if both are ever wanted at once).

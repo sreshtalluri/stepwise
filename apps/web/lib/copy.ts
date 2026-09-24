@@ -24,28 +24,33 @@ export const marketing = {
   },
 
   hero: {
-    // Verbatim from DESIGN.md §7d, where the banned overclaim ("Every angle,
-    // even ones the camera never shot") was corrected to exactly this line.
-    headlineLead: "Every angle,",
-    headlineAccent: "from the one video you have.",
+    // Flow redesign (direction A's paste-in-hero landing), replacing §7d's
+    // "Every angle, from the one video you have." The claim is the count
+    // structure plus a synthesised VIEWPOINT of a tracked body, both honest
+    // under §7h. No processing time: see steps[1] below.
+    headlineLead: "Learn any dance,",
+    headlineAccent: "count by count.",
     lede:
-      "Upload a clip filmed on one camera. Get the dancer back as a 3D body you can spin, slow down, and take one count at a time.",
+      "Paste a TikTok or YouTube link. You get the dancer as a 3D body you can walk around, split into 8-counts.",
     primary: "Try it free",
-    secondary: "See how it works",
     // DESIGN.md §7e, verbatim.
     noAccount: "No account. Works in your browser.",
-    dragHint: "Drag to spin",
   },
 
-  // Non-front presets are labelled "estimated view" and the front one
-  // "camera view" — DESIGN.md §4. The labels are not decoration: they are the
-  // honesty affordance, and they appear on the marketing hero too.
-  views: [
-    { id: "front", label: "Front", note: "camera view" },
-    { id: "side", label: "Side", note: "estimated view" },
-    { id: "back", label: "Back", note: "estimated view" },
-    { id: "top", label: "Top", note: "estimated view" },
-  ],
+  // The paste box in the hero. Same endpoint and same invite gate as /upload.
+  paste: {
+    label: "Video link",
+    placeholder: "Paste a TikTok or YouTube link",
+    submit: "Build the lesson",
+    busy: "Fetching the video",
+    orFile: "or add a video file",
+    inviteLabel: "Invite code",
+    // Says what still works for everyone, like upload.link.gated (§11).
+    inviteNote: "Links need an invite code while we test. A video file works for everyone.",
+    // The stage beside it is an abstract figure, not a clip: no cleared demo
+    // clip exists (see app/page.tsx), so it says what it is showing.
+    stageLabel: "Every lesson is counted in eights",
+  },
 
   proof: {
     // Both lines are the corrected forms recorded in DESIGN.md §7h. The second
@@ -55,7 +60,7 @@ export const marketing = {
     heading: "Filmed from the front. Watch it from the side.",
     body:
       "A phone films one angle. The step you need is often side-on or from above. When the dancer turns away the body is still tracked, so you can orbit round and see what their arms were doing.",
-    leftLabel: "The clip — front only",
+    leftLabel: "The clip, front only",
     rightLabel: "Same moment, from the side",
     caveat:
       "What the camera could not see is marked instead of invented: solid means seen, sketchy means unsure, dotted means out of frame.",
@@ -65,7 +70,7 @@ export const marketing = {
     heading: "Three steps.",
     items: [
       {
-        title: "Upload a clip",
+        title: "Paste a link or add a file",
         // Reconciled against PRD §5 "Multi-dancer, revised 2026-09-18".
         // Deliberately not "one dancer" — that cap was removed.
         body:
@@ -97,9 +102,9 @@ export const marketing = {
 
 export const upload = {
   title: "Add a clip",
-  subtitle: "One video, filmed on one camera.",
-  choose: "Choose a video",
-  drop: "or drop it here",
+  choose: "Choose a video file",
+  drop: "or drop it here. Works for everyone.",
+  or: "or",
 
   // The pasted-link door. PRD §5 listed paste-a-link as out of v1; the scope
   // note there was updated when this shipped, rather than left contradicting
@@ -110,11 +115,9 @@ export const upload = {
   // link is a weaker claim than a file, and the copy must not pretend
   // otherwise.
   link: {
-    heading: "Or paste a link",
-    placeholder: "TikTok or YouTube link",
+    placeholder: "Paste a TikTok or YouTube link",
     submit: "Get the lesson",
     inviteLabel: "Invite code",
-    invitePlaceholder: "Your code",
     // Says who it is open to and what still works for everyone else. Not
     // "coming soon" — that names a date we have not got.
     gated:
@@ -155,7 +158,7 @@ export const upload = {
   worksBest: [
     "Filmed from the front, on one camera held still.",
     "Up to 60 seconds, with no cuts between shots.",
-    "One dancer or several — you pick whose body you learn from.",
+    "One dancer or several. You pick whose body you learn from.",
   ],
 
   // The rights line appears here, once, plainly — DESIGN.md §7d,
@@ -171,11 +174,69 @@ export const upload = {
   },
 };
 
+/**
+ * The processing screen: "practice while it builds" (flow redesign, direction
+ * B, with A's per-step results). The page turns into a warm-up the moment the
+ * counts land, so its title changes with what is actually known.
+ */
 export const processing = {
-  title: "Building your lesson",
-  subtitle: "You can already use the video while the 3D is made.",
-  videoLabel: "Your clip — playing now",
-  toolsNote: "These work on the video right now.",
+  // Before the counts. "Hear the beat" is literal: they come from the audio.
+  title: "Start on the video while the 3D is built.",
+  subtitle: "Slow it down and loop it. The counts show up as soon as we hear the beat.",
+  // Once `milestones.counts` has landed.
+  countsTitle: "Found the beat. Learn the first 8.",
+  countsSubtitle: "This is how the lesson is split. Loop one 8-count until it sticks, then move on.",
+  // At success: the handoff, carrying speed and loop into the lesson.
+  readyTitle: "Ready. Same counts, now in 3D.",
+  readySubtitle: "Your loop and speed carry over.",
+  open: "Open the lesson",
+
+  videoLabel: "Your clip, playing now",
+  paused: "Paused. Tap to play.",
+  listening: "Listening for the beat",
+  part: (from: number, to: number) => `Counts ${from} to ${to}`,
+  // The counts are a PROPOSAL from the music, the same one the lesson opens
+  // on and labels as a guess (lesson.counts). Tempo is "a minute", never BPM.
+  tempo: (perMinute: number) => `${perMinute} a minute, from the music`,
+  tempoWeak: (perMinute: number) => `${perMinute} a minute, a rough guess from the music`,
+  practice: "Practice counts 1 to 8 at half speed",
+  earlier: "Earlier 8",
+  next: "Next 8",
+  loopEight: (from: number, to: number) => `Loop ${from}–${to}`,
+  soundOn: "Sound on",
+  soundOff: "Sound off",
+
+  // One at a time, rotated while the counts are up (direction B).
+  tipLabel: "While you wait",
+  tips: [
+    "Say the counts out loud. The 5, 6, 7, 8 before a part is your cue to start.",
+    "Mirror on flips the clip, so their right hand is on your right.",
+    "Get the feet first. Add the arms once the steps feel automatic.",
+    "Half speed is for learning the shape. Go back to full speed to learn the timing.",
+  ],
+
+  // A's steps, each with the result it produced. Every "done" note is a
+  // milestone the service sent, never a guess from the progress fraction.
+  steps: {
+    clip: "Clip",
+    playing: "Playing now",
+    dancers: "Dancers",
+    looking: "Looking frame by frame",
+    dancersFound: (n: number) => (n === 1 ? "1 dancer" : `${n} dancers`),
+    counts: "Counts",
+    listening: "Listening",
+    noneYet: "None yet. You can set them in the lesson.",
+    countsInLesson: "Set in the lesson",
+    countsTempo: (perMinute: number) => `${perMinute} a minute`,
+    countsFound: (perMinute: number, eights: number) => `${perMinute} a minute, ${eights} eight-counts`,
+    body: "3D body",
+    frames: (done: number, total: number) => `Frame ${done} of ${total}`,
+    eights: (done: number, total: number) => `${done} of ${total} eight-counts built`,
+    finishing: "Putting it on the floor",
+    ready: "Ready",
+  },
+  waiting: "Waiting in the queue",
+  unreachable: "We cannot reach the job right now. It keeps running, and this page will catch up.",
 
   // DESIGN.md §7c: honest about it being a queue, not a session.
   closeable: "You can close this. The link keeps working.",
@@ -191,22 +252,11 @@ export const processing = {
   speed: (rate: number) => `${rate}× speed`,
   mirrorOn: "Mirror on",
   mirrorOff: "Mirror off",
-  loopOn: "Loop on",
   loopOff: "Loop off",
 
   failedTitle: "This clip did not make it through",
   retry: "Try again",
 };
-
-export const reveal = {
-  // The orbit itself is the teaching moment — no tooltip, no modal (§7f).
-  // This single line is the fallback for people in reduced-motion, who never
-  // see the orbit.
-  hint: "Drag the body to look from another side.",
-};
-
-/** Legend under every 3D stage — DESIGN.md §4, one persistent line. */
-export const legend = "Solid = seen · sketchy = unsure · dotted = out of frame";
 
 export const lesson = {
   /**
