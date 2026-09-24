@@ -2,12 +2,16 @@
  * The lesson's practice logic, as data. Pure: no React, no video, no three.js —
  * tested in lessonEngine.test.ts.
  *
- * One mode, nothing forced: a row of chips (the learner's own parts, one per eight
- * until they edit them) to find your way, and a loop of any run of counts — 2, 4 or 8
- * from a chip or a count, a range dragged across either, or the whole dance — with an
- * optional build-up that starts a loop at 0.5× and adds a tenth each pass. The page's
- * one clock (the video, `useVideoClock`) counts the passes; everything here is read
- * off that count.
+ * One mode, nothing forced: the whole dance plays through with its counts shown until
+ * the learner makes a loop — dragged across the timeline from any count or "and" to
+ * any other, or a shortcut (a chip, a preset length) — with an optional build-up that
+ * starts a loop at 0.5× and adds a tenth each pass. The page's one clock (the video,
+ * `useVideoClock`) counts the passes; everything here is read off that count.
+ *
+ * Loop edges are counts or halves ("the and"). A loop {startCount, endCount} plays
+ * [startCount, endCount + 1) in count coordinates, so whole-count loops mean what they
+ * always did ("Counts 9–16" runs up to the next 1) and a half edge shifts the run by
+ * half a count: {3.5, 6} is "3& – 6", from the and of 3 through count 6.
  */
 import { partRanges } from "../../../packages/navigation/src/core";
 import type { LessonStructure, LoopSpan } from "../../../packages/navigation/src/core";
@@ -37,11 +41,41 @@ export function eightsOf(structure: LessonStructure): Eight[] {
 export const sameSpan = (a: LoopSpan | null, b: LoopSpan | null) =>
   !!a && !!b && a.startCount === b.startCount && a.endCount === b.endCount;
 
-/** How many counts a tap loops. The learner picks; 8 until they do. */
-export const LOOP_LENGTHS = [2, 4, 8] as const;
+/** How many counts a chip or a preset loops; 0 = all of it. The learner picks; 8 until they do. */
+export const LOOP_ALL = 0;
+export const LOOP_LENGTHS = [2, 4, 8, 16, LOOP_ALL] as const;
 export const DEFAULT_LOOP_LENGTH = 8;
+/** The counts a preset really is: "All" is the whole dance. */
+export const presetCounts = (len: number, total: number) => (len === LOOP_ALL ? total : len);
 
-const clampCount = (c: number, total: number) => Math.max(1, Math.min(Math.round(c), total));
+/** Snapped to the nearest count or "and". */
+export const snapHalf = (c: number) => Math.round(c * 2) / 2;
+const clampCount = (c: number, total: number) => Math.max(1, Math.min(snapHalf(c), total));
+
+/** How many counts a loop runs for (3& – 6 is 3.5). */
+export const loopLength = (s: LoopSpan) => s.endCount - s.startCount + 1;
+
+/**
+ * A loop between two edges on the timeline, in count coordinates (either order; the
+ * later edge is where the loop stops). Snapped to counts and "and"s unless `free`
+ * (then to a hundredth of a count). Null when shorter than one count.
+ */
+export function edgeLoop(a: number, b: number, total: number, free = false): LoopSpan | null {
+  const q = (c: number) => Math.max(1, Math.min(free ? Math.round(c * 100) / 100 : snapHalf(c), total + 1));
+  const s = q(Math.min(a, b));
+  const e = q(Math.max(a, b));
+  return e - s >= 1 ? { startCount: s, endCount: Math.round((e - 1) * 100) / 100 } : null;
+}
+
+/** One edge moved by `delta` counts (±½ from the nudge buttons); never shorter than one count. */
+export function nudgeEdge(loop: LoopSpan, edge: "start" | "end", delta: number, total: number): LoopSpan {
+  if (edge === "start") return { ...loop, startCount: Math.max(1, Math.min(loop.startCount + delta, loop.endCount)) };
+  return { ...loop, endCount: Math.max(loop.startCount, Math.min(loop.endCount + delta, total)) };
+}
+
+/** "3", "3&" — a count or its "and"; a free edge to a tenth. */
+export const countName = (c: number) =>
+  Number.isInteger(c) ? String(c) : Number.isInteger(c * 2) ? `${Math.floor(c)}&` : c.toFixed(1);
 
 /** `len` counts from `start`, cut short at the end of the dance. */
 export function loopAt(start: number, len: number, total: number): LoopSpan {
@@ -91,7 +125,7 @@ export function stepLoop(loop: LoopSpan | null, hereCount: number, len: number, 
     const start = loop.endCount + 1 + (delta - 1) * len;
     return start > total ? loop : loopAt(start, len, total);
   }
-  if (delta < 0) return loop.startCount === 1 ? loop : loopAt(Math.max(1, loop.startCount + delta * len), len, total);
+  if (delta < 0) return loop.startCount <= 1 ? loop : loopAt(Math.max(1, loop.startCount + delta * len), len, total);
   return loopAt(loop.startCount, len, total);
 }
 
@@ -111,7 +145,12 @@ export function buildUpSpeed(passes: number): number {
 }
 
 /** "Counts 9–16" — the coordinate is counts, never a timestamp (DESIGN.md §12.7). */
-export const spanLabel = (s: LoopSpan) => (s.startCount === s.endCount ? `Count ${s.startCount}` : `Counts ${s.startCount}–${s.endCount}`);
+export const spanLabel = (s: LoopSpan) =>
+  s.startCount === s.endCount ? `Count ${countName(s.startCount)}` : `Counts ${countName(s.startCount)}–${countName(s.endCount)}`;
+
+/** The timeline's readout: "Loop 3& – 6". */
+export const loopName = (s: LoopSpan) =>
+  s.startCount === s.endCount ? `Loop count ${countName(s.startCount)}` : `Loop ${countName(s.startCount)} – ${countName(s.endCount)}`;
 
 // ------------------------------------------------------------ done at full speed
 
@@ -119,7 +158,8 @@ export const spanLabel = (s: LoopSpan) => (s.startCount === s.endCount ? `Count 
  * Which counts this browser has looped at full speed, per lesson — a true fact the
  * page shows with a quiet tick (DESIGN.md §7g: no points, no streaks). Counts, not
  * chips, so a loop of any length earns its ticks; a chip gets its tick once every
- * count in it has one. Same seam as lib/structure.ts: localStorage, wrapped so
+ * count in it has one. A loop with a half-count edge ticks the whole counts it plays
+ * beat to beat: 3& – 6 ticks 4, 5 and 6, not 3. Same seam as lib/structure.ts: localStorage, wrapped so
  * private mode costs the ticks, never the lesson.
  */
 const DONE_KEY = (lessonId: string) => `stepwise.lesson-full-speed.v2.${lessonId}`;
@@ -129,12 +169,12 @@ const DONE_KEY_V1 = (lessonId: string) => `stepwise.lesson-full-speed.v1.${lesso
 /** One pass of `loop` at full speed: every count in it is done. */
 export function markDone(done: ReadonlySet<number>, loop: LoopSpan): Set<number> {
   const next = new Set(done);
-  for (let c = loop.startCount; c <= loop.endCount; c++) next.add(c);
+  for (let c = Math.ceil(loop.startCount); c <= Math.floor(loop.endCount); c++) next.add(c);
   return next;
 }
 
 export function spanDone(done: ReadonlySet<number>, s: LoopSpan): boolean {
-  for (let c = s.startCount; c <= s.endCount; c++) if (!done.has(c)) return false;
+  for (let c = Math.ceil(s.startCount); c <= Math.floor(s.endCount); c++) if (!done.has(c)) return false;
   return true;
 }
 
@@ -170,7 +210,8 @@ const LEN_KEY = (lessonId: string) => `stepwise.lesson-loop-length.v1.${lessonId
 
 export function loadLoopLength(lessonId: string): number {
   try {
-    const n = Number(window.localStorage.getItem(LEN_KEY(lessonId)));
+    const raw = window.localStorage.getItem(LEN_KEY(lessonId));
+    const n = raw ? Number(raw) : NaN; // Number(null) is 0, which is "All"
     return (LOOP_LENGTHS as readonly number[]).includes(n) ? n : DEFAULT_LOOP_LENGTH;
   } catch {
     return DEFAULT_LOOP_LENGTH;
