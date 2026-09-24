@@ -475,7 +475,11 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
 
   const duration = doc.source_video.duration_s;
   const { timeRef, displayTime } = useVideoClock(video, loopTimes);
-  const crop = useVideoCrop(video, doc, focusRef, follow, mirrored);
+  // The overlay is drawn in the frame's own coordinates, so the video under it must
+  // not be cropped (ponytail: crop-follow is simply off in overlay; apply the same
+  // transform to the overlay canvas if both are ever wanted at once).
+  const overlay = view === "overlay";
+  const crop = useVideoCrop(video, doc, focusRef, follow && !overlay, mirrored);
   const travels = travelsMeaningfully(doc, selected);
 
   useEffect(() => {
@@ -564,14 +568,14 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
 
       <div className="stages">
         <section className={stageClass("3d")}>
-          <span className="view-label">{viewLabel(view, mirrored)}</span>
+          <span className="view-label">{viewLabel(overlay ? "camera" : view, mirrored)}</span>
           <button className="swap" onClick={() => setPromoted(promoted === "3d" ? "none" : "3d")}>
             {promoted === "3d" ? "Show both" : "Show larger"}
           </button>
           <Stage3D
             doc={doc}
             selectedIndex={selected}
-            view={view}
+            view={overlay ? "camera" : view}
             mirrored={mirrored}
             timeRef={timeRef}
             follow={follow}
@@ -600,7 +604,9 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
         <section className={stageClass("video")}>
           {/* A cropped camera view is still camera evidence, but it is no longer the
               framing the phone shot — so it says so. Never a silent crop (§7h). */}
-          <span className="view-label">{crop.cropped ? "camera view · cropped" : "camera view"}</span>
+          <span className="view-label">
+            {overlay ? viewLabel("overlay", mirrored) : crop.cropped ? "camera view · cropped" : "camera view"}
+          </span>
           <button className="swap" onClick={() => setPromoted(promoted === "video" ? "none" : "video")}>
             {promoted === "video" ? "Show both" : "Show larger"}
           </button>
@@ -615,13 +621,38 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
           />
+          {/* SPIKE: the body over the video, from the source camera. Semi-transparent
+              as a whole layer so the dancer shows through — not an uncertainty
+              encoding (§12.4 still holds: the region materials carry that). Mirrored
+              by CSS with the video, never on the mesh, so the two flip together. */}
+          {overlay && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                opacity: 0.55,
+                pointerEvents: "none",
+                transform: mirrored ? "scaleX(-1)" : undefined,
+              }}
+            >
+              <Stage3D
+                doc={doc}
+                selectedIndex={selected}
+                view="overlay"
+                mirrored={false}
+                timeRef={timeRef}
+                glbUrls={glbUrls}
+                overlay
+              />
+            </div>
+          )}
           {/* Hidden when the video pane itself is demoted to a 96px strip (D2) —
               there is no room to make a close-up legible, and the strip is
               already the close-up-of-everything at that point. Placed in the
               video stage only, so it can never crowd the 3D stage or (being
               absolutely positioned inside a fixed-height box) the count strip
               below the stages. */}
-          {showCrops && promoted !== "3d" && (
+          {showCrops && promoted !== "3d" && !overlay && (
             <div className="crop-peek-group">
               <CropPeek video={video} doc={doc} timeRef={timeRef} personIndex={selected} region="hands" mirrored={mirrored} />
               <CropPeek video={video} doc={doc} timeRef={timeRef} personIndex={selected} region="feet" mirrored={mirrored} />
@@ -648,7 +679,7 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
               aria-pressed={view === preset.id}
             >
               {preset.label}
-              {preset.id !== "camera" && <small>est.</small>}
+              {preset.id !== "camera" && preset.id !== "overlay" && <small>est.</small>}
             </button>
           ))}
         </div>
@@ -727,7 +758,7 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }
 
       {compareView && (
         <div className="chips views second" role="group" aria-label="Second angle">
-          {VIEW_PRESETS.map((preset) => (
+          {VIEW_PRESETS.filter((p) => p.id !== "overlay").map((preset) => (
             <button
               key={preset.id}
               className={`chip ${compareView === preset.id ? "on" : ""}`}

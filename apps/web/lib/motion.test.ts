@@ -20,6 +20,7 @@ import {
   scoreDancers,
   dancerColor,
   projectToFrame,
+  sourceProjection,
   viewLabel,
   followStep,
   damp,
@@ -184,11 +185,35 @@ test("projectToFrame puts the dancer inside the frame and rejects points behind 
   assert.equal(projectToFrame(good, [0, 1, 20]), null);
 });
 
+test("sourceProjection lands a world point on the element pixel projectToFrame names", () => {
+  // Overlay contract: the canvas over a contain-fitted <video> must agree with the
+  // source camera, letterbox included. Both a wider and a taller element than the frame.
+  // Plus an off-centre principal point, which a centred fixture would never exercise.
+  const i0 = good.camera.intrinsics;
+  const offCentre = { ...good, camera: { ...good.camera, intrinsics: { ...i0, cx: i0.cx * 0.8, cy: i0.cy * 1.1 } } };
+  const p = good.persons[0].root_trajectory[0].position as [number, number, number];
+  const { reference_width_px: W, reference_height_px: H } = i0;
+  const m = good.camera.camera_to_world; // world -> camera, as projectToFrame does it
+  const d = [p[0] - m[12], p[1] - m[13], p[2] - m[14]];
+  const c = [0, 4, 8].map((k) => m[k] * d[0] + m[k + 1] * d[1] + m[k + 2] * d[2]);
+  for (const doc of [good, offCentre]) for (const [elW, elH] of [[900, 300], [300, 900]]) {
+    const uv = projectToFrame(doc, p)!;
+    const P = sourceProjection(doc, elW, elH);
+    const w = P[12] * c[0] + P[13] * c[1] + P[14] * c[2] + P[15];
+    const x = ((P[0] * c[0] + P[1] * c[1] + P[2] * c[2] + P[3]) / w + 1) / 2 * elW;
+    const y = (1 - (P[4] * c[0] + P[5] * c[1] + P[6] * c[2] + P[7]) / w) / 2 * elH;
+    const s = Math.min(elW / W, elH / H);
+    assert.ok(Math.abs(x - ((elW - W * s) / 2 + uv.x * s)) < 1e-6, `x at ${elW}x${elH}`);
+    assert.ok(Math.abs(y - ((elH - H * s) / 2 + uv.y * s)) < 1e-6, `y at ${elW}x${elH}`);
+  }
+});
+
 test("only the camera preset may call itself camera evidence", () => {
   assert.equal(viewLabel("camera", false), "camera · camera view");
   assert.equal(viewLabel("side", false), "side · estimated view");
   assert.equal(viewLabel("front", false), "front · estimated view");
   assert.equal(viewLabel("top", true), "top · mirrored · estimated view");
+  assert.equal(viewLabel("overlay", false), "on video · camera view");
 });
 
 /* ------------------------------------------------------- world placement */

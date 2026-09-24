@@ -16,6 +16,7 @@ import {
   damp,
   rootPlacementObserved,
   rootPositionAt,
+  sourceProjection,
   FOLLOW,
   VIEW_PRESETS,
   type MotionResult,
@@ -354,10 +355,18 @@ function Floor({ doc }: { doc: MotionResult }) {
       {/* A real surface first. Mockup finding §13.2: a 1px line is not a floor — the
           material has to sit clearly above --stage so the horizon is unmistakable.
           The fog below is what turns the far edge into that horizon rather than a
-          hard disc rim. */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+          hard disc rim.
+
+          Drawn first and without writing depth, so it can never hide the body. The
+          plane is a fit, not a surface: on real solo-02 the posed foot mesh dips
+          2–6 cm below it on most frames (the sole sits under the ball joint the
+          grounding solve measures), and a depth-tested disc sliced the toes off
+          flat. The mesh is evidence; the fitted plane does not get to occlude it.
+          The camera cannot orbit under the floor (maxPolarAngle), so nothing that
+          should be hidden by it ever is. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow renderOrder={-1}>
         <circleGeometry args={[18, 64]} />
-        <meshStandardMaterial color="#8E8071" roughness={0.95} metalness={0} />
+        <meshStandardMaterial color="#8E8071" roughness={0.95} metalness={0} depthWrite={false} />
       </mesh>
     </group>
   );
@@ -481,6 +490,26 @@ function frameRadius(bounds: THREE.Box3, cam: THREE.PerspectiveCamera, margin: n
   const halfV = THREE.MathUtils.degToRad(cam.fov) / 2;
   const halfH = Math.atan(Math.tan(halfV) * cam.aspect);
   return Math.max(size.y / 2 / Math.tan(halfV), Math.max(size.x, size.z) / 2 / Math.tan(halfH)) * 1.18 * margin;
+}
+
+/**
+ * The overlay view's camera: the clip's own camera, pose from `camera_to_world` and
+ * projection from the intrinsics, fitted to the canvas the way `object-fit: contain`
+ * fits the video under it. No orbit, no follow — the one angle that is not estimated.
+ */
+function SourceCamera({ doc }: { doc: MotionResult }) {
+  const { camera, size } = useThree();
+  useEffect(() => {
+    new THREE.Matrix4().fromArray(doc.camera.camera_to_world).decompose(camera.position, camera.quaternion, new THREE.Vector3());
+    camera.updateMatrixWorld();
+  }, [camera, doc]);
+  // Every frame, not on resize: R3F rewrites the projection from fov/aspect whenever
+  // the canvas resizes, and would silently undo this.
+  useFrame(() => {
+    camera.projectionMatrix.set(...(sourceProjection(doc, size.width, size.height) as Parameters<THREE.Matrix4["set"]>));
+    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+  });
+  return null;
 }
 
 /**
@@ -658,6 +687,11 @@ export interface Stage3DProps {
    * moved `animation` into PersonResult.
    */
   glbUrls: string[];
+  /**
+   * Render from the source camera onto a transparent canvas, for laying over the
+   * `<video>` (the "overlay" view). Drops floor, backdrop, orbit and follow.
+   */
+  overlay?: boolean;
 }
 
 export default function Stage3D({
@@ -671,6 +705,7 @@ export default function Stage3D({
   onAbsent,
   onResetView,
   glbUrls,
+  overlay = false,
 }: Stage3DProps) {
   const ownFocusRef = useRef<Focus | null>(null);
   const focusRef = externalFocusRef ?? ownFocusRef;
@@ -690,13 +725,16 @@ export default function Stage3D({
         onResetView?.();
         setResetKey((k) => k + 1);
       }}
-      gl={{ antialias: true }}
+      gl={{ antialias: true, alpha: overlay }}
     >
-      <color attach="background" args={["#1C1917"]} />
+      {/* Overlay: transparent canvas over the video — no backdrop, fog or floor to
+          cover the real room. */}
+      {!overlay && <color attach="background" args={["#1C1917"]} />}
       {/* The far edge of the floor dissolving into the backdrop IS the horizon. */}
-      <fog attach="fog" args={["#1C1917", 9, 24]} />
-      <Lights doc={doc} grounded={doc.grounding.status === "grounded"} />
-      <Floor doc={doc} />
+      {!overlay && <fog attach="fog" args={["#1C1917", 9, 24]} />}
+      <Lights doc={doc} grounded={!overlay && doc.grounding.status === "grounded"} />
+      {!overlay && <Floor doc={doc} />}
+      {overlay && <SourceCamera doc={doc} />}
       {doc.persons.map((person, i) => (
         <Dancer
           key={person.person_id}
@@ -712,19 +750,19 @@ export default function Stage3D({
       ))}
       {/* No `selectedIndex` in the key any more: a remount is a hard cut, and with
           follow on a nearby dancer should be glided to instead. ViewRig decides. */}
-      <ViewRig
+      {!overlay && <ViewRig
         key={`${view}-${resetKey}`}
         view={view}
         follow={follow}
         selectedIndex={selectedIndex}
         focusRef={focusRef}
         controlsRef={controlsRef}
-      />
+      />}
       {/* Orbit, damped, clamped so the camera never flips over the pole or goes
           under the floor. Pan is off: dragging the stage always orbits, and scrubbing
           only ever happens on the bars (OPEN-DECISIONS C3 — still open, this is the
           lean recorded there). */}
-      <OrbitControls
+      {!overlay && <OrbitControls
         ref={controlsRef}
         makeDefault
         enablePan={false}
@@ -734,7 +772,7 @@ export default function Stage3D({
         maxPolarAngle={1.52}
         minDistance={0.4}
         maxDistance={9}
-      />
+      />}
     </Canvas>
   );
 }
