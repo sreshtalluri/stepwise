@@ -242,7 +242,7 @@ export const lesson = {
    * on `notReady` — which is why that line does not promise the lesson exists.
    */
   load: {
-    loading: "Loading the lesson.",
+    loading: "Getting your lesson ready",
     jobTitle: "Your lesson",
     notReady: "This lesson is not ready yet.",
     notReadyLink: "See how it is going",

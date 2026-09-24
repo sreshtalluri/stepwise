@@ -923,3 +923,42 @@
     transition: none !important;
   }
 }
+
+/* ------------------------------------------------ lesson loading screen */
+/* "Quiet dancer": a small drawn figure, eight count dots, one line. */
+
+.ll {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--gut, 16px);
+}
+.ll-quiet {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+}
+.ll-dots {
+  display: flex;
+  gap: 7px;
+}
+.ll-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line);
+  transition: background 120ms, transform 120ms;
+}
+.ll-dots i.ll-on {
+  background: var(--accent);
+  transform: scale(1.35);
+}
+.ll-title {
+  margin: 0;
+  font: 600 15px/1.3 var(--font-body, system-ui);
+  color: var(--ink);
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ll-dots i { transition: none; }
+}
