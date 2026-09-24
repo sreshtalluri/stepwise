@@ -20,7 +20,7 @@ export const marketing = {
   nav: {
     examples: "Examples",
     howItWorks: "How it works",
-    openApp: "Open the app",
+    openApp: "Add a clip",
   },
 
   hero: {
@@ -97,7 +97,7 @@ export const marketing = {
 
 export const upload = {
   title: "Add a clip",
-  subtitle: "One video, filmed on one camera. It stays yours.",
+  subtitle: "One video, filmed on one camera.",
   choose: "Choose a video",
   drop: "or drop it here",
 
