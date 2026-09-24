@@ -24,6 +24,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
+class _FakeModalInvalidError(Exception):
+    """Stands in for modal.exception.InvalidError, which is what the real
+    Volume raises for a missing path -- see FakeVolume.remove_file."""
+
+
 class FakeVolume:
     """Enough of modal.Volume for these handlers: the parts that move bytes."""
 
@@ -61,7 +66,14 @@ class FakeVolume:
 
     def remove_file(self, path, recursive=False):
         if path not in self.files:
-            raise FileNotFoundError(path)
+            # Matches the real client, which does NOT raise FileNotFoundError:
+            # modal.Volume.remove_file raises modal.exception.InvalidError with
+            # this exact message. Faking FileNotFoundError here is what let the
+            # takedown path ship broken -- clip_artifact_paths is deliberately a
+            # superset of reality, so the first absent artifact aborted
+            # delete_clip with a 500 and no tombstone. Verified against the real
+            # Volume 2026-09-20. Do not "simplify" this back.
+            raise _FakeModalInvalidError("No such file or directory.")
         del self.files[path]
 
     def commit(self):

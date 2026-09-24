@@ -46,6 +46,21 @@ fingerprinting. Not a Python dependency and not linked against -- invoked as a
 subprocess, so no licence reaches this repo. Optional: without them the
 service still runs and still dedupes byte-identical re-uploads, it just stops
 catching re-encodes (and says so in the log rather than pretending).
+
+**Link ingestion** (`POST /clips` with a `url` field instead of a file) adds a
+second binary, `yt-dlp`, and one deliberate scope change -- docs/PRD.md §5
+listed paste-a-link as out of v1 and has been *updated*, not quietly
+contradicted. Read ingest.py's docstring and docs/research/link-ingestion.md
+before widening it: the fetch runs behind an invite-code allowlist that fails
+closed, because both platforms' terms prohibit automated downloading, and doing
+it on behalf of strangers is a different posture from the private eval fetching
+in evaluation/fetch.py.
+
+The fetch runs in THIS process, not in a Modal container, deliberately.
+evaluation/README.md's existing finding is that platform rate-limiting and bot
+checks are far worse from datacenter IPs, and this file was already built to
+run on a laptop or a small always-on box. It is dispatched as a FastAPI
+background task so the multi-second fetch never blocks the HTTP response.
 """
 from __future__ import annotations
 
@@ -61,11 +76,12 @@ from pathlib import Path
 from typing import Optional
 
 import modal
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 import fingerprint
+import ingest
 import motion_result
 import retention
 
@@ -133,6 +149,26 @@ def _volume_read_bytes(volume: modal.Volume, path: str) -> Optional[bytes]:
 # builds a browsable or searchable index of who is in what -- no lookup by
 # fingerprint, no "find this dancer", no public list. The index is keyed by
 # content and readable only by this service.
+#
+# **Link ingestion adds two cheaper gates in front of the fingerprint, and all
+# three converge on one `clip_id`.** They are ordered by what they cost:
+#
+#   1. `source_url_alias` -- the *syntactic* key of the pasted link, matched
+#      with zero network access. This is the common case the builder described:
+#      the same TikTok share link pasted by several learners. Costs nothing at
+#      all, not even a probe.
+#   2. `source_url_key` -- the *canonical* key, after one metadata probe that
+#      fetches no media. This is what makes `/t/ZP83Enx4b/` and
+#      `tiktok.com/@user/video/7672198121417444628` land on the same lesson.
+#   3. The perceptual fingerprint, after the download. The same dance arriving
+#      as a re-upload, or from a mirror of the same video on the other platform.
+#
+# The convergence is not three parallel mechanisms: all three match against the
+# SAME index entry, which already carries the fingerprint, so a removal that
+# drops that one entry (retention.remove_fingerprint) closes all three doors at
+# once. There is no second table for URLs that a takedown could miss. That is
+# the property the removal path depends on -- a deleted lesson must be gone for
+# everyone regardless of how they arrived at it.
 # ---------------------------------------------------------------------------
 
 class DispatchResponse(BaseModel):
@@ -144,8 +180,13 @@ class DispatchResponse(BaseModel):
     deduplicated: bool = False
 
 
-def _find_existing(fp: dict) -> dict | None:
+def _find_existing(fp: dict | None = None, url_key: str | None = None) -> dict | None:
     """The canonical lesson for this content, if there is a usable one.
+
+    Matches on the URL key, the URL alias, or the perceptual fingerprint --
+    whichever the caller has at this point in the pipeline. One scan, one
+    liveness rule, one returned entry, so every gate produces the same
+    canonical `clip_id`.
 
     'Usable' is checked against live state, not just the index: the entry must
     point at a job that actually succeeded and has not been taken down. A stale
@@ -153,7 +194,9 @@ def _find_existing(fp: dict) -> dict | None:
     $0.08 -- and can never serve a lesson that is gone.
     """
     for entry in retention.read_index(results_volume):
-        if not fingerprint.same_clip(entry, fp):
+        by_url = bool(url_key) and url_key in (entry.get("source_url_key"),
+                                               entry.get("source_url_alias"))
+        if not by_url and not (fp is not None and fingerprint.same_clip(entry, fp)):
             continue
         clip_id, job_id = entry.get("clip_id"), entry.get("job_id")
         if not clip_id or not job_id:
@@ -166,8 +209,93 @@ def _find_existing(fp: dict) -> dict | None:
     return None
 
 
+def _write_status(job_id: str, state: str, stage_message: str, progress, error=None) -> None:
+    """Write one job-status document, validated against the contract first.
+
+    The GPU worker writes its own status documents through a mounted Volume
+    (modal_app.run_clip); this is the same document written from outside a
+    container, for the stages that happen before a GPU is involved at all.
+    Validating here rather than only on read means a bad document never
+    reaches the Volume, so `get_job_status` cannot be forced into a 500.
+    """
+    doc = {
+        "schema_version": "1.0.0",
+        "job_id": job_id,
+        "state": state,
+        "stage_message": stage_message,
+        "progress": progress,
+        "error": error,
+        "retry_count": 0,
+    }
+    result = validate_job_status(doc)
+    if not result.valid:  # pragma: no cover -- a bug here, not a runtime condition
+        raise RuntimeError(f"refusing to write an invalid job-status: {result.errors}")
+    retention.write_json(results_volume, f"/{job_id}.job-status.json", doc)
+
+
+def _store_and_dispatch(tmp_path: str, fp: dict, clip_id: str, job_id: str,
+                        index_extra: dict | None = None) -> None:
+    """Put the clip where the GPU can read it, record it, and start the run."""
+    with uploads_volume.batch_upload() as batch:
+        batch.put_file(tmp_path, f"/{clip_id}.mp4")
+    # job_id -> clip_id is needed later (retry, result-building) without
+    # parsing it back out of the job_id string -- write it once, here.
+    retention.write_json(results_volume, f"/{job_id}.job-meta.json",
+                         dict(index_extra or {}, clip_id=clip_id))
+    retention.write_index(results_volume, retention.read_index(results_volume) + [
+        dict(fp, clip_id=clip_id, job_id=job_id, created_at=time.time(),
+             **(index_extra or {})),
+    ])
+    _run_clip_fn().spawn(clip_id=clip_id, job_id=job_id)
+
+
+def _alias_to(job_id: str, existing: dict, gate: str) -> None:
+    """Point an already-issued job_id at the lesson that already exists.
+
+    Gates 2 and 3 fire *after* the client has been handed a job_id, so unlike
+    gate 1 they cannot simply return the canonical ids. This writes the
+    redirection into job-meta, which `get_job_status` and `_clip_id_for`
+    already read.
+
+    The alias job-meta is deliberately NOT deleted by a takedown
+    (retention.clip_artifact_paths). It holds two opaque ids and nothing
+    derived from any person, and it is the only thing that lets a stale link
+    answer 410 Gone after the lesson is removed. Delete it and `_clip_id_for`
+    falls back to parsing the job_id, finds no tombstone, and reports "queued"
+    forever -- the single most misleading answer available.
+    """
+    retention.write_json(results_volume, f"/{job_id}.job-meta.json",
+                         {"clip_id": existing["clip_id"],
+                          "canonical_job_id": existing["job_id"]})
+    retention.remove_file_if_present(results_volume, f"/{job_id}.job-status.json")
+    print(f"[dedupe] gate {gate}: {job_id} -> {existing['clip_id']} "
+          f"(job {existing['job_id']}) -- no GPU run dispatched")
+
+
 @app.post("/clips", response_model=DispatchResponse)
-async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
+async def create_clip(
+    background: BackgroundTasks,
+    file: UploadFile | None = File(None),
+    url: str | None = Form(None),
+    x_invite_code: str | None = Header(None),
+) -> DispatchResponse:
+    """One front door, two ways in: a file, or a link to fetch.
+
+    The link path returns before the fetch finishes -- a yt-dlp probe plus
+    download is multi-second and must not be held open across an HTTP request.
+    The job it hands back is real and pollable from the first moment; the fetch
+    reports into it the same way the GPU stages do.
+    """
+    if url:
+        return _accept_link(background, url, x_invite_code)
+    if file is None:
+        raise HTTPException(400, "Send a video file, or a link to one.")
+    return await upload_clip(file)
+
+
+async def upload_clip(file: UploadFile) -> DispatchResponse:
+    """The original file path, unchanged. Kept under its own name so the
+    existing dedupe tests (test_retention.py) call it directly."""
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
         total = 0
         while chunk := await file.read(1024 * 1024):
@@ -185,29 +313,152 @@ async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
             # re-uploads dedupe. Never a wrong match, just fewer matches.
             print("[dedupe] no perceptual fingerprint (ffmpeg unavailable or "
                   "decode failed) -- exact-sha256 matching only for this upload")
-        existing = _find_existing(fp)
+        existing = _find_existing(fp=fp)
         if existing:
-            print(f"[dedupe] hit: reusing {existing['clip_id']} "
+            print(f"[dedupe] gate 3 (fingerprint): reusing {existing['clip_id']} "
                   f"(job {existing['job_id']}) -- no GPU run dispatched")
             return DispatchResponse(clip_id=existing["clip_id"],
                                     job_id=existing["job_id"], deduplicated=True)
 
         clip_id = uuid.uuid4().hex
         job_id = f"job_{clip_id}"  # resumable: DESIGN.md §7c's copyable link is just this job_id
-        with uploads_volume.batch_upload() as batch:
-            batch.put_file(tmp_path, f"/{clip_id}.mp4")
+        _store_and_dispatch(tmp_path, fp, clip_id, job_id)
     finally:
         os.unlink(tmp_path)
 
-    # job_id -> clip_id is needed later (retry, result-building) without
-    # parsing it back out of the job_id string -- write it once, here.
-    retention.write_json(results_volume, f"/{job_id}.job-meta.json", {"clip_id": clip_id})
-    retention.write_index(results_volume, retention.read_index(results_volume) + [
-        dict(fp, clip_id=clip_id, job_id=job_id, created_at=time.time()),
-    ])
-
-    _run_clip_fn().spawn(clip_id=clip_id, job_id=job_id)
     return DispatchResponse(clip_id=clip_id, job_id=job_id)
+
+
+# ---------------------------------------------------------------------------
+# The link path. See ingest.py for URL normalisation, the failure vocabulary
+# and the invite gate; this is only the wiring.
+# ---------------------------------------------------------------------------
+
+def _accept_link(background: BackgroundTasks, url: str,
+                 invite_code: str | None) -> DispatchResponse:
+    link = ingest.normalize(url)
+    if link is None:
+        # Knowable with no network and no job: there is nothing to observe, so
+        # there is nothing to report into a job-status document and nothing a
+        # retry could change. Answered immediately instead.
+        raise HTTPException(400, "That link is not a TikTok or YouTube video. "
+                                 "Paste a link to one, or upload the file.")
+
+    if not ingest.invite_codes():
+        # Fails CLOSED. An unconfigured deploy is not a public downloader.
+        raise HTTPException(503, "Pasting a link is not switched on here. "
+                                 "Upload the file instead.")
+    if not ingest.invite_ok(invite_code):
+        raise HTTPException(403, "Pasting a link is open to invited testers "
+                                 "while this is being tried out. Upload the file instead.")
+    if not ingest.ytdlp_available():
+        raise HTTPException(503, "Pasting a link is not switched on here. "
+                                 "Upload the file instead.")
+
+    # Gate 1 -- free. No probe, no network, no job minted.
+    existing = _find_existing(url_key=link.key)
+    if existing:
+        print(f"[dedupe] gate 1 (pasted url {link.key}): reusing {existing['clip_id']} "
+              f"(job {existing['job_id']}) -- nothing fetched")
+        return DispatchResponse(clip_id=existing["clip_id"],
+                                job_id=existing["job_id"], deduplicated=True)
+
+    # Both ids are minted now, so `job_{clip_id}` holds for link jobs too and
+    # remove_lesson's job_id reconstruction keeps working unchanged.
+    clip_id = uuid.uuid4().hex
+    job_id = f"job_{clip_id}"
+    # Written before the fetch starts, not after it succeeds: a fetch that
+    # fails retryably needs the link to retry, and at that point there is no
+    # index entry to recover it from.
+    retention.write_json(results_volume, f"/{job_id}.job-meta.json",
+                         {"clip_id": clip_id, "source_url": link.fetch_url})
+    _write_status(job_id, "processing", "Fetching the video", 0.02)
+    background.add_task(_ingest_link, link, clip_id, job_id)
+    return DispatchResponse(clip_id=clip_id, job_id=job_id)
+
+
+def _ingest_link(link: ingest.Link, clip_id: str, job_id: str) -> None:
+    """Probe, refuse or fetch, fingerprint, dispatch. Runs after the response.
+
+    ponytail: a FastAPI background task, so a restart mid-fetch leaves the job
+    at "processing" with nothing working on it. Acceptable while this is
+    invite-only and single-replica; the upgrade path is the same durable queue
+    a second replica would need anyway. It is not silent -- the job is visibly
+    stuck rather than wrongly reported as failed or succeeded.
+    """
+    tmp_path = None
+    try:
+        probed = ingest.probe(link)
+        # Refused BEFORE any media is fetched: the probe is metadata only.
+        ingest.check_duration(probed)
+
+        # Gate 2 -- one probe spent, still no media. This is where a share
+        # link and the full canonical URL for the same video converge.
+        canon = ingest.canonical_key(link.platform, probed) or link.key
+        if canon != link.key:
+            existing = _find_existing(url_key=canon)
+            if existing:
+                _alias_to(job_id, existing, f"2 (canonical url {canon})")
+                return
+
+        _write_status(job_id, "processing", "Fetching the video", 0.05)
+        fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
+        os.close(fd)
+        os.unlink(tmp_path)  # yt-dlp wants to create it itself
+        ingest.download(link, tmp_path)
+
+        fp = fingerprint.fingerprint(tmp_path)
+        # Gate 3 -- the same dance by a different route: a re-upload of the
+        # file, or the same video mirrored onto the other platform.
+        existing = _find_existing(fp=fp)
+        if existing:
+            _alias_to(job_id, existing, "3 (fingerprint)")
+            return
+
+        # A takedown can land while the fetch is running -- the fetch takes
+        # seconds and the removal endpoint is always open. Without this check
+        # the removal writes a tombstone, the fetch then finishes and stores
+        # the clip anyway, and a GPU burns on a lesson somebody has already
+        # asked to have deleted. Observed 2026-09-20 before this guard existed.
+        # Checked here rather than in `remove_lesson` because this is the side
+        # that knows when the clip actually lands.
+        #
+        # `.reload()` is required, not defensive: a Volume handle serves reads
+        # from the commit it last saw, so without it this read returns the
+        # state from before the takedown and the guard silently never fires.
+        # Observed 2026-09-20 -- the tombstone was on the Volume and this read
+        # still came back empty. modal_app.py hits the same hazard on the
+        # uploads Volume and documents it there.
+        results_volume.reload()
+        if _volume_read_json(results_volume, f"/{clip_id}.removed.json") is not None:
+            print(f"[ingest] {clip_id} was removed while it was being fetched -- "
+                  "not stored, no GPU dispatched")
+            retention.remove_file_if_present(results_volume, f"/{job_id}.job-status.json")
+            return
+
+        _write_status(job_id, "processing", "Getting the video ready", 0.1)
+        _store_and_dispatch(tmp_path, fp, clip_id, job_id, index_extra={
+            "source_url": link.fetch_url,
+            "source_url_key": canon,
+            # The pasted form, kept only when it differs, so gate 1 hits for
+            # the next person who pastes the same share link.
+            "source_url_alias": None if canon == link.key else link.key,
+        })
+        print(f"[ingest] {canon} -> {clip_id} ({os.path.getsize(tmp_path) / 1e6:.1f} MB)")
+    except ingest.FetchError as e:
+        print(f"[ingest] {link.key} failed: {e.code}")
+        _write_status(job_id, "failed", "", None, error=e.as_job_error())
+    except Exception as e:  # noqa: BLE001
+        # Never leave a job at "processing" because of a bug in this function.
+        # §7h: the message says the fetch did not go through, not why -- the
+        # exception is for the log, not for the learner.
+        print(f"[ingest] {link.key} raised: {e!r}")
+        code, message, retryable = ingest.classify("")  # nothing observed -> no reason claimed
+        _write_status(job_id, "failed", "", None,
+                      error={"code": code, "message": message, "retryable": retryable})
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +470,20 @@ async def upload_clip(file: UploadFile = File(...)) -> DispatchResponse:
 def _clip_id_for(job_id: str) -> str:
     meta = _volume_read_json(results_volume, f"/{job_id}.job-meta.json")
     return meta["clip_id"] if meta else job_id.removeprefix("job_")
+
+
+def _resolve_job(job_id: str) -> tuple[str, str]:
+    """(job that actually did the work, its clip_id) for a possibly-aliased id.
+
+    A link that deduplicated at gate 2 or 3 was handed its own job_id before
+    the match was known, so that id is an alias. Both reads come from the same
+    job-meta document `_clip_id_for` already uses, so an alias costs nothing
+    extra -- and the non-alias path never calls this at all (see
+    `get_job_status`), which keeps a poll at exactly one Volume read.
+    """
+    meta = _volume_read_json(results_volume, f"/{job_id}.job-meta.json") or {}
+    return (meta.get("canonical_job_id") or job_id,
+            meta.get("clip_id") or job_id.removeprefix("job_"))
 
 
 def _refuse_if_removed(clip_id: str) -> None:
@@ -248,7 +513,22 @@ def get_job_status(job_id: str) -> dict:
         # Without this check a removed lesson would report "queued" forever:
         # the most misleading possible answer, since the thing it is waiting
         # for is never coming.
-        _refuse_if_removed(_clip_id_for(job_id))
+        #
+        # A missing document is also the only case that can be a dedupe alias
+        # (`_alias_to` removes the alias's own status doc precisely so this
+        # branch is reached), so the redirection is resolved here too -- off
+        # the hot path, where the common "job is genuinely running" poll still
+        # costs exactly one Volume read.
+        canonical_job, clip_id = _resolve_job(job_id)
+        if canonical_job != job_id:
+            doc = _volume_read_json(results_volume, f"/{canonical_job}.job-status.json")
+            if doc is not None:
+                doc = dict(doc, job_id=job_id)
+                result = validate_job_status(doc)
+                if not result.valid:
+                    raise HTTPException(500, f"job-status document failed contract validation: {result.errors}")
+                return doc
+        _refuse_if_removed(clip_id)
         # Not a 404: a job that was just spawned and hasn't written its first
         # "queued" doc yet is a real, valid state, not a missing job. Distinct
         # from "job_id never existed" only by convention -- this service does
@@ -282,8 +562,15 @@ def get_job_status(job_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 @app.post("/jobs/{job_id}/retry")
-def retry_job(job_id: str) -> dict:
+def retry_job(job_id: str, background: BackgroundTasks) -> dict:
     doc = _volume_read_json(results_volume, f"/{job_id}.job-status.json")
+    if doc is None:
+        # A dedupe alias has no status document of its own. Resolving gives the
+        # truthful 409 ("succeeded, nothing to retry") instead of a 404 that
+        # would claim the caller's job_id never existed.
+        canonical_job, _ = _resolve_job(job_id)
+        doc = (_volume_read_json(results_volume, f"/{canonical_job}.job-status.json")
+               if canonical_job != job_id else None)
     if doc is None:
         raise HTTPException(404, "Unknown job_id.")
     if doc["state"] != "failed":
@@ -292,6 +579,22 @@ def retry_job(job_id: str) -> dict:
         raise HTTPException(409, "This failure is not retryable.")
 
     meta = _volume_read_json(results_volume, f"/{job_id}.job-meta.json")
+
+    # A link job that failed during the fetch has no clip anywhere -- nothing
+    # was ever downloaded. Re-spawning run_clip on it would burn a GPU
+    # container looking for a file that does not exist and fail with a
+    # confusing "not found", so the retry re-runs the fetch instead. The
+    # error's own code is what says which stage failed.
+    if (meta or {}).get("source_url") and doc["error"]["code"] in ingest.FETCH_STAGE_CODES:
+        link = ingest.normalize(meta["source_url"])
+        if link is None:  # pragma: no cover -- it normalised once to get here
+            raise HTTPException(500, "The stored link no longer parses -- cannot re-run the fetch.")
+        clip_id = meta.get("clip_id") or job_id.removeprefix("job_")
+        _refuse_if_removed(clip_id)
+        _write_status(job_id, "processing", "Fetching the video", 0.02)
+        background.add_task(_ingest_link, link, clip_id, job_id)
+        return {"job_id": job_id, "retry_count": doc["retry_count"] + 1}
+
     if meta is None:
         raise HTTPException(500, "No job-meta record for this job_id -- cannot recover its clip_id.")
     # A removal deletes the source video, so a retry here would burn GPU time

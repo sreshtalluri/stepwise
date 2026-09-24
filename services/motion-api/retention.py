@@ -64,9 +64,9 @@ def clip_artifact_paths(results_listing: list[str], clip_id: str, job_id: str | 
     (from `Volume.listdir`), needed because the per-dancer GLB names depend on
     ByteTrack's track ids, which are not knowable from the clip_id alone.
 
-    Deliberately includes artifacts that may not exist: the callers ignore
-    FileNotFoundError, and a list that is a superset of reality is safe while
-    a list that misses a file is the bug this module exists to prevent.
+    Deliberately includes artifacts that may not exist: the callers go through
+    `remove_file_if_present`, and a list that is a superset of reality is safe
+    while a list that misses a file is the bug this module exists to prevent.
     """
     results = [
         f"/{clip_id}.npz",                      # dropped after export now, but old lessons have one
@@ -82,10 +82,48 @@ def clip_artifact_paths(results_listing: list[str], clip_id: str, job_id: str | 
     ]
     if job_id:
         results += [f"/{job_id}.job-status.json", f"/{job_id}.job-meta.json"]
+    # NOT listed, deliberately: the job-meta of any *aliased* job_id -- a link
+    # that was handed its own id and then matched an existing lesson (see
+    # api.py's `_alias_to`). Those documents hold two opaque ids and nothing
+    # derived from a person, and they are the only thing that makes a stale
+    # link answer 410 Gone rather than "queued" forever after a takedown.
+    # Deleting them would make the removal *less* honest, not more complete.
     return {
         "uploads": [f"/{clip_id}.mp4"],   # the source video: the thing a dancer actually wants gone
         "results": results,
     }
+
+
+def remove_file_if_present(volume, path: str) -> bool:
+    """Delete one Volume path. True if it was there, False if it already was not.
+
+    Every deletion in this service goes through here, because the real Modal
+    client does not raise what the type system suggests: `Volume.remove_file`
+    raises `modal.exception.InvalidError("No such file or directory.")`, NOT
+    `FileNotFoundError`, for a path that is absent.
+
+    That is not a detail. Verified against the real client 2026-09-20, it broke
+    the takedown path outright: `clip_artifact_paths` is deliberately a
+    superset of reality, so the first artifact that happened not to exist --
+    `{clip_id}.npz` is dropped after export, so it is usually the first one --
+    aborted `delete_clip` mid-way with a 500, leaving a lesson partly deleted
+    and, because the tombstone is written last, no record that anyone had asked.
+    The fake volumes in test_retention.py raise `FileNotFoundError`, which is
+    why the tests were green while the real path was not.
+
+    Matched on the message rather than swallowing `InvalidError` wholesale, so
+    a genuinely malformed argument still raises instead of being reported as
+    "already absent".
+    """
+    try:
+        volume.remove_file(path)
+        return True
+    except FileNotFoundError:
+        return False
+    except Exception as e:  # noqa: BLE001 -- narrowed by the message check below
+        if "no such file" in str(e).lower():
+            return False
+        raise
 
 
 def delete_clip(uploads_volume, results_volume, clip_id: str, job_id: str | None,
@@ -111,11 +149,7 @@ def delete_clip(uploads_volume, results_volume, clip_id: str, job_id: str | None
     deleted, missing = [], []
     for volume, key in ((uploads_volume, "uploads"), (results_volume, "results")):
         for path in paths[key]:
-            try:
-                volume.remove_file(path)
-                deleted.append(path)
-            except FileNotFoundError:
-                missing.append(path)
+            (deleted if remove_file_if_present(volume, path) else missing).append(path)
 
     remove_fingerprint(results_volume, clip_id)
 
