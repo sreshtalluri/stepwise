@@ -23,7 +23,7 @@ import {
 import { accentForPerson, countLabel, eightStartCount, timeOfCount } from "../../../../packages/navigation/src/core";
 import { footContact, type FootContact } from "../../lib/footContact";
 import { dancerBox, firstWellObserved, markerPoint, sideWord, stillCrop } from "../../lib/dancers";
-import { chipLoop, spanLabel, type Eight } from "../../lib/lessonEngine";
+import { chipLoop, countLoop, extendAnchor, LOOP_LENGTHS, spanDone, spanLabel, type Eight } from "../../lib/lessonEngine";
 import { lesson as copy } from "../../lib/copy";
 import { prefersReducedMotion } from "../../lib/reveal";
 import { useCount, useFrameGrabs } from "./hooks";
@@ -383,36 +383,90 @@ export function CloseUps({ l, className = "", onRegion }: { l: Lesson; className
 /**
  * The current eight's counts, large, over the stage. Weight and size carry the state
  * (DESIGN.md §7), and the numerals turn over on the beat (`useCount`), not on the
- * page's 10 Hz tick. Tapping a numeral seeks to that count.
+ * page's 10 Hz tick. Counts outside the loop fade; a count looped at full speed gets
+ * a dot. With `select` (desktop) a count is where a loop starts: tap = loop the chosen
+ * length from it, shift-tap or drag across counts = loop exactly those. Without it,
+ * tapping a numeral seeks to that count.
  */
-export function CountBar({ l, big = false }: { l: Lesson; big?: boolean }) {
+export function CountBar({ l, big = false, select = false }: { l: Lesson; big?: boolean; select?: boolean }) {
   const grid = l.structure.grid;
+  const total = grid.countTotal;
   const count = useCount(l.timeRef, grid);
-  const inDance = count >= 1 && count <= grid.countTotal;
+  const inDance = count >= 1 && count <= total;
   const first = eightStartCount(inDance ? count : (l.loop?.startCount ?? 1));
+  const drag = useRef<{ anchor: number; moved: boolean } | null>(null);
+  const countAt = (x: number, y: number) => Number(document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-count]")?.dataset.count ?? 0);
+  const out = (c: number) => !!l.loop && (c < l.loop.startCount || c > l.loop.endCount);
   return (
-    <div className={`ls-counts${big ? " ls-big" : ""}`} role="group" aria-label={copy.countOne.now(inDance ? countLabel(count) : 0)}>
+    <div
+      className={`ls-counts${big ? " ls-big" : ""}`}
+      role="group"
+      aria-label={copy.countOne.now(inDance ? countLabel(count) : 0)}
+      onPointerMove={(e) => {
+        const d = drag.current;
+        const c = d && countAt(e.clientX, e.clientY);
+        if (!d || !c || (c === d.anchor && !d.moved)) return;
+        d.moved = true;
+        l.setLoop(countLoop(c, l.loopLen, total, d.anchor));
+      }}
+      onPointerUp={() => (drag.current = null)}
+      onPointerCancel={() => (drag.current = null)}
+    >
       {Array.from({ length: 8 }, (_, i) => first + i).map((c) => (
         <button
           key={c}
           type="button"
           tabIndex={-1}
-          className={c === count ? "ls-count ls-on" : "ls-count"}
-          onClick={() => l.seek(timeOfCount(grid, c))}
-          disabled={c > grid.countTotal}
+          data-count={c}
+          className={`ls-count${c === count ? " ls-on" : ""}${out(c) ? " ls-out" : ""}${l.done.has(c) ? " ls-done" : ""}`}
+          aria-label={select ? copy.loopLen.fromCount(c, l.loopLen) : undefined}
+          title={select ? copy.loopLen.countHint : undefined}
+          onPointerDown={(ev) => {
+            if (!select || (ev.pointerType === "mouse" && ev.button !== 0)) return;
+            // A touch captures the pointer on this button; release it so a drag reaches the others.
+            (ev.target as Element).releasePointerCapture?.(ev.pointerId);
+            drag.current = { anchor: c, moved: false };
+          }}
+          onClick={(ev) => {
+            if (!select) return l.seek(timeOfCount(grid, c));
+            const d = drag.current;
+            drag.current = null;
+            if (d?.moved) return;
+            const anchor = ev.shiftKey && l.loop ? extendAnchor(l.loop, c) : null;
+            l.setLoop(countLoop(c, l.loopLen, total, anchor), { play: l.playing });
+          }}
+          disabled={c > total}
         >
-          {c <= grid.countTotal ? countLabel(c) : ""}
+          {c <= total ? countLabel(c) : ""}
         </button>
       ))}
     </div>
   );
 }
 
+/** "Loop 2 · 4 · 8 counts": how many counts a tap on a chip or a count loops. */
+export function LoopLength({ l }: { l: Lesson }) {
+  return (
+    <div className="ls-looplen" role="group" aria-label={copy.loopLen.label}>
+      <span aria-hidden="true">{copy.loopLen.lead}</span>
+      <div className="ls-seg">
+        {LOOP_LENGTHS.map((n) => (
+          <button key={n} type="button" aria-pressed={l.loopLen === n} aria-label={copy.loopLen.option(n)} onClick={() => l.setLoopLen(n)}>
+            {n}
+          </button>
+        ))}
+      </div>
+      <span aria-hidden="true">{copy.loopLen.unit}</span>
+    </div>
+  );
+}
+
 /**
- * The one row that drives the lesson: a chip per 8-count. Tap = loop it; tap the
- * looped one again (or "All") = the whole dance; shift-tap or drag across chips =
- * loop the range. A quiet tick marks an eight already looped at full speed. Above
- * it, a plain scrubber for the whole clip.
+ * The one row that drives the lesson: a chip per part (an eight until the learner
+ * edits them). Tap = loop the chosen length from its first count; tap again (or
+ * "All") = the whole dance; shift-tap or drag across chips = loop those whole chips.
+ * A quiet tick marks a chip whose counts have all been looped at full speed. Above
+ * it, a plain scrubber for the whole clip, and the loop length.
  */
 export function EightChips({ l }: { l: Lesson }) {
   const drag = useRef<{ anchor: number; moved: boolean } | null>(null);
@@ -420,20 +474,25 @@ export function EightChips({ l }: { l: Lesson }) {
     const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-eight]");
     return el ? Number(el.dataset.eight) : -1;
   };
-  const inLoop = (e: Eight) => !!l.loop && e.startCount >= l.loop.startCount && e.endCount <= l.loop.endCount;
+  // Lit when the loop touches it, so four counts inside an eight still show where they are.
+  const inLoop = (e: Eight) => !!l.loop && e.startCount <= l.loop.endCount && e.endCount >= l.loop.startCount;
   const endS = l.endS;
+  const total = l.structure.grid.countTotal;
   return (
     <div className="ls-chips-wrap">
-      <input
-        className="ls-scrub"
-        type="range"
-        min={0}
-        max={endS}
-        step={0.01}
-        value={Math.min(l.displayTime, endS)}
-        onChange={(e) => l.seek(Number(e.target.value))}
-        aria-label={copy.chips.scrub}
-      />
+      <div className="ls-chips-top">
+        <input
+          className="ls-scrub"
+          type="range"
+          min={0}
+          max={endS}
+          step={0.01}
+          value={Math.min(l.displayTime, endS)}
+          onChange={(e) => l.seek(Number(e.target.value))}
+          aria-label={copy.chips.scrub}
+        />
+        <LoopLength l={l} />
+      </div>
       <div
         className="ls-chips"
         role="group"
@@ -444,7 +503,7 @@ export function EightChips({ l }: { l: Lesson }) {
           const k = chipAt(e.clientX, e.clientY);
           if (k < 0 || (k === d.anchor && !d.moved)) return;
           d.moved = true;
-          l.setLoop(chipLoop(l.loop, l.eights[k], l.eights[d.anchor]));
+          l.setLoop(chipLoop(l.loop, l.eights[k], l.loopLen, total, l.eights[d.anchor]));
         }}
         onPointerUp={() => (drag.current = null)}
         onPointerCancel={() => (drag.current = null)}
@@ -452,6 +511,8 @@ export function EightChips({ l }: { l: Lesson }) {
         {l.eights.map((e, k) => {
           const looped = inLoop(e);
           const playing = l.here?.id === e.id;
+          const done = spanDone(l.done, e);
+          const span = spanLabel(e);
           return (
             <button
               key={e.id}
@@ -459,7 +520,7 @@ export function EightChips({ l }: { l: Lesson }) {
               data-eight={k}
               className={`ls-chip8${looped ? " ls-on" : ""}${playing ? " ls-here" : ""}`}
               aria-pressed={looped}
-              aria-label={`${e.label}, ${spanLabel(e)}${l.done.has(e.id) ? `, ${copy.chips.done}` : ""}`}
+              aria-label={`${e.label === span ? span : `${e.label}, ${span}`}${done ? `, ${copy.chips.done}` : ""}`}
               onPointerDown={(ev) => {
                 if (ev.pointerType === "mouse" && ev.button !== 0) return;
                 drag.current = { anchor: k, moved: false };
@@ -468,12 +529,13 @@ export function EightChips({ l }: { l: Lesson }) {
                 const d = drag.current;
                 drag.current = null;
                 if (d?.moved) return;
-                const anchor = ev.shiftKey && l.loop ? (l.eights.find((x) => x.startCount === l.loop!.startCount) ?? null) : null;
-                l.setLoop(chipLoop(l.loop, e, anchor), { play: l.playing });
+                const from = l.loop?.startCount ?? 0;
+                const anchor = ev.shiftKey ? (l.eights.find((x) => x.startCount <= from && x.endCount >= from) ?? null) : null;
+                l.setLoop(chipLoop(l.loop, e, l.loopLen, total, anchor), { play: l.playing });
               }}
             >
               <span>{e.n}</span>
-              {l.done.has(e.id) && <Icon name="check" size={12} />}
+              {done && <Icon name="check" size={12} />}
             </button>
           );
         })}
@@ -518,7 +580,7 @@ export function Transport({ l, more, className = "" }: { l: Lesson; more: React.
         </span>
       </button>
       {l.next && (
-        <button type="button" className="ls-next" onClick={() => l.setLoop({ startCount: l.next!.startCount, endCount: l.next!.endCount }, { play: l.playing })}>
+        <button type="button" className="ls-next" onClick={() => l.setLoop(l.next, { play: l.playing })}>
           {copy.chips.next(spanLabel(l.next))}
           <Icon name="right" size={16} />
         </button>
@@ -569,7 +631,7 @@ export function CountOneTools({ l }: { l: Lesson }) {
 }
 
 export function doneLine(l: Lesson) {
-  return copy.chips.doneCount(l.eights.filter((e) => l.done.has(e.id)).length, l.eights.length);
+  return copy.chips.doneCount(l.done.size, l.structure.grid.countTotal);
 }
 
 // ------------------------------------------------------------------ dancers
@@ -830,14 +892,14 @@ export function useLessonKeys(l: Lesson) {
       } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
         e.preventDefault();
         const d = e.key === "ArrowLeft" ? -1 : 1;
-        if (e.shiftKey) x.stepEight(d);
+        if (e.shiftKey) x.stepLoop(d);
         else x.seek(x.timeRef.current + d * x.structure.grid.secondsPerCount);
       } else if (k === "m") x.setMirrored((v) => !v);
       else if (k === "s") x.cycleSpeed();
       else if (k === "b") x.setBuildUp(!x.buildUp);
       else if (k === "f") x.setFollow((v) => !v);
       else if (k === "t") x.tapOne();
-      else if (k === "l") x.setLoop(x.loop ? null : x.here ? { startCount: x.here.startCount, endCount: x.here.endCount } : null);
+      else if (k === "l") (x.loop ? x.setLoop(null) : x.stepLoop(0));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

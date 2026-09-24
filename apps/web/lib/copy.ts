@@ -189,7 +189,7 @@ export const processing = {
   subtitle: "Slow it down and mirror it. If the music has a clear beat, the counts show up here.",
   // Once `milestones.counts` has landed.
   countsTitle: "The counts are in. Learn the first 8.",
-  countsSubtitle: "This is how the lesson is split. Loop one 8-count until it sticks, then move on.",
+  countsSubtitle: "This is how the lesson is split. Loop a few counts until they stick, then move on.",
   // At success: the handoff, carrying speed and loop into the lesson.
   readyTitle: "Ready. Same counts, now in 3D.",
   readySubtitle: "Your loop and speed carry over.",
@@ -337,24 +337,32 @@ export const lesson = {
   },
 
   /**
-   * The 8-count chips: the one row that drives practice. The tick is a true fact
-   * (this eight was looped at full speed in this browser), DESIGN.md §7g — no
-   * points, no streaks.
+   * The chips: the one row that drives practice, one per part (an eight until the
+   * learner edits them). The tick is a true fact (these counts were looped at full
+   * speed in this browser), DESIGN.md §7g — no points, no streaks.
    */
   chips: {
-    group: "8-counts",
+    group: "Parts of the dance",
     scrub: "Position in the dance",
     all: "All",
     done: "looped at full speed",
-    doneCount: (n: number, total: number) => `${n} of ${total} at full speed`,
+    doneCount: (n: number, total: number) => `${n} of ${total} counts at full speed`,
     next: (span: string) => `Next: ${span.toLowerCase()}`,
+  },
+
+  /** How many counts a tap loops. Nothing is forced to be an eight. */
+  loopLen: {
+    label: "Counts per loop",
+    lead: "Loop",
+    unit: "counts",
+    option: (n: number) => `Loop ${n} counts`,
+    fromCount: (c: number, n: number) => `Loop ${n} counts from count ${c}`,
+    countHint: "Click to loop from this count. Shift-click or drag to loop just these counts.",
   },
 
   transport: {
     play: "Play",
     pause: "Pause",
-    prev: "Previous 8-count",
-    next: "Next 8-count",
     speedLabel: "Speed",
     build: "Build up",
     buildHint: "Starts the loop at 0.5× and adds 0.1× each time round, up to 1×",
@@ -414,7 +422,7 @@ export const lesson = {
     noFloor: "No floor: feet not visible in this clip.",
     clipped: "The dancer is at the edge of the shot, so the crop stops there.",
     estimated: "Angles other than the camera's are estimated from the tracked body.",
-    keys: "Keys: space play, arrows a count, shift and arrows an 8-count, L loop, S speed, B build up, M mirror, T tap on 1.",
+    keys: "Keys: space play, arrows a count, shift and arrows the next or previous counts, L loop, S speed, B build up, M mirror, T tap on 1.",
   },
 
   phone: {
@@ -422,14 +430,14 @@ export const lesson = {
     exitProp: "Leave prop it up",
     countInOn: "Count-in on",
     countInOff: "Count-in off",
-    autoOn: "Auto next 8",
-    autoOff: "Stay on this 8",
-    hint: "Tap to play. Swipe up for the next 8. Hold for half speed.",
+    autoOn: "Auto next",
+    autoOff: "Stay on these counts",
+    hint: "Tap to play. Swipe up for the next counts. Hold for half speed.",
     hold: "Half speed while you hold",
     paused: "Paused",
     less: "Close",
-    zoneBack: "Back an 8-count",
-    zoneNext: "Next 8-count",
+    zoneBack: "Previous counts",
+    zoneNext: "Next counts",
   },
 
   menu: {
