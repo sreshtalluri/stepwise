@@ -953,6 +953,11 @@ ORIGIN_SECRET = optional_secret("stepwise-origin")
 # Absent -> /metrics answers 404 to everyone.
 ADMIN_SECRET = optional_secret("stepwise-admin")
 
+# STEPWISE_INVITE_CODES (comma-separated): who may use POST /clips/link during
+# the beta (ingest.invite_code_ok). Absent -> the link door is shut and only
+# file upload works, which is the closed-by-default the gate was built for.
+INVITE_SECRET = optional_secret("stepwise-invite")
+
 
 # glTF sampler interpolation, fixed up after pymomentum writes the file.
 #
@@ -1929,7 +1934,7 @@ api_image = (
 
 @app.function(
     image=api_image,
-    secrets=R2_SECRET + DB_SECRET + ORIGIN_SECRET + ADMIN_SECRET + OBS_SECRETS,
+    secrets=R2_SECRET + DB_SECRET + ORIGIN_SECRET + ADMIN_SECRET + INVITE_SECRET + OBS_SECRETS,
     # Scale to zero. A cold start is a few seconds on the upload endpoint,
     # where it is invisible, and on the first two-second job poll, where it is
     # also invisible. min_containers=1 pins ~$45/month of always-on container
