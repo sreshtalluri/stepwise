@@ -228,6 +228,8 @@ export const processing = {
     waiting: "Waiting",
   },
   waiting: "Waiting in the queue",
+  // Before the first status answer: the page does not know yet, so it says so.
+  checking: "Checking on your clip",
   // Only what the page itself does: it keeps polling (lib/jobStatus.ts). It
   // cannot see the job while it cannot reach it, so it says nothing about it.
   unreachable: "We cannot reach the job right now. This page keeps checking.",
@@ -283,9 +285,9 @@ export const lesson = {
   },
   postCreditTitle: (text: string) => `From the post's caption and sound: ${text}`,
   /**
-   * Opening a lesson by its link, keyed by what services/motion-api answered.
-   * An unknown job_id reads as "queued" there, not 404, so a mistyped link lands
-   * on `notReady` — which is why that line does not promise the lesson exists.
+   * Opening a lesson (or its processing page) by its link, keyed by what
+   * services/motion-api answered: 409 not ready, 410 removed, 404 unknown.
+   * `notReady` still does not promise the lesson exists.
    */
   load: {
     loading: "Getting the dance ready",

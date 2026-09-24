@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import LessonViewer from "./LessonViewer";
 import RemoveLessonDialog from "./RemoveLessonDialog";
 import LessonLoading from "./LessonLoading";
-import StateScreen from "./StateScreen";
+import { LoadFailed } from "./StateScreen";
 import { LESSONS, lessonSource, parseCredit, type Credit } from "../lib/lessons";
 import { captureThumb, forgetLesson, hasThumb, recordOpened } from "../lib/myLessons";
 import { lesson as lessonCopy } from "../lib/copy";
@@ -109,24 +109,4 @@ export default function LessonLoader({ lessonId }: { lessonId: string }) {
   if (load.kind === "loading") return <LessonLoading />;
 
   return <LoadFailed status={load.status} lessonId={lessonId} />;
-}
-
-function LoadFailed({ status, lessonId }: { status: number; lessonId: string }) {
-  const copy = lessonCopy.load;
-  if (status === 409) {
-    return (
-      <StateScreen pose="sit" title={copy.notReady} body={copy.notReadyBody}
-        action={{ label: copy.notReadyLink, href: `/job/${encodeURIComponent(lessonId)}` }} />
-    );
-  }
-  if (status === 410) {
-    return <StateScreen pose="wave" title={copy.removed} body={copy.removedBody} action={{ label: copy.removedLink, href: "/" }} />;
-  }
-  if (status === 404) {
-    return <StateScreen pose="shrug" title={copy.notFound} body={copy.notFoundBody} action={{ label: copy.notFoundLink, href: "/upload" }} />;
-  }
-  return (
-    <StateScreen pose="look" title={copy.failed} body={copy.failedBody} alert
-      action={{ label: copy.failedLink, onClick: () => window.location.reload() }} />
-  );
 }

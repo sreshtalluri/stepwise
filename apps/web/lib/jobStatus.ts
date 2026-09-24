@@ -88,7 +88,9 @@ export function localClipUrl(jobId: string): string | null {
 export type JobFeed =
   | { kind: "loading" }
   | { kind: "ok"; status: JobStatus; history: string[]; elapsedMs: number }
-  | { kind: "unreachable" };
+  | { kind: "unreachable" }
+  /** 404 no such job, 410 removed: final, so the poll stops. */
+  | { kind: "gone"; status: 404 | 410 };
 
 /**
  * Polls the job service. The job survives a closed tab (it is a queue, not a
@@ -114,6 +116,10 @@ export function useJobStatus(jobId: string, intervalMs = 2000, epoch = 0): JobFe
         const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, {
           cache: "no-store",
         });
+        if (res.status === 404 || res.status === 410) {
+          if (!cancelled) setFeed({ kind: "gone", status: res.status });
+          return;
+        }
         if (!res.ok) throw new Error(String(res.status));
         const body: unknown = await res.json();
         if (!isJobStatus(body)) throw new Error("malformed job status");

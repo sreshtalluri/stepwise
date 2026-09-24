@@ -147,6 +147,11 @@ export function MainStage({
       <video
         ref={l.setVideo}
         className="ls-video"
+        // CORS like the thumbnail and the dancer stills (captureThumb, useFrameGrabs) on
+        // the same URL. R2 sends ACAO only to a request with an Origin, with no Vary and
+        // a year's max-age, so a plain request first cached a copy without it, and the
+        // canvas grab in the same second failed: job_345's black My lessons card.
+        crossOrigin="anonymous"
         src={l.videoUrl}
         playsInline
         preload="auto"

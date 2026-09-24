@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { Lockup } from "./brand/Mark";
-import { marketing } from "../lib/copy";
+import { lesson as lessonCopy, marketing } from "../lib/copy";
 import { drawPose, statePoseAt, type StatePose } from "../lib/countoff";
 import { prefersReducedMotion } from "../lib/reveal";
 import type { Failure } from "../lib/submit";
@@ -114,15 +114,26 @@ export function StateBlock({
   );
 }
 
+/** The site's top bar: the logo home, and one link. Every page but the lesson has it. */
+export function SiteNav({ to = "lessons" }: { to?: "lessons" | "add" }) {
+  return (
+    <nav className="fd-nav">
+      <Lockup />
+      <div className="fd-nav-r">
+        {to === "add" ? (
+          <Link href="/upload" className="fd-btn fd-btn-sm">{marketing.nav.add}</Link>
+        ) : (
+          <Link href="/lessons">{marketing.nav.myLessons}</Link>
+        )}
+      </div>
+    </nav>
+  );
+}
+
 export default function StateScreen(props: Parameters<typeof StateBlock>[0]) {
   return (
     <main className="fd ss">
-      <nav className="fd-nav">
-        <Lockup />
-        <div className="fd-nav-r">
-          <Link href="/lessons">{marketing.nav.myLessons}</Link>
-        </div>
-      </nav>
+      <SiteNav />
       <div className="ss-body">
         <StateBlock {...props} />
       </div>
@@ -140,5 +151,26 @@ export function StateNote({ pose, message, action }: { pose: StatePose; message:
         {action && <Action action={action} className="ss-link" />}
       </div>
     </div>
+  );
+}
+
+/** A lesson or job link that did not resolve, by the service's status. Shared by the lesson and processing pages. */
+export function LoadFailed({ status, lessonId }: { status: number; lessonId: string }) {
+  const copy = lessonCopy.load;
+  if (status === 409) {
+    return (
+      <StateScreen pose="sit" title={copy.notReady} body={copy.notReadyBody}
+        action={{ label: copy.notReadyLink, href: `/job/${encodeURIComponent(lessonId)}` }} />
+    );
+  }
+  if (status === 410) {
+    return <StateScreen pose="wave" title={copy.removed} body={copy.removedBody} action={{ label: copy.removedLink, href: "/" }} />;
+  }
+  if (status === 404) {
+    return <StateScreen pose="shrug" title={copy.notFound} body={copy.notFoundBody} action={{ label: copy.notFoundLink, href: "/upload" }} />;
+  }
+  return (
+    <StateScreen pose="look" title={copy.failed} body={copy.failedBody} alert
+      action={{ label: copy.failedLink, onClick: () => window.location.reload() }} />
   );
 }

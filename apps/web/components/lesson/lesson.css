@@ -1015,6 +1015,13 @@ a.ls-chip {
   margin: 0 6px;
   background: var(--line);
 }
+/* Desktop and tablet: when the toggles and the credit do not both fit (a 768 px
+   tablet), the credit and meter take a row of their own instead of covering the
+   toggles. The phone bar never wraps: its credit sits over the stage. */
+.ls-desk .ls-bar {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
 .ls-bar-end {
   margin-left: auto;
   display: flex;

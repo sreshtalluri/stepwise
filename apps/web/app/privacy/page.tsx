@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { privacy as copy } from "../../lib/copy";
 import { RemoveByLink } from "../../components/RemoveLessonDialog";
+import { SiteNav } from "../../components/StateScreen";
 
 export const metadata: Metadata = { title: "Privacy — stepwise" };
 
@@ -8,6 +9,8 @@ export const metadata: Metadata = { title: "Privacy — stepwise" };
 export default function PrivacyPage() {
   const last = copy.sections.length - 1;
   return (
+    <>
+    <div className="fd"><SiteNav /></div>
     <main className="wrap app-screen" style={{ maxWidth: 720 }}>
       <h1 className="app-title">{copy.title}</h1>
       <p className="muted" style={{ marginTop: 8 }}>{copy.intro}</p>
@@ -23,5 +26,6 @@ export default function PrivacyPage() {
         </section>
       ))}
     </main>
+    </>
   );
 }

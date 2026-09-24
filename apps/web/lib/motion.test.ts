@@ -24,6 +24,7 @@ import {
   sourceProjection,
   viewLabel,
   followStep,
+  clampScreenLag,
   damp,
   deadzoneFor,
   travelExtent,
@@ -513,4 +514,16 @@ test("stageBasis levels a no-floor (moving-camera) clip to its feet, not the pho
   const deg = (Math.acos(up[1]) * 180) / Math.PI;
   assert.ok(deg > 7 && deg < 8.5, `up is ${deg.toFixed(2)} deg off the phone's, want ~8`);
   assert.ok(up[2] < 0 && Math.abs(up[0]) < 0.01);
+});
+
+test("follow keeps the body's centre inside the pane horizontally, and touches nothing else", () => {
+  // Side view of job_5716's walk: depth is screen-horizontal, and a 0.56 m trail on a
+  // 0.9 m half-frame put the body's edge on the pane edge.
+  const right: Vec3 = [0, 0, 1];
+  const subject: Vec3 = [0, 1, 0];
+  // Inside the limit: returned as-is.
+  const near: Vec3 = [0.2, 1.1, 0.3];
+  assert.equal(clampScreenLag(near, subject, right, 0.36), near);
+  // Beyond it: only the horizontal component is cut, to the limit, on the same side.
+  assert.deepEqual(clampScreenLag([0.2, 1.1, -0.56], subject, right, 0.36), [0.2, 1.1, -0.36]);
 });
