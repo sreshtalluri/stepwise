@@ -29,6 +29,7 @@ import {
   travelsMeaningfully,
   rootPlacementObserved,
   rootPositionAt,
+  soleLift,
   projectBoxToFrame,
   cropTransform,
   MAX_CROP_ZOOM,
@@ -258,6 +259,21 @@ test("the world position is lerped the way the GLB's LINEAR channels are, not st
   // position the pipeline never claimed.
   assert.deepEqual(rootPositionAt(travelling, 0, -5), rt[0].position.slice(0, 3));
   assert.deepEqual(rootPositionAt(travelling, 0, 1e6), rt[rt.length - 1].position.slice(0, 3));
+});
+
+test("soleLift: planted soles land on the floor, a jump keeps its height, nothing sinks", () => {
+  // Sole 4 cm under the floor while planted (the measured solo-02 bias), then a
+  // 30 cm jump, then planted again 2 cm under.
+  const gaps = [-0.04, -0.04, -0.04, -0.04, 0.3, 0.3, 0.3, -0.02, -0.02, -0.02, -0.02];
+  const lift = soleLift(gaps);
+  const after = gaps.map((g, k) => g + lift[k]);
+  assert.ok(after.every((g) => g >= -1e-12), `under the floor: ${after}`);
+  // Planted, away from the take-off/landing edges: exactly on it, not floating.
+  for (const k of [0, 1, 2, 8, 9, 10]) assert.ok(Math.abs(after[k]) < 1e-9, `k=${k}: ${after[k]}`);
+  // The jump is lifted by the interpolated bias (~3 cm), not flattened onto the floor.
+  for (const k of [4, 5, 6]) assert.ok(after[k] > 0.3 && after[k] < 0.35, `k=${k}: ${after[k]}`);
+  // No contact at all: only ever lifted, never pulled down.
+  assert.deepEqual(soleLift([0.2, 0.3]), [0, 0]);
 });
 
 /* --------------------------------------------------------------- follow rig */

@@ -521,6 +521,53 @@ export function rootPositionAt(doc: MotionResult, personIndex: number, t: number
 }
 
 /**
+ * A foot whose sole is within this of the fitted floor at a sample is treated as
+ * standing on it. 5 cm is wider than the raw error it has to absorb (solo-01/02:
+ * lowest sole sits a median 3–4 cm under the plane, p95 of the spread ±3 cm) and
+ * narrower than any step that clears the floor.
+ * ponytail: a hop lower than 5 cm is flattened onto the floor; per-foot contact
+ * evidence in the document would lift that ceiling.
+ */
+export const SOLE_CONTACT_BAND_M = 0.05;
+
+/**
+ * Per-sample lift, metres along the floor normal, that puts this dancer's soles ON
+ * the fitted floor. `soleGaps[k]` is the rendered mesh's lowest foot vertex above
+ * the plane at sample k, before any lift (negative = under the floor).
+ *
+ * Why the viewer has to do this at all: the floor is fitted to foot JOINTS (the
+ * lowest of ankle/subtalar/midfoot/ball, grounding.FOOT_JOINTS), and so is the
+ * placement it is compared with — but the mesh sole hangs a median 3.1 cm (2.4–4.3)
+ * below those joints, and per-frame pose/placement noise adds ±3 cm on top. Measured
+ * on real solo-02: the lowest sole is under the floor on 97% of samples, median
+ * −4.1 cm, worst −11 cm. Only the viewer has the rendered surface, so only it can
+ * close that gap, and it can for every existing lesson without a recompute.
+ *
+ *  - contact samples (within the band): lifted so the lowest sole touches the plane;
+ *  - airborne samples: the lift is interpolated from the contact samples either
+ *    side, so a jump keeps its real height instead of being pulled down;
+ *  - a 3-tap zero-phase average, so the body does not bob with per-frame noise;
+ *  - never lower than needed to clear the floor: nothing ends up under it.
+ */
+export function soleLift(soleGaps: number[]): number[] {
+  const n = soleGaps.length;
+  const contact = soleGaps.flatMap((g, k) => (g < SOLE_CONTACT_BAND_M ? [k] : []));
+  if (!contact.length) return soleGaps.map((g) => Math.max(0, -g));
+  const raw = new Array<number>(n);
+  let c = 0;
+  for (let k = 0; k < n; k++) {
+    while (c + 1 < contact.length && contact[c + 1] <= k) c++;
+    const a = contact[c], b = contact[c + 1];
+    if (k <= a || b === undefined) raw[k] = -soleGaps[k <= a ? a : contact[contact.length - 1]];
+    else raw[k] = -soleGaps[a] + ((-soleGaps[b] + soleGaps[a]) * (k - a)) / (b - a);
+  }
+  return raw.map((_, k) => {
+    const avg = (raw[Math.max(0, k - 1)] + raw[k] + raw[Math.min(n - 1, k + 1)]) / 3;
+    return Math.max(avg, -soleGaps[k]);
+  });
+}
+
+/**
  * How far across the floor this dancer ranges over the whole clip, in metres: the
  * diagonal of the bounding rectangle of `root_trajectory` on the ground plane.
  *

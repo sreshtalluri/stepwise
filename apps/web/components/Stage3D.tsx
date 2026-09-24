@@ -16,6 +16,7 @@ import {
   damp,
   rootPlacementObserved,
   rootPositionAt,
+  soleLift,
   sourceProjection,
   FOLLOW,
   VIEW_PRESETS,
@@ -215,6 +216,57 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
   // Whole-clip fact, so it is read once, not 60 times a second.
   const placed = useMemo(() => rootPlacementObserved(doc, personIndex), [doc, personIndex]);
 
+  /**
+   * Sole contact (see `soleLift`). The floor and the placement both measure foot
+   * JOINTS; the drawn sole hangs ~3 cm under them, so without this the feet sink
+   * into the floor on almost every frame. Only for a placed dancer on a grounded
+   * floor — a never-placed dancer has no position relative to any floor to correct.
+   */
+  const floor = useMemo(() => {
+    const plane = doc.grounding.status === "none" ? null : doc.grounding.floor_plane;
+    if (!plane || !placed) return null;
+    const feet = ["foot_l", "foot_r"].flatMap((id) => regionMeshes.get(id) ?? []);
+    if (!feet.length) return null;
+    return { normal: new THREE.Vector3(...plane.normal).normalize(), point: new THREE.Vector3(...plane.point), feet };
+  }, [doc, placed, regionMeshes]);
+  const lift = useRef<number[] | null>(null);
+
+  /**
+   * Lowest drawn sole along the floor normal, relative to the root bone, in the
+   * placement group's frame (so the mirror, applied on the child, is included).
+   * Needs the scene's world matrices current for the pose just set.
+   */
+  const soleBelowRoot = (): number => {
+    const place = placeRef.current!;
+    const { normal, feet } = floor!;
+    place.updateMatrixWorld(true);
+    const rootAt = place.worldToLocal(rootBone!.getWorldPosition(scratch.current)).dot(normal);
+    let low = Infinity;
+    const v = vertex.current;
+    for (const mesh of feet) {
+      const count = mesh.geometry.attributes.position.count;
+      for (let i = 0; i < count; i++) {
+        low = Math.min(low, place.worldToLocal(mesh.localToWorld(mesh.getVertexPosition(i, v))).dot(normal));
+      }
+    }
+    return low - rootAt;
+  };
+  const vertex = useRef(new THREE.Vector3());
+
+  // Once per clip, after the action is playing (the effect above): pose every sample,
+  // measure the sole against the floor at the placed root, derive the lift.
+  useEffect(() => {
+    lift.current = null;
+    if (!floor || !rootBone || !placeRef.current) return;
+    const gaps = doc.sample_times_s.map((t, k) => {
+      mixer.setTime(t);
+      const root = new THREE.Vector3(...(doc.persons[personIndex].root_trajectory[k].position as Vec3));
+      return root.sub(floor.point).dot(floor.normal) + soleBelowRoot();
+    });
+    lift.current = soleLift(gaps);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- soleBelowRoot only reads refs and `floor`
+  }, [doc, personIndex, floor, rootBone, mixer, clip]);
+
   useFrame((_, delta) => {
     const t = timeRef.current ?? 0;
     mixer.setTime(t);
@@ -239,6 +291,19 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
       // the bone's world matrix from the pose mixer.setTime just wrote.
       place.worldToLocal(rootBone.getWorldPosition(scratch.current));
       place.position.set(world[0] - scratch.current.x, world[1] - scratch.current.y, world[2] - scratch.current.z);
+
+      if (floor && lift.current) {
+        // The per-sample lift, lerped on the same clock as the pose and the root,
+        // then checked against the live sole: the mixer lerps rotations between
+        // samples, so a foot can dip between two samples that each clear the floor.
+        const times = doc.sample_times_s;
+        const i = sampleIndexAt(times, t);
+        const span = i + 1 < times.length ? times[i + 1] - times[i] : 0;
+        const u = span > 0 ? Math.min(Math.max((t - times[i]) / span, 0), 1) : 0;
+        const planned = lift.current[i] + ((lift.current[i + 1] ?? lift.current[i]) - lift.current[i]) * u;
+        const height = scratch.current.set(...world).sub(floor.point).dot(floor.normal) + soleBelowRoot();
+        place.position.addScaledVector(floor.normal, Math.max(planned, -height));
+      }
     }
 
     // Visibility is a step lookup on sample_times_s — never interpolated across a
@@ -357,16 +422,13 @@ function Floor({ doc }: { doc: MotionResult }) {
           The fog below is what turns the far edge into that horizon rather than a
           hard disc rim.
 
-          Drawn first and without writing depth, so it can never hide the body. The
-          plane is a fit, not a surface: on real solo-02 the posed foot mesh dips
-          2–6 cm below it on most frames (the sole sits under the ball joint the
-          grounding solve measures), and a depth-tested disc sliced the toes off
-          flat. The mesh is evidence; the fitted plane does not get to occlude it.
-          The camera cannot orbit under the floor (maxPolarAngle), so nothing that
-          should be hidden by it ever is. */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow renderOrder={-1}>
+          Depth-tested like any surface. It used to slice the toes off because the
+          sole sat 3–4 cm under the fitted plane on most frames; the Dancer's sole
+          contact (`soleLift`) now keeps a placed dancer's feet on top of it, so a
+          foot that shows up cut here is a real regression, not a thing to hide. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <circleGeometry args={[18, 64]} />
-        <meshStandardMaterial color="#8E8071" roughness={0.95} metalness={0} depthWrite={false} />
+        <meshStandardMaterial color="#8E8071" roughness={0.95} metalness={0} />
       </mesh>
     </group>
   );
