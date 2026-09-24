@@ -70,7 +70,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import modal
-from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 
@@ -1012,9 +1012,10 @@ def remove_lesson(clip_id: str, request: RemovalRequest, http: Request) -> Remov
 # ---------------------------------------------------------------------------
 
 @app.post("/events")
-async def post_events(http: Request) -> dict:
+async def post_events(http: Request, tasks: BackgroundTasks) -> dict:
     body = await http.body()
-    return {"accepted": analytics.ingest(body, http.headers, http.client and http.client.host)}
+    return {"accepted": analytics.ingest(body, http.headers, http.client and http.client.host,
+                                         defer=tasks.add_task)}
 
 
 @app.get("/metrics")

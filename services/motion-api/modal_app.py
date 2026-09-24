@@ -958,6 +958,10 @@ ADMIN_SECRET = optional_secret("stepwise-admin")
 # file upload works, which is the closed-by-default the gate was built for.
 INVITE_SECRET = optional_secret("stepwise-invite")
 
+# POSTHOG_KEY (+ optional POSTHOG_HOST, default US cloud): forward accepted events to
+# PostHog for dashboards (analytics.forward). Absent -> nothing leaves Neon.
+POSTHOG_SECRET = optional_secret("stepwise-posthog")
+
 
 # glTF sampler interpolation, fixed up after pymomentum writes the file.
 #
@@ -1939,7 +1943,8 @@ api_image = (
 
 @app.function(
     image=api_image,
-    secrets=R2_SECRET + DB_SECRET + ORIGIN_SECRET + ADMIN_SECRET + INVITE_SECRET + OBS_SECRETS,
+    secrets=(R2_SECRET + DB_SECRET + ORIGIN_SECRET + ADMIN_SECRET + INVITE_SECRET + POSTHOG_SECRET
+             + OBS_SECRETS),
     # Scale to zero. A cold start is a few seconds on the upload endpoint,
     # where it is invisible, and on the first two-second job poll, where it is
     # also invisible. min_containers=1 pins ~$45/month of always-on container
