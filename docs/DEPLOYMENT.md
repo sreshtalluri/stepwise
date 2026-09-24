@@ -19,7 +19,7 @@ execution.
 | **HTTP API** | **LIVE** | `https://sreshta-talluri--stepwise-motion-web.modal.run` |
 | Dispatch rate limit | **LIVE** — per learner IP (forwarded by the Worker), retries charged and capped at 2, link downloads pre-checked | 5/h · 20/day per IP, 200/day global, `STEPWISE_LIMIT_*` |
 | GPU pipeline | live (unchanged) | Modal app `stepwise-motion`, workspace `sreshta-talluri`, environment `main` |
-| Asset delivery | **BROKEN since ≤2026-09-23 — R2 rejects the credentials** (`Unauthorized` on Put/Head/List, both the `stepwise-r2` Secret and `~/.stepwise-secrets/r2.env`). Serving falls back to the Volume proxy: lessons open, video seeking does not. `/health` still says `r2` because it checks env names, not access. Fix: new R2 API token → `modal secret create stepwise-r2 --force …` | Cloudflare R2 bucket, presigned URLs (no custom domain yet) |
+| Asset delivery | **LIVE on R2** — restored 2026-09-23 with a new bucket-scoped Account API token (the old R2 keys died with the user token they were minted from; ~1 h outage, lessons fell back to the Volume proxy with no seeking). `/health` checks env names, not access: use `verify_r2_access` | Cloudflare R2 bucket, presigned URLs (no custom domain yet) |
 | Retention sweeper | live, daily | `sweep_expired`, `modal.Period(days=1)` |
 | Job state | **LIVE on Postgres** (Neon), Volume read-through (migration step 3) | `stepwise-db` Secret, `STEPWISE_JOB_BACKEND=postgres` |
 | CI | live | `.github/workflows/test.yml`, push + PR |
