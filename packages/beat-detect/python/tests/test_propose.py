@@ -82,3 +82,25 @@ def test_solo02_shape_tempo_and_downbeat(tmp_path):
     count_57 = result.count_one_s + 56 * result.seconds_per_count
     assert abs(count_57 - (true_one + 56 * spc)) < 0.06, count_57
     assert result.warnings == []
+
+
+
+def test_extract_audio_trims_he_aac_priming_once():
+    """The decoded track must be exactly as long as the container says.
+
+    Fixture: a synthesized click, HE-AAC (the codec TikTok uses) in .mp4,
+    encoded with macOS AudioToolbox (`-c:a aac_at -profile:a 4`), whose edit
+    list trims 2112 priming samples and declares 137151 samples at 44.1 kHz.
+    Debian bookworm's ffmpeg 5.1 trimmed the priming twice: 3.062 s here, and
+    on solo-02 every beat came out 115 ms early (count 1 at 1.789 s instead
+    of 1.905 s). imageio-ffmpeg's 7.x decodes 3.110 s."""
+    from pathlib import Path
+
+    from beat_detect.propose import _extract_audio
+
+    out = _extract_audio(Path(__file__).parent / "fixtures" / "he-aac-click.mp4")
+    try:
+        z, zsr = sf.read(str(out))
+    finally:
+        out.unlink()
+    assert abs(len(z) / zsr - 137151 / 44100) < 0.005, len(z) / zsr

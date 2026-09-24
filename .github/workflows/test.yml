@@ -85,7 +85,7 @@ jobs:
         if: matrix.suite == 'beat-detect'
         run: |
           uv venv --python 3.12
-          uv pip install pytest librosa numpy soundfile
+          uv pip install pytest librosa numpy soundfile imageio-ffmpeg==0.6.0
           cd packages/beat-detect/python && ../../../.venv/bin/python -m pytest -q
 
       - name: cv tools
