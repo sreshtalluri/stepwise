@@ -28,6 +28,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 NO_REQUEST = types.SimpleNamespace(headers={}, client=None)
 
 
+def _removal(api, relationship="i_am_in_it", reason=""):
+    return api.RemovalRequest(relationship=relationship, reason=reason)
+
+
 class FakeVolume:
     """Enough of modal.Volume for these handlers: the parts that move bytes."""
 
@@ -131,7 +135,7 @@ def test_removal_deletes_every_artifact(api):
     api.results_volume.files["/abc.npz"] = b"npz-bytes"
     api.results_volume.files["/abc.last-access.json"] = b'{"at": 0}'
 
-    out = api.remove_lesson("abc", api.RemovalRequest(reason="i am in this video"))
+    out = api.remove_lesson("abc", _removal(api, reason="i am in this video"), NO_REQUEST)
 
     survivors = [p for p in api.results_volume.files if "abc" in p]
     assert survivors == ["/abc.removed.json"], survivors
@@ -139,14 +143,47 @@ def test_removal_deletes_every_artifact(api):
     assert len(out.removed) >= 8
 
     tomb = json.loads(api.results_volume.files["/abc.removed.json"])
-    assert set(tomb) == {"clip_id", "removed_at", "reason"}, \
-        "the tombstone must hold nothing derived from the person"
+    assert set(tomb) == {"clip_id", "removed_at", "reason", "relationship"}, \
+        "the tombstone must hold nothing derived from the video"
+    assert tomb["relationship"] == "i_am_in_it" and tomb["reason"] == "i am in this video"
+
+
+def test_removal_by_job_id_resolves_the_canonical_clip(api):
+    # The web only knows the job_id in its /lesson/{job_id} link.
+    _seed_lesson(api, "abc", "job_abc")
+    api.results_volume.files["/job_legacy.job-meta.json"] = json.dumps({"clip_id": "abc"}).encode()
+    out = api.remove_lesson_by_job("job_legacy", _removal(api), NO_REQUEST)
+    assert out.clip_id == "abc"
+    assert "/abc.removed.json" in api.results_volume.files
+    assert api.uploads_volume.files == {}
+
+
+def test_removal_request_requires_a_relationship_and_caps_the_reason(api):
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        api.RemovalRequest(reason="no box ticked")
+    with pytest.raises(ValidationError):
+        api.RemovalRequest(relationship="lawyer")
+    with pytest.raises(ValidationError):
+        api.RemovalRequest(relationship="other", reason="x" * 501)
+
+
+def test_removal_alerts_the_owner_without_the_reason(api, monkeypatch):
+    sent = []
+    monkeypatch.setattr(api.observability, "message",
+                        lambda text, component, **kw: sent.append((text, component, kw)))
+    _seed_lesson(api, "abc", "job_abc")
+    api.remove_lesson("abc", _removal(api, "i_own_the_rights", "my name is Jo, @jo.dances"), NO_REQUEST)
+    assert sent == [("lesson removed", "web",
+                     {"level": "warning", "relationship": "i_own_the_rights", "clip_id": "abc"})]
+    api.remove_lesson("abc", _removal(api), NO_REQUEST)
+    assert len(sent) == 1, "an already-removed lesson is not a second alert"
 
 
 def test_removed_lesson_is_410_not_404_and_assets_are_gone(api):
     from fastapi import HTTPException
     _seed_lesson(api, "abc", "job_abc")
-    api.remove_lesson("abc", None)
+    api.remove_lesson("abc", _removal(api), NO_REQUEST)
 
     for call in (lambda: api.get_job_status("job_abc"),
                  lambda: api.get_job_result("job_abc"),
@@ -159,8 +196,8 @@ def test_removed_lesson_is_410_not_404_and_assets_are_gone(api):
 
 def test_removal_is_idempotent(api):
     _seed_lesson(api, "abc", "job_abc")
-    api.remove_lesson("abc", None)
-    again = api.remove_lesson("abc", None)
+    api.remove_lesson("abc", _removal(api), NO_REQUEST)
+    again = api.remove_lesson("abc", _removal(api), NO_REQUEST)
     assert again.removed == []
 
 
@@ -180,7 +217,7 @@ def test_dedupe_never_resurrects_a_removed_lesson(api):
     fp = {"sha256": "f" * 64, "duration_s": 20.0, "frames": 4,
           "ahash": "0" * 64, "dhash": "0" * 64}
     _seed_lesson(api, "abc", "job_abc", fp)
-    api.remove_lesson("abc", None)
+    api.remove_lesson("abc", _removal(api), NO_REQUEST)
     assert api._find_existing(dict(fp)) is None, \
         "a re-upload must never be pointed at a lesson that was taken down"
 
@@ -202,7 +239,7 @@ def test_removal_drops_the_fingerprint_entry(api):
     fp = {"sha256": "f" * 64, "duration_s": 20.0, "frames": 4,
           "ahash": "0" * 64, "dhash": "0" * 64}
     _seed_lesson(api, "abc", "job_abc", fp)
-    api.remove_lesson("abc", None)
+    api.remove_lesson("abc", _removal(api), NO_REQUEST)
     assert retention.read_index(api.results_volume) == [], \
         "the content fingerprint is derived from the video and must go with it"
 
@@ -294,7 +331,7 @@ def test_reuploading_a_reencode_starts_no_gpu_job(api, tmp_path):
     assert len(api.uploads_volume.files) == 1, "no second copy of the video may be stored"
 
     # And the removal is therefore complete for BOTH uploaders at once.
-    api.remove_lesson(second.clip_id, None)
+    api.remove_lesson(second.clip_id, _removal(api), NO_REQUEST)
     assert api.uploads_volume.files == {}
 
 

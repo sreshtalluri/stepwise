@@ -138,3 +138,12 @@ def test_fastapi_errors_reach_sentry_scrubbed(sent):
     assert "ValueError" in body, "the ASGI integration never reported the 500"
     for leak in ("tiktok.com", "some.dancer", "X-Amz-Signature", "AKIA123"):
         assert leak not in body, leak
+
+
+def test_message_is_a_warning_with_tags_and_still_scrubbed(sent):
+    observability.message(f"lesson removed via {TIKTOK}", "web",
+                          relationship="i_am_in_it", clip_id="c0ffee")
+    body = "\n".join(sent).replace(" ", "")
+    assert '"level":"warning"' in body and "lessonremovedvia[url]" in body
+    assert '"relationship":"i_am_in_it"' in body and '"clip_id":"c0ffee"' in body
+    assert "tiktok.com" not in body

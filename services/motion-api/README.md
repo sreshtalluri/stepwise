@@ -241,6 +241,16 @@ Gone. Immediate, not queued. Verified against the live service on 2026-09-21:
 9 Volume paths plus 3 R2 keys removed, nothing left in the bucket holding that
 lesson, and `/jobs`, `/assets/video:` and `/assets/*.glb` all 410.
 
+`POST /jobs/{job_id}/removal` is the same thing addressed by job_id (what the
+web's `/lesson/{job_id}` link carries). Body, both routes:
+`{"relationship": "i_am_in_it" | "i_own_the_rights" | "other", "reason": "<=500 chars, optional"}`.
+Repeating a removal is a 200 no-op. Each real removal: one `events` row
+(`name='removal'`, daily-salted IP hash, `props.relationship`), a Sentry
+warning "lesson removed" tagged `relationship` + `clip_id` (the typed reason is
+never sent), and the reason kept only on the tombstone. 5 removals/day per IP
+(`STEPWISE_LIMIT_REMOVALS_IP_DAY`), then 429 in the same error shape as uploads;
+like the dispatch limit it is off without the Postgres backend.
+
 One thing that is **not** handled and will matter the day a custom domain
 exists: deleting the origin object does not delete the CDN's edge copy. See
 `retention._delete_r2_objects` and `docs/DEPLOYMENT.md` §5.2.
