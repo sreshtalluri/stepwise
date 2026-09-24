@@ -46,10 +46,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 # PRD section 5: one clip, <=60 s. This constant and
 # `tools/process_clip.extract_frames`'s `max_seconds` are one fact written
@@ -131,6 +132,19 @@ _ERROR_PATTERNS: tuple[tuple[tuple[str, ...], str, str, bool], ...] = (
     # OBSERVED: `yt-dlp https://example.com/` -> "ERROR: Unsupported URL: ..."
     (("unsupported url",), "link_not_supported",
      "That link does not point at a video we can open. Paste a TikTok or YouTube link.",
+     False),
+    # OBSERVED (from Modal): YouTube answers datacenter IPs with "Sign in to
+    # confirm you're not a bot. Use --cookies-from-browser ...". That is
+    # YouTube refusing our servers, not the video being behind a login, so it
+    # is matched BEFORE the login row (it carries the same "--cookies" hint).
+    # Only "not a bot": "Sign in to confirm your age" is a genuine login wall
+    # and stays login_required.
+    # ponytail: no proxy yet. A paid residential proxy would plug in as
+    # `--proxy <url>` (from an env var) on both yt-dlp calls, probe and
+    # download; this row then only fires when the proxy is blocked too.
+    (("not a bot",), "host_blocked",
+     "YouTube is blocking our servers right now. "
+     "Download the video and upload the file here instead.",
      False),
     # OBSERVED: `yt-dlp https://vimeo.com/76979871` -> "web client only works
     # when logged-in. Use --cookies, ...". The "--cookies" hint is yt-dlp's
@@ -289,6 +303,10 @@ def credit(info: dict, pasted_url: str) -> dict:
     its `uploader_id` is a number; YouTube's `uploader_id` is the "@handle" and
     `uploader` the channel name. `creator` is None when neither is there -- the
     line then names only the host rather than guessing a person.
+
+    Plus, only when found: `choreo` (who the caption credits, choreo_credit),
+    `track` and `artist` (music_credit). The caption itself is never stored,
+    only what was extracted from it.
     """
     extractor = (info.get("extractor") or "").lower()
     uploader_id = info.get("uploader_id") or ""
@@ -302,8 +320,88 @@ def credit(info: dict, pasted_url: str) -> dict:
     url = info.get("webpage_url") or ""
     # The link goes on the page, so it has to be one of the two hosts we fetch
     # from; the pasted URL already passed that check.
-    return {"url": url if _host_allowed(url) else pasted_url,
-            "host": _HOST_NAMES.get(extractor, extractor), "creator": creator}
+    out = {"url": clean_url(url if _host_allowed(url) else pasted_url),
+           "host": _HOST_NAMES.get(extractor, extractor), "creator": creator}
+    choreo = choreo_credit(info.get("description") or info.get("title") or "")
+    if choreo:
+        out["choreo"] = choreo
+    out.update(music_credit(info))
+    return out
+
+
+def clean_url(url: str) -> str:
+    """The canonical video URL: tracking query (TikTok's `?_r=1&_t=...`,
+    YouTube's `si=`) and fragment dropped. YouTube's `v` is the one query
+    parameter that IS the video, so it stays."""
+    p = urlparse(url)
+    keep = [(k, v) for k, v in parse_qsl(p.query) if k == "v"]
+    return urlunparse(p._replace(query=urlencode(keep), fragment=""))
+
+
+# C0/C1 controls, zero-width and bidi-override characters: never on the page.
+_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f​-‏‪-‮⁦-⁩]")
+
+
+def _tidy(s, cap: int = 80) -> str | None:
+    """Controls out, whitespace squeezed, capped at `cap` characters."""
+    if not isinstance(s, str):
+        return None
+    s = " ".join(_CONTROL.sub(" ", s).split())
+    return (s[:cap - 1] + "…" if len(s) > cap else s) or None
+
+
+def music_credit(info: dict) -> dict:
+    """{track, artist}, whichever yt-dlp has. TikTok's "original sound - x" is
+    kept: it names whose sound it is. The artist is dropped when the track
+    already names them ("original sound - x" by "x")."""
+    track = _tidy(info.get("track"))
+    artists = info.get("artists")
+    if isinstance(artists, list) and artists:
+        artist = _tidy(", ".join(a for a in artists if isinstance(a, str)))
+    else:
+        artist = _tidy(info.get("artist"))
+    if track and artist and artist.lower() in track.lower():
+        artist = None
+    return {k: v for k, v in (("track", track), ("artist", artist)) if v}
+
+
+# Choreography credit from the caption: only the forms dancers write before a
+# handle, and only @handles after them -- plus a capitalised name right after
+# "choreo by". No match, no credit: never a guess. `(?<![#\w])` keeps hashtags
+# (#choreo, #dc) out. TikTok handles: letters, digits, "_" and ".".
+_LEAD = re.compile(
+    r"(?<![#\w])(?:choreographed\s+by|choreo(?:graphy|grapher)?(?:\s+by)?"
+    r"|dc|dance\s+credits?|cr(?:edits?)?)\s*[:\-–—]?\s*(?=@)",
+    re.IGNORECASE)
+_HANDLE = re.compile(r"\s*(?:,|&|\+|/|\band\b|\bx\b)?\s*@([A-Za-z0-9_.]{2,30})", re.IGNORECASE)
+_NAMED = re.compile(r"(?<![#\w])(?i:choreo(?:graphy)?|choreographed)\s+(?i:by)\s*[:\-–—]?\s*"
+                    r"([A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,2})")
+# "cr"/"credit" also credits filming and sound: skip it after one of these
+# ("🎥 cr @x", "song cr: @x"). The camera emoji alone never leads a match.
+_NOT_CHOREO = re.compile(r"(🎥|📹|📸|\bvid(eo)?|\bfilm(ed)?|\bsong|\bmusic|\baudio|\bsound)\W*$",
+                         re.IGNORECASE)
+
+
+def choreo_credit(caption: str) -> str | None:
+    """"@a, @b" for whoever the caption credits with the choreography (up to
+    three, in caption order), a plain name after "choreo by", or None."""
+    caption = (caption or "")[:4000]
+    handles: list[str] = []
+    for m in _LEAD.finditer(caption):
+        if m.group(0)[:2].lower() == "cr" and _NOT_CHOREO.search(caption[max(0, m.start() - 12):m.start()]):
+            continue
+        pos = m.end()
+        while h := _HANDLE.match(caption, pos):
+            name = "@" + h.group(1).rstrip(".")
+            if name.lower() not in {x.lower() for x in handles}:
+                handles.append(name)
+            pos = h.end()
+    if handles:
+        return _tidy(", ".join(handles[:3]), 100)
+    m = _NAMED.search(caption)
+    if m and m.group(1).split()[0].lower() not in {"me", "myself", "us", "the", "my"}:
+        return _tidy(m.group(1), 40)
+    return None
 
 
 # ---------------------------------------------------------------------------

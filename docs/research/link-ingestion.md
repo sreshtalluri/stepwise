@@ -168,6 +168,7 @@ fallback message contains none of *private*, *deleted*, *removed*, *blocked*,
 | Failure | Code | `retryable` | Why that flag | Provenance |
 |---|---|---|---|---|
 | Not a video link, or an unsupported site | `link_not_supported` | **false** | Nothing about the link will change | Observed |
+| YouTube bot check ("Sign in to confirm you're not a bot") on our datacenter IPs | `host_blocked` | **false** | Retrying from the same servers will not help; the message says to upload the file instead. A residential proxy would lift it (ponytail note in `ingest.py`) | Observed (Modal) |
 | Platform demands a login | `login_required` | **false** | We have no credentials and will not get any | Observed (yt-dlp's `--cookies` hint) |
 | Region-locked | `region_locked` | **false** | Our server does not move | yt-dlp source (`common.py raise_geo_restricted`) — **not reproduced**, no geo-locked clip to hand |
 | Rate-limited | `rate_limited` | **true** | The one failure that genuinely clears on its own | yt-dlp source — not reproduced |
