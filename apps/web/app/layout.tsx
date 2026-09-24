@@ -52,6 +52,10 @@ export default function RootLayout({
           <Link href="/privacy" style={{ textDecoration: "underline", textUnderlineOffset: 3 }}>
             {privacy.footer}
           </Link>
+          {" · "}
+          <a href={`mailto:${privacy.contact}`} style={{ textDecoration: "underline", textUnderlineOffset: 3 }}>
+            {privacy.contact}
+          </a>
         </footer>
       </body>
     </html>
