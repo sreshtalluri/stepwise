@@ -816,9 +816,12 @@ export function stageBasis(doc: MotionResult, level = true): StageBasis {
   if (!plane) return { right: camX, up: camY, back: camZ };
 
   let up = norm(plane.normal as Vec3);
-  // The camera is always on the room side of the floor, so that is the side up points to.
-  const c: Vec3 = [m[12] - plane.point[0], m[13] - plane.point[1], m[14] - plane.point[2]];
-  if (dot(up, c) < 0) up = [-up[0], -up[1], -up[2]];
+  // Up is the side of the floor the phone's picture-up points to — the dancer's head,
+  // and the pipeline's own sign convention (grounding.py: normal[1] > 0), which the
+  // placement in Stage3D relies on. NOT "the side the camera is on": a phone resting on
+  // the floor sits within fit noise of the plane and flipped the stage upside down
+  // (job_b8223229: camera 1.3 cm "below" its floor).
+  if (dot(up, camY) < 0) up = [-up[0], -up[1], -up[2]];
   // The camera's +Z (toward the viewer) laid onto the floor; a straight-down camera has
   // no such direction, so its picture-down (-Y) is used instead.
   let back = reject(camZ, up);

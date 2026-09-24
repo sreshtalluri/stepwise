@@ -480,6 +480,18 @@ test("stageBasis levels the orbit to the floor, not the phone (solo-02's 13.6-de
   assert.ok(Math.abs(dot(top, b.up) - 1) < 1e-9);
 });
 
+test("stageBasis keeps up head-side when the phone rests on the floor (job_b8223229)", () => {
+  // Real plane from the low-angle clip: the camera origin is 1.3 cm on the floor's
+  // underside (fit noise), which must not turn the stage upside down.
+  const normal: Vec3 = [0.013827, 0.95928, -0.282117];
+  const lowAngle = {
+    camera: { camera_to_world: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
+    grounding: { status: "grounded", floor_plane: { normal, point: [0.033635, -0.94579, -3.259407] } },
+  } as unknown as MotionResult;
+  const up = stageBasis(lowAngle).up;
+  assert.ok(up[0] * normal[0] + up[1] * normal[1] + up[2] * normal[2] > 0.99);
+});
+
 test("stageBasis is the camera's own axes on a level floor, with no floor, and for the camera view", () => {
   const axes = { right: [1, 0, 0], up: [0, 1, 0], back: [0, 0, 1] };
   for (const [doc, level] of [[good, true], [failure, true], [good, false]] as const) {
