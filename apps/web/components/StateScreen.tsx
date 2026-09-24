@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { Lockup } from "./brand/Mark";
-import { marketing } from "../lib/copy";
+import { lesson as lessonCopy, marketing } from "../lib/copy";
 import { drawPose, statePoseAt, type StatePose } from "../lib/countoff";
 import { prefersReducedMotion } from "../lib/reveal";
 import type { Failure } from "../lib/submit";
@@ -140,5 +140,26 @@ export function StateNote({ pose, message, action }: { pose: StatePose; message:
         {action && <Action action={action} className="ss-link" />}
       </div>
     </div>
+  );
+}
+
+/** A lesson or job link that did not resolve, by the service's status. Shared by the lesson and processing pages. */
+export function LoadFailed({ status, lessonId }: { status: number; lessonId: string }) {
+  const copy = lessonCopy.load;
+  if (status === 409) {
+    return (
+      <StateScreen pose="sit" title={copy.notReady} body={copy.notReadyBody}
+        action={{ label: copy.notReadyLink, href: `/job/${encodeURIComponent(lessonId)}` }} />
+    );
+  }
+  if (status === 410) {
+    return <StateScreen pose="wave" title={copy.removed} body={copy.removedBody} action={{ label: copy.removedLink, href: "/" }} />;
+  }
+  if (status === 404) {
+    return <StateScreen pose="shrug" title={copy.notFound} body={copy.notFoundBody} action={{ label: copy.notFoundLink, href: "/upload" }} />;
+  }
+  return (
+    <StateScreen pose="look" title={copy.failed} body={copy.failedBody} alert
+      action={{ label: copy.failedLink, onClick: () => window.location.reload() }} />
   );
 }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SkeletonOverlay from "./SkeletonOverlay";
-import StateScreen, { StateNote } from "./StateScreen";
+import StateScreen, { LoadFailed, StateNote } from "./StateScreen";
 import { processing as copy } from "../lib/copy";
 import { failedBody, flowSteps, handoffHref, type Step } from "../lib/flow";
 import { localClipUrl, timeRemaining, useJobStatus, type JobStatus } from "../lib/jobStatus";
@@ -75,6 +75,9 @@ export default function ProcessingScreen({ jobId }: { jobId: string }) {
       setRetry({ kind: "error", message: copy.retryFailed, final: false });
     }
   }
+
+  // A mistyped or removed link: the lesson page's own screens, not an endless poll.
+  if (feed.kind === "gone") return <LoadFailed status={feed.status} lessonId={jobId} />;
 
   if (status?.state === "failed" && status.error) {
     const final = !status.error.retryable || (retry.kind === "error" && retry.final);
