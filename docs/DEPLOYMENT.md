@@ -17,14 +17,15 @@ execution.
 | | Status | Where |
 |---|---|---|
 | **HTTP API** | **LIVE** | `https://sreshta-talluri--stepwise-motion-web.modal.run` |
+| Dispatch rate limit | in code (`ratelimit.py`), live after the next backend deploy | 5/h · 20/day per IP, 200/day global, `STEPWISE_LIMIT_*` |
 | GPU pipeline | live (unchanged) | Modal app `stepwise-motion`, workspace `sreshta-talluri`, environment `main` |
-| Asset delivery | **LIVE on R2** | Cloudflare R2 bucket, presigned URLs (no custom domain yet) |
+| Asset delivery | **BROKEN since ≤2026-09-23 — R2 rejects the credentials** (`Unauthorized` on Put/Head/List, both the `stepwise-r2` Secret and `~/.stepwise-secrets/r2.env`). Serving falls back to the Volume proxy: lessons open, video seeking does not. `/health` still says `r2` because it checks env names, not access. Fix: new R2 API token → `modal secret create stepwise-r2 --force …` | Cloudflare R2 bucket, presigned URLs (no custom domain yet) |
 | Retention sweeper | live, daily | `sweep_expired`, `modal.Period(days=1)` |
-| Job state | Volume JSON (Postgres path built, not switched on) | `STEPWISE_JOB_BACKEND` unset |
+| Job state | **LIVE on Postgres** (Neon), Volume read-through (migration step 3) | `stepwise-db` Secret, `STEPWISE_JOB_BACKEND=postgres` |
 | CI | live | `.github/workflows/test.yml`, push + PR |
-| Database | **blocked** — no Neon project | schema written and tested, §5 |
+| Database | **LIVE** — Neon, `001_init` applied | §5.1 |
 | Frontend hosting | **blocked** — no Cloudflare account/domain | `apps/web` builds clean, §5 |
-| Error tracking | **code wired, not switched on** — needs the `stepwise-sentry` Modal Secret and a deploy | §5.3 |
+| Error tracking | **backend LIVE** (`stepwise-sentry` Secret exists, deployed); browser goes live with the frontend deploy | §5.3 |
 
 One app, one `modal deploy`, one set of credentials. `api.py` was already a
 Modal client — it constructs `modal.Volume.from_name(...)` at import and
@@ -230,7 +231,9 @@ it needs code to finish; all of it needs a credential.
 
 ### 5.1 Neon Postgres → job state, and D5/D6/D7
 
-**Blocked on:** a Neon project and its pooled `DATABASE_URL`.
+**Done** — the steps below were run; `/health` reports `"backend":"postgres","postgres":"ok"`. Kept as the record, and as the rebuild procedure.
+
+**Bug found after cutover, fixed in `4669792`:** `record_dispatch` inserts the row as `queued` and the worker writes only the Volume, so serving the row whenever it existed meant the read-through never ran and every job read `queued` forever. `read_status` now serves a terminal row as-is and otherwise lets the Volume document win.
 
 **Already done:** `services/motion-api/migrations/001_init.sql` covers `users`,
 `creator_tokens`, `sessions`, `clips` (with the `content_sha256 UNIQUE` dedupe
@@ -331,7 +334,7 @@ are all still to do and all need the Cloudflare account first.
 
 ### 5.3 Sentry
 
-**Wired; off until its Secret exists.** Modal Starter retains logs for **one
+**Backend switched on 2026-09-23.** The first switch-on deploy took the API down for ~15 minutes: the `STEPWISE_GIT_SHA` `Secret.from_dict` was attached only when git was readable, so the deploy declared one more dependency than the container's re-import, and every function died at startup with *"Function has 6 dependencies but container got 7 object ids"*. Fixed in `c620bf3` (always attached). **Any per-function object in `modal_app.py` must be declared identically locally and in the container.** Modal Starter retains logs for **one
 day**, so without this a user reporting yesterday's failure is already
 undebuggable.
 

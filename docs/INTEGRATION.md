@@ -1874,3 +1874,35 @@ this run disproves.
   trustworthiness are still unverified and answering them is not a merge's job.
 - No secret committed. R2 and database credentials are Modal Secrets read at
   runtime; `/health` reports which names are set and never a value.
+
+---
+
+## 29. integration-4
+
+**Cut 2026-09-23 from `render-travel` at the commit that adds this section**,
+fast-forward from `integration-3` (`dd490fc`). No merges were needed: every
+change since integration-3 landed on one line of history.
+
+| Commit | What |
+|---|---|
+| `8230189`, `88fe3c2` | E6 item 5, route B: `Stage3D` places each dancer from `root_trajectory`. Closes §27's first bullet — the rendered dancer now travels. |
+| `4731bbe`, `92d508f` | CI typechecks `apps/web` with `packages/navigation` installed; `apps/web` packaged as a Cloudflare Worker (OpenNext). |
+| `8081567`, `c620bf3` | Sentry, backend and browser. `c620bf3` fixes the switch-on deploy, which crashed every container (DEPLOYMENT.md §5.3). |
+| `deadd04` | `/lesson/{id}` resolves in the browser: fixtures from `/fixtures`, anything else as a job via `/api`. Real lessons no longer 404, and there is no `node:fs` for the Worker to 500 on. |
+| `19cbd2f` | Dispatch rate limit in Postgres: 5/h and 20/day per IP, 200/day overall, 429 in DESIGN.md §11's voice. |
+| `31395a8`, `4669792` | `GET /jobs/{id}`: 404 for an id never dispatched, and the Postgres row no longer masks the worker's progress (every job since the cutover had read `queued` forever). |
+
+**Browser-verified on this tip** (`next dev`, headless Chromium):
+
+* `travelling` — top view, follow off: the dancer is at the left edge at 0.5 s
+  and near centre at 12 s. The follow button reads "travels 2.6 m".
+* `unplaced-dancer` — both dancers render standing on the floor. Dancer 2,
+  whose placement never ran, stays where its clip puts it rather than at the
+  2.16 m placeholder height, which is 88fe3c2's "visible limitation, not a
+  confident lie" contract.
+* A real eval clip (`solo-02`, 33 s, one dancer) end to end on the live
+  Modal app: `POST /clips` → 214 s wall clock → `succeeded`, grounded,
+  117.5 BPM. That run is what found the stuck-`queued` bug above, and that
+  **R2 credentials are currently rejected** (DEPLOYMENT.md §1).
+
+§27's other three items are unchanged.
