@@ -7,6 +7,10 @@ dependencies = [
     "imageio-ffmpeg==0.6.0",  # pinned ffmpeg 7.x; see _extract_audio
     "librosa>=0.10",
     "numpy>=1.26",
+    # Beat This! (MIT code and weights). CPU-only torch: no GPU on this path.
+    "beat-this==1.1.0",
+    "torch>=2",
+    "torchaudio",
 ]
 
 [dependency-groups]
@@ -14,6 +18,15 @@ dev = [
     "pytest>=8.3",
     "soundfile>=0.12",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchaudio = { index = "pytorch-cpu" }
 
 [build-system]
 requires = ["hatchling"]

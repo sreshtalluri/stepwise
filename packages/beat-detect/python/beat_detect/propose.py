@@ -7,7 +7,8 @@ ambiguity so a UI (built later, not here) can let a human overrule it.
 `packages/navigation/src/core.ts`'s `gridFromTaps()` is the manual path this
 feeds a *starting point* for; manual tap-in always wins.
 
-Library: librosa (ISC licence — see README for why over madmom/BeatNet).
+Beats: Beat This! (`beat-this`, MIT code and weights), CPU. Count 1: a kick
+(low-band accent) rule over those beats, via librosa (ISC). See README.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 import imageio_ffmpeg
@@ -32,10 +34,9 @@ _PLAUSIBLE_BPM = (70, 180)
 class TempoAlternate:
     """A half-time / double-time reading of the same beat grid.
 
-    librosa's beat tracker (like any autocorrelation-based tracker) frequently
-    locks onto 2x or 0.5x the tempo a human would tap. `secondsPerCount` is
-    the SAME anchor grid re-hypothesized at a different subdivision — not a
-    different countOneS.
+    Any beat tracker (Beat This! included) can lock onto 2x or 0.5x the tempo
+    a human would tap. `secondsPerCount` is the SAME anchor grid
+    re-hypothesized at a different subdivision — not a different countOneS.
     """
 
     label: str  # "double-time" | "half-time"
@@ -108,78 +109,81 @@ def _extract_audio(source: Path) -> Path:
     return tmp
 
 
-def _refine_grid(y: np.ndarray, sr: int, spc0: float) -> tuple[float, float]:
-    """(seconds_per_count, phase_s) of the constant grid that best fits the onsets.
+@lru_cache(maxsize=1)
+def _beat_this():
+    """Beat This! (CPJKU, ISMIR 2024; MIT code and weights), `final0`, CPU,
+    no DBN. Loaded once per process (~1 s). The checkpoint is baked into the
+    Modal image at build time; anywhere else, torch.hub fetches it once into
+    ~/.cache/torch/hub/checkpoints."""
+    from beat_this.inference import Audio2Beats  # torch: imported only when used
 
-    librosa's tempo is quantized to whole 512-sample frames of lag: at 22.05 kHz
-    the only readings near 115-120 BPM are 112.3 / 117.5 / 123.0 / 129.2, and
-    `beat_track` spaces its beats at that period. A 2% tempo error drifts the
-    grid half a beat off within ~25 counts (solo-02: 117.45 read vs 115.07 true,
-    count 25 lands 0.25 s off the beat). So: keep librosa's reading only as the
-    starting point and search +-6% around it -- more than one quantization step,
-    well short of half/double -- at 0.5 ms / 4 ms resolution for the spacing and
-    phase whose grid lands on the most onset energy.
+    return Audio2Beats("final0", device="cpu", dbn=False)
+
+
+def _track_beats(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
+    """(beat times, downbeat times) in seconds. Tests replace this with
+    recorded model output so they stay fast and offline."""
+    beats, downbeats = _beat_this()(y, sr)
+    return np.asarray(beats, float), np.asarray(downbeats, float)
+
+
+def _fit_grid(beats: np.ndarray) -> tuple[float, float, np.ndarray]:
+    """(seconds_per_count, phase_s, idx): the least-squares constant grid
+    `phase_s + seconds_per_count * idx` through the model's beats.
+
+    `idx` is each beat's count number, stepped by the rounded gap so a beat
+    the model skipped (or doubled) does not shift every later count.
+    ponytail: one constant tempo (the contract's grid). A drifting track
+    (solo-07, 125 -> 129 BPM) ends up to ~90 ms off at its ends; pass per-beat
+    times through the contract if that ever shows.
     """
-    hop = 128  # ~6 ms envelope; 512 is what caused the quantization
-    env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop)
-    ft = librosa.frames_to_time(np.arange(len(env)), sr=sr, hop_length=hop)
-    best = (-1.0, spc0, 0.0)
-    for spc in np.arange(spc0 * 0.94, spc0 * 1.06, 0.0005):
-        n = int((ft[-1] - spc) / spc)
-        if n < 2:
-            break
-        phases = np.arange(0.0, spc, 0.004)
-        score = np.interp(phases[:, None] + spc * np.arange(n), ft, env).mean(axis=1)
-        i = int(np.argmax(score))
-        if score[i] > best[0]:
-            best = (float(score[i]), float(spc), float(phases[i]))
-    return best[1], best[2]
+    gaps = np.diff(beats)
+    steps = np.maximum(1, np.round(gaps / np.median(gaps))).astype(int)
+    idx = np.concatenate([[0], np.cumsum(steps)])
+    spc, phase = np.polyfit(idx, beats, 1)
+    return float(spc), float(phase), idx
 
 
-def _count_one(y: np.ndarray, sr: int, spc: float, phase_s: float, music_start_s: float
-               ) -> tuple[float, float, list[CountOneAlternate]]:
-    """(count_one_s, margin, alternates).
+def _count_one(y: np.ndarray, sr: int, beats: np.ndarray, idx: np.ndarray, downbeats: np.ndarray,
+               spc: float, phase_s: float) -> tuple[float, float, list[CountOneAlternate]]:
+    """(count_one_s, margin, alternates), on the grid `phase_s + spc * n`.
 
-    1. The beat-of-the-bar (mod 4) with the strongest low-band (<150 Hz, kick)
-       onsets is the bar downbeat. Beat This! and madmom agree with it on all
-       four eval clips' bar phase.
-    2. Count 1 is the first bar downbeat at or after the music starts. Checked
-       against the owner's labels (tapped/picked in a labelling page, 2026-09-23):
-       solo-01 1.292, solo-02 1.905, group-synced-01 1.120 -- all three are this
-       rule's pick. An earlier rule ("earliest strong beat, half a bar allowed")
-       came from a misread of one comment and was two counts early on two of
-       them; it is gone.
+    1. Kick rule: the beat-of-the-bar (idx mod 4) with the strongest low-band
+       (<150 Hz) onsets at the model's beats is the bar downbeat. With Beat
+       This!'s beats it matched the owner's count 1 on all four labelled clips
+       (solo-01, solo-02, group-synced-01, solo-07); Beat This!'s own
+       downbeats missed solo-07 by half a bar (docs/research/downbeat-models.md).
+    2. When no beat of the bar is >=10% ahead of the runner-up (`margin` <
+       1.1) the kick rule is a coin toss, so the model's majority downbeat
+       phase decides instead.
+    3. Count 1 is the first bar downbeat at or after the first beat the
+       model heard (skips a silent intro, keeps a pickup out).
 
-    ponytail: one fixed grid per clip. solo-07 speeds up (~125 -> 129 BPM), so
-    its grid drifts and no phase of it lands on the owner's 1.03 s (Beat This!
-    gets 0.97). A tempo-following tracker is the upgrade -- check the Beat This!
-    weights licence first (code is MIT, weights unstated).
-    `margin` is the downbeat phase's score over the runner-up. `alternates` are
-    the other three beats of the bar, strongest accent first.
+    `alternates` are the other three beats of that bar. When the kick rule
+    and the model disagree, the pick that lost goes first (the second guess
+    is usually the other one); the rest follow by accent share.
     """
+    if len(beats) < 8:
+        return float(beats[0]) if len(beats) else phase_s, 0.0, []
     hop = 256
     S = np.abs(librosa.stft(y, hop_length=hop))
     low = librosa.onset.onset_strength(
         S=librosa.amplitude_to_db(S[librosa.fft_frequencies(sr=sr) < 150]), sr=sr, hop_length=hop)
     ft = librosa.frames_to_time(np.arange(len(low)), sr=sr, hop_length=hop)
-    beats = phase_s + spc * np.arange(int((ft[-1] - 0.05 - phase_s) / spc) + 1)
-    if len(beats) < 8:
-        return float(beats[0]) if len(beats) else phase_s, 0.0, []
-    accent = np.array([low[(ft > b - 0.05) & (ft < b + 0.05)].max() for b in beats])
-    scores = np.array([accent[k::4].mean() for k in range(4)])
-    k = int(np.argmax(scores))
+    accent = np.array([low[(ft > b - 0.05) & (ft < b + 0.05)].max(initial=0.0) for b in beats])
+    scores = np.array([accent[idx % 4 == k].mean() for k in range(4)])
+    kick = int(np.argmax(scores))
     runner_up = np.sort(scores)[-2]
-    margin = float(scores[k] / runner_up) if runner_up > 0 else 1.0
-    # Skip beats before librosa heard any music (silent intro), half a beat of slack.
-    first = int(np.searchsorted(beats, music_start_s - spc / 2))
-    first = min(first, len(beats) - 4)
-    one = first + (k - first) % 4  # the first downbeat after the music starts
+    margin = float(scores[kick] / runner_up) if runner_up > 0 else 1.0
+    near = [int(idx[np.argmin(np.abs(beats - d))]) % 4 for d in downbeats]
+    model = int(np.bincount(near, minlength=4).argmax()) if near else kick
+    k = kick if margin >= 1.1 else model
+    other = model if k == kick else kick
+    # idx starts at 0 on the first beat heard, so count 1 is grid count k.
     share = scores / scores.sum() if scores.sum() > 0 else np.full(4, 0.25)
-    alternates = [
-        CountOneAlternate(float(beats[i]), int(i - one), round(float(share[i % 4]), 3))
-        for i in sorted(range(first, first + 4), key=lambda i: -share[i % 4]) if i != one
-    ]
-    return float(beats[one]), margin, alternates
+    rest = sorted((i for i in range(4) if i != k), key=lambda i: (i != other, -share[i]))
+    alternates = [CountOneAlternate(float(phase_s + spc * i), i - k, round(float(share[i]), 3)) for i in rest]
+    return float(phase_s + spc * k), margin, alternates
 
 
 def _count_total(count_one_s: float, seconds_per_count: float, clip_duration_s: float) -> int:
@@ -202,29 +206,28 @@ def propose_grid(source: str | Path, *, clip_duration_s: float | None = None) ->
 
     warnings: list[str] = []
     count_one_alternates: list[CountOneAlternate] = []
-    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, units="frames")
-    bpm = float(np.atleast_1d(tempo)[0])
-    beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+    beat_times, downbeat_times = _track_beats(y, sr)
 
     if len(beat_times) < 4:
         warnings.append(f"only {len(beat_times)} beats detected; grid is a low-confidence guess")
-        seconds_per_count = 60.0 / bpm if bpm > 0 else 0.5
+        seconds_per_count = float(np.median(np.diff(beat_times))) if len(beat_times) > 1 else 0.5
         count_one_s = float(beat_times[0]) if len(beat_times) else 0.0
         confidence = 0.0
     else:
-        intervals = np.diff(beat_times)
-        seconds_per_count, phase_s = _refine_grid(y, sr, float(np.median(intervals)))
-        bpm = 60.0 / seconds_per_count
-        count_one_s, downbeat_margin, count_one_alternates = _count_one(y, sr, seconds_per_count, phase_s, float(beat_times[0]))
+        seconds_per_count, phase_s, idx = _fit_grid(beat_times)
+        count_one_s, downbeat_margin, count_one_alternates = _count_one(
+            y, sr, beat_times, idx, downbeat_times, seconds_per_count, phase_s)
         if downbeat_margin < 1.1:
             warnings.append("no beat of the bar is clearly accented; count 1 is a weak guess")
         # Regularity: tight, evenly-spaced intervals -> high confidence.
         # Coefficient of variation of 0 -> confidence 1; >=0.5 -> confidence 0.
+        intervals = np.diff(beat_times) / np.diff(idx)
         cv = float(np.std(intervals) / np.mean(intervals)) if np.mean(intervals) > 0 else 1.0
         regularity = max(0.0, 1.0 - cv / 0.5)
         # Penalize very short beat counts (little evidence).
         coverage = min(1.0, len(beat_times) / 8)
         confidence = round(regularity * coverage, 3)
+    bpm = 60.0 / seconds_per_count
 
     alternates = [
         TempoAlternate("double-time", seconds_per_count / 2, bpm * 2),
