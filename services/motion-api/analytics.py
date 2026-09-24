@@ -32,6 +32,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import urllib.request
 
 import jobstore
@@ -175,9 +176,11 @@ def record(name: str, props: dict, headers, client_host, *, job_id=None, clip_id
     """A server-side event (job_created). Best-effort."""
     def run():
         with jobstore.connection() as conn:
+            visitor = _visitor(conn, headers, client_host)
             conn.execute("INSERT INTO events (name, job_id, clip_id, day_hash, props) "
                          "VALUES (%s, %s, %s, %s, %s::jsonb)",
-                         (name, job_id, clip_id, _visitor(conn, headers, client_host), json.dumps(props)))
+                         (name, job_id, clip_id, visitor, json.dumps(props)))
+        _forward_soon(visitor, [(name, props, job_id)])
     _guarded(name, run)
 
 
@@ -215,6 +218,9 @@ def record_finished(doc: dict, clip_id: str, persons_of) -> None:
                 conn.execute("INSERT INTO events (name, job_id, clip_id, props) "
                              "VALUES ('job_finished', %s, %s, %s::jsonb)",
                              (key[0], clip_id, json.dumps(props)))
+                # No visitor here (the worker finished it, not a browser): the
+                # job id is the PostHog distinct_id.
+                _forward_soon(key[0], [("job_finished", props, key[0])])
         _FINISHED.add(key)
     _guarded("job_finished", run)
 
@@ -227,16 +233,18 @@ def record_finished(doc: dict, clip_id: str, persons_of) -> None:
 # geoip is off, so the only address PostHog could see is Modal's.
 # ---------------------------------------------------------------------------
 
-def posthog_batch(key: str, visitor: bytes, rows: list, when: str) -> dict:
-    """rows are validate()'s (name, props, lesson) tuples."""
+def posthog_batch(key: str, visitor: bytes | str, rows: list, when: str) -> dict:
+    """rows are validate()'s (name, props, lesson) tuples. `visitor` is the
+    day_hash, or a job id for job_finished, which has no visitor."""
+    distinct = visitor if isinstance(visitor, str) else visitor.hex()
     return {"api_key": key, "batch": [
-        {"event": name, "distinct_id": visitor.hex(), "timestamp": when,
+        {"event": name, "distinct_id": distinct, "timestamp": when,
          "properties": {**props, **({"lesson": lesson} if lesson else {}),
                         "$process_person_profile": False, "$geoip_disable": True, "$ip": None}}
         for name, props, lesson in rows]}
 
 
-def forward(visitor: bytes, rows: list, when: str) -> None:
+def forward(visitor: bytes | str, rows: list, when: str) -> None:
     """POST the batch to PostHog. No POSTHOG_KEY -> no-op. Runs after the
     response (api.py BackgroundTasks); a failure is logged and dropped."""
     key = os.environ.get("POSTHOG_KEY")
@@ -250,6 +258,14 @@ def forward(visitor: bytes, rows: list, when: str) -> None:
         urllib.request.urlopen(req, timeout=3).close()
     except Exception as e:  # noqa: BLE001 -- dashboards are optional
         print(f"[analytics] posthog forward dropped: {type(e).__name__}: {e}")
+
+
+def _forward_soon(visitor, rows: list) -> None:
+    """forward() off the request thread, for the server-side events, which have
+    no BackgroundTasks to hand. No key -> nothing, not even a thread."""
+    if os.environ.get("POSTHOG_KEY"):
+        threading.Thread(target=forward, daemon=True, args=(
+            visitor, rows, dt.datetime.now(dt.timezone.utc).isoformat())).start()
 
 
 def ingest(body: bytes, headers, client_host, defer=None) -> int:
