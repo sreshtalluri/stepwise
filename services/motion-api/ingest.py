@@ -7,7 +7,7 @@ same file.
 
 **Read `docs/research/link-ingestion.md` before changing this.** The platform
 terms question for *ingestion* is genuinely different from the one
-`docs/research/rights-and-privacy.md` answered for *uploads*, it is not
+`docs/legal/rights-and-privacy.md` answered for *uploads*, it is not
 settled, and the answer this code implements ("invite-only pilot, not public
 launch") is a scope choice with a named expiry, not a legal conclusion.
 
@@ -276,6 +276,34 @@ def source_key(info: dict) -> str:
     normalise to `tiktok:7672198121417444628`.
     """
     return f"{(info.get('extractor') or '').lower()}:{info.get('id') or ''}"
+
+
+_HOST_NAMES = {"tiktok": "TikTok", "youtube": "YouTube"}
+
+
+def credit(info: dict, pasted_url: str) -> dict:
+    """Who made the original, for the "Original by @creator on TikTok" line.
+
+    docs/legal/legal-public-learning.md §6(a)2. Read off yt-dlp's metadata
+    (checked 2026-09-23): TikTok's `uploader` is the @handle without the @ and
+    its `uploader_id` is a number; YouTube's `uploader_id` is the "@handle" and
+    `uploader` the channel name. `creator` is None when neither is there -- the
+    line then names only the host rather than guessing a person.
+    """
+    extractor = (info.get("extractor") or "").lower()
+    uploader_id = info.get("uploader_id") or ""
+    uploader = info.get("uploader") or ""
+    if uploader_id.startswith("@"):
+        creator = uploader_id
+    elif extractor == "tiktok" and uploader:
+        creator = f"@{uploader}"
+    else:
+        creator = uploader or None
+    url = info.get("webpage_url") or ""
+    # The link goes on the page, so it has to be one of the two hosts we fetch
+    # from; the pasted URL already passed that check.
+    return {"url": url if _host_allowed(url) else pasted_url,
+            "host": _HOST_NAMES.get(extractor, extractor), "creator": creator}
 
 
 # ---------------------------------------------------------------------------

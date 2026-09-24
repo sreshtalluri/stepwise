@@ -185,13 +185,17 @@ def read_status(volume, job_id: str, clip_id_for) -> Optional[dict]:
     return doc
 
 
-def record_dispatch(volume, job_id: str, clip_id: str) -> None:
+def record_dispatch(volume, job_id: str, clip_id: str, credit: Optional[dict] = None) -> None:
     """Called once, when a job is spawned. Writes the job -> clip mapping that
     retry and result-building need later without parsing it back out of the
-    job_id string."""
+    job_id string, and for a pasted link the creator credit (ingest.credit)
+    that GET /jobs/{job_id}/source serves."""
     import retention
 
-    retention.write_json(volume, f"/{job_id}.job-meta.json", {"clip_id": clip_id})
+    meta = {"clip_id": clip_id}
+    if credit:
+        meta["credit"] = credit
+    retention.write_json(volume, f"/{job_id}.job-meta.json", meta)
     if postgres_enabled():
         try:
             _pg_write(job_id, clip_id, queued_doc(job_id))

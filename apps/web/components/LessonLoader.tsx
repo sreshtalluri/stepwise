@@ -6,7 +6,7 @@ import LessonViewer from "./LessonViewer";
 import RemoveLessonDialog from "./RemoveLessonDialog";
 import LessonLoading from "./LessonLoading";
 import StateScreen from "./StateScreen";
-import { LESSONS, lessonSource } from "../lib/lessons";
+import { LESSONS, lessonSource, parseCredit, type Credit } from "../lib/lessons";
 import { captureThumb, forgetLesson, hasThumb, recordOpened } from "../lib/myLessons";
 import { lesson as lessonCopy } from "../lib/copy";
 import type { MotionResult } from "../lib/motion";
@@ -25,6 +25,7 @@ export default function LessonLoader({ lessonId }: { lessonId: string }) {
   const source = lessonSource(lessonId);
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [reporting, setReporting] = useState(false);
+  const [credit, setCredit] = useState<Credit | null>(null);
   const router = useRouter();
   // Built-in examples are static files: nothing on the server to remove, and
   // they are listed as examples rather than in My lessons.
@@ -50,6 +51,22 @@ export default function LessonLoader({ lessonId }: { lessonId: string }) {
     };
   }, [source.docUrl]);
 
+  // The creator credit, beside the document rather than in it: MotionResult is
+  // a strict contract. An uploaded file answers 404 and gets no line.
+  useEffect(() => {
+    if (!source.creditUrl) return;
+    let cancelled = false;
+    fetch(source.creditUrl)
+      .then((res) => (res.ok ? res.json() : null))
+      .catch(() => null)
+      .then((c) => {
+        if (!cancelled) setCredit(parseCredit(c));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source.creditUrl]);
+
   // "My lessons" (lib/myLessons.ts): remember a job lesson on this device when
   // it opens; forget it when its link says it was removed. Fixtures are listed
   // as examples already.
@@ -74,6 +91,7 @@ export default function LessonLoader({ lessonId }: { lessonId: string }) {
         lessonId={lessonId}
         title={source.title ?? lessonCopy.load.jobTitle}
         videoUrl={source.videoUrl}
+        credit={credit}
         glbUrls={source.glbUrls(load.doc)}
         onRemoveFromMyLessons={isExample ? undefined : () => {
           forgetLesson(lessonId);

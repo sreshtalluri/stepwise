@@ -71,7 +71,7 @@ The marketing site (loud front door, live spinnable demo in the hero), the in-ap
 
 ### The link-ingestion tripwire ⛓ blocks opening sign-up
 
-`docs/research/rights-and-privacy.md` §6.6 asks for this to be written down rather than left in someone's memory, so here it is.
+`docs/legal/rights-and-privacy.md` §6.6 asks for this to be written down rather than left in someone's memory, so here it is.
 
 **`POST /clips/link` fetches video from TikTok and YouTube with an automated tool, from our server, on a visitor's behalf. Both platforms' terms prohibit that.** It ships behind an invite-code allowlist (`STEPWISE_INVITE_CODES`, closed by default) and is scoped to this pilot. File upload is not gated and is unaffected.
 

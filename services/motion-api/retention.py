@@ -29,7 +29,7 @@ reconstruct once ($0.0839 measured on solo-01, L40S). A short TTL is
 economically irrational: every expiry that the learner then re-uploads spends
 two decades of storage to save nothing.
 
-The reason to expire is the one in docs/research/rights-and-privacy.md section 1:
+The reason to expire is the one in docs/legal/rights-and-privacy.md section 1:
 the system holds video of people who never agreed to be here, and holding it
 after it has stopped being useful to anyone is exposure with no upside. So the
 clock runs on LAST ACCESS, not on upload: a lesson people keep opening is a
@@ -44,7 +44,7 @@ import time
 # not cost (see module docstring) -- so the number is chosen as "comfortably
 # longer than a learner's plausible gap", not as "as short as we can bear".
 # Six months covers a season away from dancing and a summer break. This is
-# explicitly the builder's call to change (docs/research/rights-and-privacy.md
+# explicitly the builder's call to change (docs/legal/rights-and-privacy.md
 # section 8: "pick a number, state it, honour it") -- but if it changes, the
 # copy in docs/DESIGN.md section 7d changes in the same commit, or the product
 # is making a promise the code does not keep (DESIGN.md section 7h).

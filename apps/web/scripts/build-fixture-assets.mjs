@@ -264,7 +264,7 @@ function buildTwoDancers(good, half = 0.62) {
  * travel — solo-01 measures 8.63 m of XZ extent over 27.35 m of path. This fixture
  * stays because nobody has checked a real placed clip into the repo, and a real one
  * is a real person's reconstruction, which is not a thing to commit (see
- * docs/research/rights-and-privacy.md). Derived here rather than added to
+ * docs/legal/rights-and-privacy.md). Derived here rather than added to
  * `packages/motion-contract/fixtures/` because it is not pipeline output, and
  * inventing a travelling clip in the frozen contract package would suggest it is.
  *

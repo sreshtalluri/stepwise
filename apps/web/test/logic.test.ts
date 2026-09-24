@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { REVEAL_DURATION_MS, easeInOutCubic, revealAzimuth } from "../lib/reveal";
 import { isJobStatus, timeRemaining } from "../lib/jobStatus";
-import { lessonIdFromLink, lessonSource } from "../lib/lessons";
+import { lessonIdFromLink, lessonSource, parseCredit } from "../lib/lessons";
 import type { MotionResult } from "../lib/motion";
 
 test("the reveal is one full orbit that settles back at the front", () => {
@@ -99,4 +99,13 @@ test("lessonIdFromLink takes a lesson or processing link, never a fixture", () =
   assert.equal(lessonIdFromLink("https://www.tiktok.com/@someone/video/123"), null);
   assert.equal(lessonIdFromLink("/lesson/good-lesson"), null);
   assert.equal(lessonIdFromLink(""), null);
+});
+
+test("parseCredit keeps an https credit and drops anything else", () => {
+  const tiktok = { url: "https://www.tiktok.com/@jonraydybuco/video/7672198121417444628", host: "TikTok", creator: "@jonraydybuco" };
+  assert.deepEqual(parseCredit(tiktok), tiktok);
+  assert.deepEqual(parseCredit({ ...tiktok, creator: null }), { ...tiktok, creator: null });
+  assert.equal(parseCredit({ ...tiktok, url: "javascript:alert(1)" }), null);
+  assert.equal(parseCredit({ detail: "No source link for this lesson." }), null);
+  assert.equal(parseCredit(null), null);
 });

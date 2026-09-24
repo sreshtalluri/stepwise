@@ -922,7 +922,7 @@ def propose_counts(clip_id: str) -> dict | None:
 # and deletes Volume paths, so it has no business loading torch. boto3 joins it
 # because a lesson's bytes now live in two places, and a sweeper that forgets
 # one of them is a privacy leak rather than a storage leak
-# (docs/research/rights-and-privacy.md §1).
+# (docs/legal/rights-and-privacy.md §1).
 sweeper_image = (
     modal.Image.debian_slim(python_version="3.12")
     # psycopg + analytics.py (and the two modules it imports): the 13-month

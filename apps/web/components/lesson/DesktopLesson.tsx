@@ -6,6 +6,7 @@ import { lesson as copy } from "../../lib/copy";
 import {
   BottomBar,
   CountBar,
+  CreditLine,
   DancerPicker,
   doneLine,
   Icon,
@@ -39,6 +40,7 @@ export default function DesktopLesson({ l }: { l: Lesson }) {
         }
         end={
           <div className="ls-bar-end">
+            <CreditLine l={l} />
             <span className="ls-meter">{doneLine(l)}</span>
             <WhoChip l={l} shots={shots} />
           </div>

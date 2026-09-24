@@ -1,7 +1,7 @@
 # Learning in public: the legal picture for stepwise, by stage
 
 > **This is research, not legal advice.** Neither the author nor the builder is a lawyer. It
-> builds on `rights-and-privacy.md` (uploads, biometrics, GDPR), `link-ingestion.md` (platform
+> builds on `rights-and-privacy.md` (uploads, biometrics, GDPR), `../research/link-ingestion.md` (platform
 > terms) and the identity/age research on `research-identity-analytics`, and covers what they did
 > not: **public** lessons, embedding, a curated library and revenue. §7 lists what a lawyer has to
 > confirm. Terms were read on 2026-09-23 and can change without notice.
@@ -21,7 +21,7 @@ The law treats the product's three layers very differently:
    a two-second routine posted to YouTube and turned into a 3D animation survived dismissal.
    That is our pipeline almost exactly. Epic settled in 2024.
 3. **Fetching from TikTok or YouTube.** This is a breach of contract, not a copyright issue
-   (`link-ingestion.md` §3).
+   (`../research/link-ingestion.md` §3).
 
 **Top risks (likelihood × impact):**
 
@@ -73,7 +73,7 @@ because the output is timings, not audio. TikTok's embed player exposes `play`, 
 therefore slow only the 3D, with the video muted or hidden. That is a real cost, and possibly
 an acceptable one, because the 3D is the teacher. Uploads have nothing to embed, so they keep
 today's hosted model. The cleanest fetch alternative is the platform's own download button
-feeding the upload path (`link-ingestion.md` §6).
+feeding the upload path (`../research/link-ingestion.md` §6).
 
 ## 4. Safe harbours
 
@@ -111,7 +111,7 @@ feeding the upload path (`link-ingestion.md` §6).
   only adult, permissioned dancers in marketing.
 - **"Unlisted" is weaker than it looks.** Link lessons derive `clip_id` from the source URL
   (D11), so anyone who knows the TikTok URL can find or delete the lesson. Lesson pages send
-  no `noindex`; only `/admin` does.
+  no `noindex`; only `/admin` does. *(Since fixed: [README](README.md) tracker item 3.)*
 
 ## 6. Recommended changes by stage
 
