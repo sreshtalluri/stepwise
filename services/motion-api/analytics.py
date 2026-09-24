@@ -339,68 +339,6 @@ def ingest(body: bytes, headers, client_host, defer=None) -> int:
 
 
 # ---------------------------------------------------------------------------
-# reads: /metrics
-# ---------------------------------------------------------------------------
-
-def admin_ok(headers) -> bool:
-    """STEPWISE_ADMIN_KEY via `x-stepwise-admin-key` or HTTP basic (any user).
-    Unset -> nobody."""
-    key = os.environ.get("STEPWISE_ADMIN_KEY")
-    if not key:
-        return False
-    given = headers.get("x-stepwise-admin-key", "")
-    auth = headers.get("authorization", "")
-    if not given and auth.lower().startswith("basic "):
-        import base64
-        try:
-            given = base64.b64decode(auth[6:]).decode().partition(":")[2]
-        except Exception:  # noqa: BLE001
-            given = ""
-    return hmac.compare_digest(given.encode(), key.encode())
-
-
-def metrics(conn, days: int = 30) -> dict:
-    """The owner's summary, read from the same report_* views (migration 002)
-    a Grafana or Metabase dashboard reads, so the two cannot disagree."""
-    since = _today() - dt.timedelta(days=days - 1)
-    q = lambda sql: conn.execute(sql, (since,)).fetchall()  # noqa: E731
-
-    daily = q("SELECT day, visitors, uploads, gpu_runs, finished, succeeded FROM report_daily "
-              "WHERE day >= %s ORDER BY day DESC")
-    finished = sum(r[4] or 0 for r in daily)
-    succeeded = sum(r[5] or 0 for r in daily)
-    failures = q("SELECT error_code, sum(jobs) FROM report_failures WHERE day >= %s "
-                 "GROUP BY 1 ORDER BY 2 DESC LIMIT 10")
-    features = q("SELECT name, sum(events), sum(visitors) FROM report_events WHERE day >= %s "
-                  "AND name NOT IN ('job_created', 'job_finished') GROUP BY 1 ORDER BY 2 DESC")
-    (visits, corrected, median_play) = conn.execute(
-        "SELECT count(*), count(*) FILTER (WHERE corrected_count_one), "
-        "  percentile_cont(0.5) WITHIN GROUP (ORDER BY play_seconds) "
-        "FROM report_lesson_visits WHERE day >= %s", (since,)).fetchone()
-    loops = q("SELECT via, snapped, sum(loops) FROM report_loops WHERE day >= %s "
-              "GROUP BY 1, 2 ORDER BY 3 DESC")
-    lengths = q("SELECT counts, sum(loops) FROM report_loops WHERE day >= %s "
-                "GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5")
-    referrers = q("SELECT host, sum(opens) FROM report_referrers WHERE day >= %s "
-                  "GROUP BY 1 ORDER BY 2 DESC LIMIT 10")
-    return {
-        "since": str(since), "days": days,
-        "daily": [dict(zip(("day", "visitors", "uploads", "gpu_runs", "finished", "succeeded"),
-                           (str(r[0]), *r[1:]))) for r in daily],
-        "completion_rate": round(succeeded / finished, 3) if finished else None,
-        "jobs_finished": finished,
-        "top_failures": [{"code": c, "n": n} for c, n in failures],
-        "features": [{"name": n, "events": c, "visitors": v} for n, c, v in features],
-        "lesson_visits": visits,
-        "count_one_correction_rate": round(corrected / visits, 3) if visits else None,
-        "median_play_seconds": median_play,
-        "loops": [{"via": v, "snapped": s, "n": n} for v, s, n in loops],
-        "loop_lengths": [{"counts": c, "n": n} for c, n in lengths],
-        "referrers": [{"host": h, "n": n} for h, n in referrers],
-    }
-
-
-# ---------------------------------------------------------------------------
 # retention: 13 months of rows, then daily roll-ups
 # ---------------------------------------------------------------------------
 
@@ -413,7 +351,7 @@ def rollup(conn, dry_run: bool = False) -> dict:
     with conn.transaction():
         (n,) = conn.execute(f"SELECT count(*) FROM events WHERE occurred_at < {cutoff}").fetchone()
         if n and not dry_run:
-            # detail: what report_daily / report_failures need after the rows go.
+            # detail: state:error_code for job_finished, 'deduplicated' for a dedup'd upload.
             conn.execute(
                 "INSERT INTO event_daily (day, name, detail, n, visitors, seconds) "
                 "SELECT occurred_at::date, name, CASE "

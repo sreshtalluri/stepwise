@@ -4,6 +4,11 @@ Owner question, 2026-09-23. Read with `identity-and-analytics.md` §3 (on `resea
 which this does not overturn. Constraints: no consent banner, EU/UK visitors possible, free
 public site, solo builder, /privacy states only what the code does.
 
+**Status (2026-09-24): superseded by the upgrade path.** Dashboards are PostHog Cloud (US), fed by
+server-side forwarding (`analytics.forward`, docs/DEPLOYMENT.md §3.2). Options (b) and (c) below
+were built and are now retired: `/admin`, `GET /metrics`, the `report_*` views and the
+`stepwise_reader` role are gone (migration `003_retire_report_views`). Neon keeps the events.
+
 ## What we already pay for (or get free)
 
 | Service | Gives analytics? |

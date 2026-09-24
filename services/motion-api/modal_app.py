@@ -953,10 +953,6 @@ DB_SECRET = optional_secret("stepwise-db")
 # -> the API is open to anyone, as before, and per-IP limits use the socket.
 ORIGIN_SECRET = optional_secret("stepwise-origin")
 
-# STEPWISE_ADMIN_KEY: the only key to GET /metrics (analytics.admin_ok).
-# Absent -> /metrics answers 404 to everyone.
-ADMIN_SECRET = optional_secret("stepwise-admin")
-
 # STEPWISE_INVITE_CODES (comma-separated): who may use POST /clips/link during
 # the beta (ingest.invite_code_ok). Absent -> the link door is shut and only
 # file upload works, which is the closed-by-default the gate was built for.
@@ -1948,7 +1944,7 @@ api_image = (
 
 @app.function(
     image=api_image,
-    secrets=(R2_SECRET + DB_SECRET + ORIGIN_SECRET + ADMIN_SECRET + INVITE_SECRET + POSTHOG_SECRET
+    secrets=(R2_SECRET + DB_SECRET + ORIGIN_SECRET + INVITE_SECRET + POSTHOG_SECRET
              + OBS_SECRETS),
     # Scale to zero. A cold start is a few seconds on the upload endpoint,
     # where it is invisible, and on the first two-second job poll, where it is

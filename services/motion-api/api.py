@@ -1034,8 +1034,7 @@ def remove_lesson(clip_id: str, request: RemovalRequest, http: Request) -> Remov
 # Analytics (analytics.py). POST /events is the browser's beacon: a batch of
 # allowlisted {name, props}, no identifier. It always answers 200 -- a bad or
 # over-cap event is dropped, and no database means everything is dropped.
-# GET /metrics is the owner's read, behind STEPWISE_ADMIN_KEY; 404 without it,
-# so its existence is not advertised.
+# Dashboards are PostHog (analytics.forward); there is no read endpoint here.
 # ---------------------------------------------------------------------------
 
 @app.post("/events")
@@ -1043,16 +1042,6 @@ async def post_events(http: Request, tasks: BackgroundTasks) -> dict:
     body = await http.body()
     return {"accepted": analytics.ingest(body, http.headers, http.client and http.client.host,
                                          defer=tasks.add_task)}
-
-
-@app.get("/metrics")
-def get_metrics(http: Request, days: int = 30) -> dict:
-    if not analytics.admin_ok(http.headers):
-        raise HTTPException(404, "Not found.")
-    if not jobstore.postgres_enabled():
-        raise HTTPException(503, "No analytics database configured (STEPWISE_JOB_BACKEND=postgres).")
-    with jobstore.connection() as conn:
-        return analytics.metrics(conn, max(1, min(days, 400)))
 
 
 @app.get("/health")
