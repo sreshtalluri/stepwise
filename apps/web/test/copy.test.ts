@@ -230,8 +230,9 @@ test("privacy and removal copy match what the code does — §7h", () => {
     "This deletes the video and the 3D lesson for everyone who has the link. It can't be undone.");
   // No accounts: "my lessons" is this browser and must say so.
   assert.match(copy.myLessons.subtitle, /on this device/i);
-  // The API's relationship enum, verbatim (services/motion-api/api.py RemovalRequest).
-  assert.deepEqual(Object.keys(copy.removal.relationships), ["i_am_in_it", "i_own_the_rights", "other"]);
+  // The API's relationship enum, verbatim (services/motion-api/api.py RemovalRequest;
+  // test_retention.py checks the same from the other side).
+  assert.deepEqual(Object.keys(copy.removal.relationships), ["i_am_in_it", "under_18", "i_own_the_rights", "other"]);
   // Nothing there is to promise: no terms, no response time, no inbox.
   assert.ok(!/\b(terms|within \d+|hours?|we will respond|contact us)\b/i.test(all), all);
   // There is no app, only a website (1e680e3).

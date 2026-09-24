@@ -10,3 +10,4 @@ versions the build works from.
 - `CONCEPTS.md` — plain-language glossary
 - `NAMES.md` — public name candidates
 - `design-mockups/` — HTML mockups with the real tokens, plus screenshots
+- `legal/` — rights, privacy and platform-terms research, with a tracker of every legal action item

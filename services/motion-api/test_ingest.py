@@ -38,8 +38,10 @@ TIKTOK_ID = "7672198121417444628"
 
 
 def _info(duration=19, vid=TIKTOK_ID, extractor="TikTok", live_status=None):
+    # uploader / uploader_id as yt-dlp reported them for this clip, 2026-09-23.
     return {"id": vid, "extractor": extractor, "duration": duration,
-            "live_status": live_status, "webpage_url": TIKTOK_FULL}
+            "live_status": live_status, "webpage_url": TIKTOK_FULL,
+            "uploader": "jonraydybuco", "uploader_id": "6842822859564581894"}
 
 
 @pytest.fixture()
@@ -169,6 +171,7 @@ def test_upload_then_link_lands_on_one_clip_id(api, fake_ytdlp, tmp_path):
 
     pasted = _paste(api)
     assert pasted.clip_id == uploaded.clip_id, "two routes, two lessons -- takedown would be partial"
+    assert api.get_job_source(pasted.job_id)["host"] == "TikTok", "the link's video is credited"
     assert pasted.deduplicated is True
     assert len(api._spawned) == 1
 
@@ -178,6 +181,40 @@ def test_upload_then_link_lands_on_one_clip_id(api, fake_ytdlp, tmp_path):
     again = _paste(api)
     assert again.clip_id == uploaded.clip_id
     assert fake_ytdlp.downloads == downloads_before
+
+
+# ---------------------------------------------------------------------------
+# creator credit
+# ---------------------------------------------------------------------------
+
+def test_credit_reads_the_handle_per_platform():
+    import ingest
+    assert ingest.credit(_info(), TIKTOK_SHORT) == {
+        "url": TIKTOK_FULL, "host": "TikTok", "creator": "@jonraydybuco"}
+    yt = {"extractor": "youtube", "uploader": "Blender", "uploader_id": "@BlenderOfficial",
+          "webpage_url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ"}
+    assert ingest.credit(yt, "x") == {"url": yt["webpage_url"], "host": "YouTube",
+                                      "creator": "@BlenderOfficial"}
+    # No handle: name the host only. A link off our two hosts: use the pasted one.
+    bare = {"extractor": "TikTok", "webpage_url": "javascript:alert(1)"}
+    assert ingest.credit(bare, TIKTOK_SHORT) == {"url": TIKTOK_SHORT, "host": "TikTok", "creator": None}
+
+
+def test_link_lesson_serves_its_credit_and_upload_does_not(api, fake_ytdlp, tmp_path):
+    import fingerprint
+    clip = tmp_path / "other.mp4"
+    clip.write_bytes(b"a different dance")
+    uploaded = api._store_and_dispatch(str(clip), "cafe" * 8, fingerprint.fingerprint(str(clip)), NO_REQUEST)
+    with pytest.raises(api.HTTPException) as e:
+        api.get_job_source(uploaded.job_id)
+    assert e.value.status_code == 404
+
+    pasted = _paste(api)
+    assert api.get_job_source(pasted.job_id)["creator"] == "@jonraydybuco"
+    # Removal deletes job-meta, so the credit goes with the lesson.
+    api.remove_lesson_by_job(pasted.job_id, _removal(api, relationship="under_18"), NO_REQUEST)
+    with pytest.raises(api.HTTPException):
+        api.get_job_source(pasted.job_id)
 
 
 def test_simultaneous_pastes_cannot_produce_two_lessons(api, fake_ytdlp):

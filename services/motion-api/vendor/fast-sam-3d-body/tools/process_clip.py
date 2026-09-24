@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import subprocess
 import time
-from collections import Counter
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -38,11 +37,9 @@ import numpy as np
 # reconstruction for every confidently-tracked dancer, refuse above this.
 MAX_DANCERS = 6
 
-# ponytail: "confidently-tracked" here means "ByteTrack kept this id alive for
-# at least this many sampled frames" -- a plain frequency threshold, not a
-# confidence-score model. Cheap and good enough to separate a real dancer from
-# a one-frame false detection; upgrade to a track-quality score if false
-# positives near the cap turn out to matter in practice.
+# Floor for the one track tools/track_hygiene.py never drops (the clip's
+# longest), so a clip with a dancer keeps one. Every other track has to clear
+# track_hygiene's presence rules, which are far stricter than this.
 CONFIDENT_MIN_FRAMES = 5
 
 StageCallback = Optional[Callable[..., None]]
@@ -58,13 +55,6 @@ def _emit(on_progress: StageCallback, stage: str, message: str, progress: Option
           **milestones) -> None:
     if on_progress is not None:
         on_progress(stage, message, progress, **milestones)
-
-
-def select_confident_tracks(track_frame_counts: Counter, min_frames: int = CONFIDENT_MIN_FRAMES) -> set[int]:
-    """Pure decision logic, no CV/torch deps -- factored out so it's directly
-    unit-testable (see test_process_clip.py) without a GPU or the real
-    detector. See CONFIDENT_MIN_FRAMES for why this is a plain threshold."""
-    return {tid for tid, count in track_frame_counts.items() if count >= min_frames}
 
 
 def refusal_reason_for(n_confident_dancers: int, max_dancers: int = MAX_DANCERS) -> Optional[str]:
@@ -116,8 +106,9 @@ def process_clip(
     Two passes over the frames, not one:
 
     1. Detection-only pass (cheap: RTMO+ByteTrack, no SAM 3D Body). Decides
-       which track ids are "confidently tracked" (seen in >= CONFIDENT_MIN_FRAMES
-       sampled frames) and refuses the whole clip -- before spending any GPU
+       which track ids are dancers (tools/track_hygiene.py: fragments of one
+       body stitched into one id, blips and reflections dropped) and refuses
+       the whole clip -- before spending any GPU
        time on reconstruction -- if that count exceeds MAX_DANCERS. This
        replaces the old "violator-duet"/different-roles refusal rule
        (docs/OPEN-DECISIONS.md doesn't cover this; the too-many-dancers cap
@@ -136,10 +127,12 @@ def process_clip(
     the gate proves the pipeline hands back genuinely-missing data instead of
     a fabricated pose, it does not implement the suppression/hysteresis logic
     that consumes it (that is Milestone A's own Kalman + suppression chain,
-    not gate scope). track_id is ByteTrack's raw id and can and will jump at
-    an occlusion/re-entry or a dancer crossing -- no identity-continuity
-    correction happens here, matching the multi-dancer scope revision's
-    explicit non-goals (docs/PRD.md section 5).
+    not gate scope). track_id is ByteTrack's id after track_hygiene has
+    stitched one body's fragments together (a re-detection near where the
+    track was lost, or a duplicate box on the same body). Two dancers who
+    CROSS can still swap ids -- no cross-dancer identity correction happens
+    here, matching the multi-dancer scope revision's explicit non-goals
+    (docs/PRD.md section 5).
 
     If the clip is refused (too many confidently-tracked dancers), returns a
     dict with `refused=True` and no reconstruction data -- callers must check
@@ -151,6 +144,7 @@ def process_clip(
     from tools.build_detector import HumanDetector
     from tools.skeleton_constraints import constrain_clip  # branch: bone-constraints
     from tools.hand_crops import annotate_clip  # branch: hands
+    from tools.track_hygiene import clean_tracks
 
     _emit(on_progress, "loading", "Loading the motion model", 0.0)
     device = torch.device("cuda")
@@ -184,15 +178,12 @@ def process_clip(
     # ---- Pass 1: detection only -- who's in this clip, and is it too many? ----
     _emit(on_progress, "detecting", "Finding the dancers in the clip", 0.1)
     raw_detections = []  # for the "raw detector overlays visible" deliverable
-    track_frame_counts: Counter = Counter()
     for i, frame_path in enumerate(frame_files):
         img = cv2.imread(str(frame_path))
         det = detector.run_human_detection(img, bbox_thr=bbox_thr, default_to_full_image=False)
         raw_detections.append({
             "boxes": det["boxes"], "keypoints": det["keypoints"], "track_ids": det["track_ids"]
         })
-        for tid in det["track_ids"].tolist():
-            track_frame_counts[tid] += 1
         if i % 20 == 0:
             _emit(
                 on_progress, "detecting",
@@ -200,10 +191,14 @@ def process_clip(
                 0.1 + 0.15 * (i + 1) / max(1, len(frame_files)),
             )
 
-    confident_track_ids = select_confident_tracks(track_frame_counts)
+    # Relabels stitched fragments in raw_detections in place, so pass 2, the
+    # detections sidecar and the npz all see one id per body.
+    dancer_ids, hygiene = clean_tracks(raw_detections, fps, min_frames=CONFIDENT_MIN_FRAMES)
+    for d in hygiene:
+        print(f"  track hygiene: {d}")
+    confident_track_ids = set(dancer_ids)
     n_confident = len(confident_track_ids)
-    print(f"{n_confident} confidently-tracked dancer(s) (>= {CONFIDENT_MIN_FRAMES} frames): "
-          f"{sorted(confident_track_ids)}")
+    print(f"{n_confident} dancer(s) after track hygiene: {sorted(confident_track_ids)}")
 
     if refusal_reason_for(n_confident) is not None:
         message = (
@@ -348,6 +343,7 @@ def process_clip(
 
     return {
         "refused": False,
+        "track_hygiene": hygiene,  # stitched/dropped decisions, for the performance record
         "bone_length_report": bone_report,
         "crop_report": crop_report,
         "sample_times_s": np.array(sample_times_s, dtype=np.float64),
@@ -379,7 +375,7 @@ def process_clip(
 # `expr_params` is 0.02 MB and is here for the other reason: 72 facial
 # expression coefficients per person per frame are the most face-shaped thing
 # the system stores, they exist purely because the whole dict got pickled, and
-# nothing has ever read them (docs/research/rights-and-privacy.md section 6.2).
+# nothing has ever read them (docs/legal/rights-and-privacy.md section 6.2).
 # Dropping the persistence costs no capability -- the model still emits them on
 # demand if a future feature wants expression.
 #

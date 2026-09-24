@@ -2,13 +2,13 @@
 
 Written alongside the `link-ingestion` branch, 2026-09-21.
 
-**This is a different question from the one `rights-and-privacy.md` answered, and
+**This is a different question from the one `../legal/rights-and-privacy.md` answered, and
 its conclusions do not transfer.** That document analysed a stranger *uploading*
 a clip: the act is theirs, the file is already in their hands, and the
 platform's terms are not in the picture at all. This document is about
 **stepwise fetching a video from TikTok or YouTube, on behalf of a visitor, with
 an automated tool, from our own server**. That is our act, not theirs, and it
-runs into terms `rights-and-privacy.md` never looked at.
+runs into terms `../legal/rights-and-privacy.md` never looked at.
 
 Where the two overlap — who is in the clip, what we keep, who can make it stop —
 the earlier analysis holds and is not repeated here. Where they do not, this
@@ -116,7 +116,7 @@ not a claim available for YouTube the way it nearly is for TikTok.
 Worth naming, because these are the objections that get raised and they are the
 wrong ones:
 
-- **Copyright in the dance.** Unchanged from `rights-and-privacy.md` §3a: short
+- **Copyright in the dance.** Unchanged from `../legal/rights-and-privacy.md` §3a: short
   social-media routines are usually below the threshold for choreographic works.
   Ingestion does not move this.
 - **Copyright in the video.** Unchanged from §3b: the videographer holds it, and
@@ -219,7 +219,7 @@ What each half is doing:
 - **"and build a lesson from it"** says what we then do, in the same breath, so
   nobody reads "fetch" as "link to".
 - **"Anyone in the clip can ask us to take it down, and we will"** is
-  `rights-and-privacy.md` §6.1's highest-value mitigation, made visible at the
+  `../legal/rights-and-privacy.md` §6.1's highest-value mitigation, made visible at the
   moment it becomes relevant. It commits to an outcome the code actually
   delivers (`POST /lessons/{clip_id}/removal`, immediate, no queue).
 
@@ -229,7 +229,7 @@ What it does **not** say, and what the copy lint enforces:
   §12.13 lists them. We do none of them.
 - Not "only paste video you have the right to use" — see above. A test asserts
   the link line does not contain the phrase.
-- **No blocking checkbox.** `rights-and-privacy.md` §7a settled this and
+- **No blocking checkbox.** `../legal/rights-and-privacy.md` §7a settled this and
   ingestion does not reopen it: a checkbox collects an attestation from the
   wrong person, since the consent that matters is the dancer's and the person
   pasting cannot give it on their behalf. If anything the argument is *stronger*
@@ -246,7 +246,7 @@ It does not say "coming soon", which would name a date we have not got.
 
 **One consequence worth stating here rather than in a code comment.** Because
 ingestion makes it trivially easy to point stepwise at any dancer's public post,
-it raises the probability of the scenario `rights-and-privacy.md` §1 identifies
+it raises the probability of the scenario `../legal/rights-and-privacy.md` §1 identifies
 as the largest real exposure: a dancer finding their own body reconstructed
 somewhere they never heard of. The removal path is the mitigation and it
 already exists. The invite gate is what keeps the volume low enough that it
@@ -278,7 +278,7 @@ decide.
   group chat.
 - **It limits who can ask us to fetch, not what we fetch.** It protects the
   platforms from nothing.
-- **It is not a legal exemption.** `rights-and-privacy.md` §6.6 makes the same
+- **It is not a legal exemption.** `../legal/rights-and-privacy.md` §6.6 makes the same
   point about the pilot generally: BIPA, CUBI and GDPR have no small-operator
   carve-out. Invite-only buys *time* and *consent from the right people*, not
   immunity.
@@ -286,7 +286,7 @@ decide.
 
 ### The tripwire
 
-`rights-and-privacy.md` §6.6 asks for this to be named explicitly rather than
+`../legal/rights-and-privacy.md` §6.6 asks for this to be named explicitly rather than
 left in someone's memory, so: **the day link ingestion is opened to people the
 builder has not met, all of the following must already be decided, not just
 listed.**
@@ -297,7 +297,7 @@ listed.**
 2. **A rate limit per code and per source host.** The current code has none. At
    six people this is fine; the first day it is not six people, it is not fine.
 3. **Whether the derived `clip_id` (§7) survives**, which depends on **D5**.
-4. **`rights-and-privacy.md` §6.4** — a registered takedown agent and a
+4. **`../legal/rights-and-privacy.md` §6.4** — a registered takedown agent and a
    repeat-infringer policy. Ingestion makes this more pressing than uploads did:
    we are now the party that made the copy.
 5. **§6.5's terms of service**, specifically whether the visitor representation
@@ -308,7 +308,7 @@ listed.**
    is not asking for one lesson to be deleted.
 
 Items 4 and 5 already needed a lawyer for the upload case
-(`rights-and-privacy.md` §8). Ingestion does not add a new lawyer question so
+(`../legal/rights-and-privacy.md` §8). Ingestion does not add a new lawyer question so
 much as make two existing ones sharper.
 
 ### The first-party alternative, for whoever picks this up
@@ -416,7 +416,7 @@ friction point in the whole funnel.
 
 ## 9. What this document does not establish
 
-In the spirit of `rights-and-privacy.md` §9.
+In the spirit of `../legal/rights-and-privacy.md` §9.
 
 - **No lawyer has read this.** It is a careful reading of two terms-of-service
   documents by someone who is not counsel, and the two items §6 flags for

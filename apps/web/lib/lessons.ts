@@ -45,10 +45,26 @@ export function lessonIdFromLink(text: string): string | null {
   return Object.hasOwn(LESSONS, id) ? null : id;
 }
 
+/** Where a link lesson's video came from: services/motion-api GET /jobs/{id}/source. */
+export interface Credit {
+  url: string;
+  host: string;
+  creator: string | null;
+}
+
+/** The API's answer as a Credit, or null. The URL goes in an href, so https only. */
+export function parseCredit(x: unknown): Credit | null {
+  const c = x as Partial<Credit> | null;
+  if (typeof c?.url !== "string" || typeof c.host !== "string" || !c.url.startsWith("https://")) return null;
+  return { url: c.url, host: c.host, creator: typeof c.creator === "string" ? c.creator : null };
+}
+
 export interface LessonSource {
   /** null for a job: the MotionResult carries no title. */
   title: string | null;
   docUrl: string;
+  /** A job's creator credit (404 for an uploaded file); null for a fixture. */
+  creditUrl: string | null;
   videoUrl: string;
   glbUrls: (doc: MotionResult) => string[];
 }
@@ -67,6 +83,7 @@ export function lessonSource(id: string): LessonSource {
     return {
       title: LESSONS[id].title,
       docUrl: `/fixtures/${id}.json`,
+      creditUrl: null,
       videoUrl: `/fixtures/${id}.mp4`,
       glbUrls: (doc) => doc.persons.map((p) => `/fixtures/${id}.${p.person_id}.glb`),
     };
@@ -75,6 +92,7 @@ export function lessonSource(id: string): LessonSource {
   return {
     title: null,
     docUrl: `/api/jobs/${job}/result`,
+    creditUrl: `/api/jobs/${job}/source`,
     videoUrl: `/api/jobs/${job}/video`,
     glbUrls: (doc) =>
       doc.persons.map((p) => `/api/assets/${encodeURIComponent(p.animation.glb_asset_id)}`),

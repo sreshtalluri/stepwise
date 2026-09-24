@@ -245,7 +245,7 @@ The strongest asset is a **finished lesson a stranger can use before uploading a
 
   > **We fetch the video from the link and build a lesson from it. Anyone in the clip can ask us to take it down, and we will.**
 
-  First half names *who copies it* — our server, our request — because "paste a link to your dance" would quietly put the act on the visitor. Second half is D8's missing sentence, doing more work here than it does on the file path, and it commits to a mechanism that exists. It does not say "we check", "we verify" or "we have permission" (§7h, §12.13). It does **not** ask for a tick: `docs/research/rights-and-privacy.md` §7a found a checkbox collects an attestation from the wrong person, and the argument is stronger here because the visitor's claim is weaker. The invite line beside it says what still works for everyone — "Adding a video file works for everyone" — because a wall that only says no strands someone who came to learn a dance, and it does not say "coming soon", which would name a date we have not got.
+  First half names *who copies it* — our server, our request — because "paste a link to your dance" would quietly put the act on the visitor. Second half is D8's missing sentence, doing more work here than it does on the file path, and it commits to a mechanism that exists. It does not say "we check", "we verify" or "we have permission" (§7h, §12.13). It does **not** ask for a tick: `docs/legal/rights-and-privacy.md` §7a found a checkbox collects an attestation from the wrong person, and the argument is stronger here because the visitor's claim is weaker. The invite line beside it says what still works for everyone — "Adding a video file works for everyone" — because a wall that only says no strands someone who came to learn a dance, and it does not say "coming soon", which would name a date we have not got.
 - The retention line sits here too, once (D6):
 
   > **We keep the clip while the lesson exists. Lessons nobody opens for six months are deleted, and a removal request deletes one straight away.**
@@ -310,7 +310,7 @@ Everything above is about claims on the **motion**. The identical rule applies t
 
 The rule, stated so it is checkable in review:
 
-- **Never state a retention period, a deletion behaviour, or a removal promise that the code does not implement.** If the deletion path does not exist, the line does not ship. `docs/research/rights-and-privacy.md` §7c puts it the same way: a false retention promise is worse than no retention promise.
+- **Never state a retention period, a deletion behaviour, or a removal promise that the code does not implement.** If the deletion path does not exist, the line does not ship. `docs/legal/rights-and-privacy.md` §7c puts it the same way: a false retention promise is worse than no retention promise.
 - **A retention number in copy and the constant in the code change in the same commit.** They are one fact written twice.
 - **Describe the mechanism, not a guarantee.** "Anyone in a clip can ask us to take it down, and we will" names what happens. "Your data is secure" and "we protect your privacy" name nothing and are banned here for the same reason "seamless" is banned in §11.
 - Copy may not say **"we check"**, **"we verify"**, or **"we have permission"**. We do none of those things.

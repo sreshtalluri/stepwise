@@ -101,7 +101,7 @@
   white-space: nowrap;
 }
 @media (max-width: 360px) {
-  .fd-nav-r .fd-btn {
+  .fd .fd-nav-r .fd-btn {
     display: none;
   }
 }
@@ -206,7 +206,13 @@
 .fd-paste .fd-btn {
   flex: none;
 }
-@media (max-width: 480px) {
+/* Stack the field over the button once the door is too narrow for both: the
+   field needs its full placeholder (~263px) beside the button (~176px). The
+   door's width, not the viewport's: in the two-column hero it is half. */
+.fd-door {
+  container-type: inline-size;
+}
+@container (max-width: 460px) {
   .fd-paste {
     flex-wrap: wrap;
     border-radius: 22px;

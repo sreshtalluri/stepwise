@@ -5,6 +5,7 @@ import type { Focus } from "./Stage3D";
 import { defaultPersonIndex, sourceAspect, SPEEDS, type MotionResult } from "../lib/motion";
 import { load, openingStructure, save } from "../lib/structure";
 import { parseHandoff } from "../lib/flow";
+import type { Credit } from "../lib/lessons";
 import {
   buildUpSpeed,
   DEFAULT_LOOP_LENGTH,
@@ -72,6 +73,8 @@ export interface LessonViewerProps {
   doc: MotionResult;
   title: string;
   videoUrl: string;
+  /** Who made the original video, for a link lesson; null for an upload. */
+  credit?: Credit | null;
   /** One GLB URL per entry in `doc.persons`. */
   glbUrls: string[];
   /** Scope for the learner's counts, parts, full-speed ticks and dancer. */
@@ -112,7 +115,7 @@ export default function LessonViewer(props: LessonViewerProps) {
 export type Lesson = ReturnType<typeof useLesson>;
 
 function useLesson(
-  { doc, title, videoUrl, glbUrls, lessonId, onRemoveFromMyLessons, onReportOrRemove }: LessonViewerProps,
+  { doc, title, videoUrl, credit = null, glbUrls, lessonId, onRemoveFromMyLessons, onReportOrRemove }: LessonViewerProps,
   phone: boolean,
 ) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
@@ -469,7 +472,7 @@ function useLesson(
   const crop = useVideoCrop(video, doc, focusRef, timeRef, selected, follow && panels.includes("video"), mirrored);
 
   return {
-    doc, title, videoUrl, glbUrls, lessonId, endS, aspect, wide,
+    doc, title, videoUrl, credit, glbUrls, lessonId, endS, aspect, wide,
     video, setVideo, timeRef, displayTime, playing, setPlaying, play, pause, togglePlay, seek,
     structure, editStructure, authored, countsFrom, tapOne, nudgeOne, tryOne, alternates,
     eights, loop, setLoop, loopEight, here, hereCount, stepLoop, loopLen, setLoopLen, next, done, sameSpan,

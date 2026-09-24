@@ -168,6 +168,18 @@ def test_removal_request_requires_a_relationship_and_caps_the_reason(api):
         api.RemovalRequest(relationship="other", reason="x" * 501)
 
 
+def test_removal_boxes_match_the_dialog(api):
+    """Every box RemoveLessonDialog offers (lib/copy.ts removal.relationships)
+    is one the API accepts, and the reverse -- "under 18" included."""
+    import re
+    import typing
+    copy = (Path(__file__).resolve().parents[2] / "apps/web/lib/copy.ts").read_text()
+    block = re.search(r"relationships: \{(.*?)\}", copy, re.S).group(1)
+    offered = set(re.findall(r"^\s*(\w+):", block, re.M))
+    accepted = set(typing.get_args(api.RemovalRequest.model_fields["relationship"].annotation))
+    assert offered == accepted and "under_18" in accepted
+
+
 def test_removal_alerts_the_owner_without_the_reason(api, monkeypatch):
     sent = []
     monkeypatch.setattr(api.observability, "message",

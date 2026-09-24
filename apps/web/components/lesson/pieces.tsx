@@ -649,6 +649,22 @@ const CLOSE_BAR: { id: PanelId; label: string }[] = [
  * The one top bar: every view a toggle, and every view that is on is a panel. Mirror
  * is a modifier on all of them. Scrolls sideways on a phone.
  */
+/**
+ * "Original by @creator on TikTok", linking to the video a link lesson was made
+ * from (docs/legal/legal-public-learning.md §6(a)2). Nothing for an upload.
+ * Pointer events stop here so a tap on it over the phone stage is not a pause.
+ */
+export function CreditLine({ l, className = "" }: { l: Lesson; className?: string }) {
+  if (!l.credit) return null;
+  const stop = (e: React.PointerEvent) => e.stopPropagation();
+  return (
+    <a className={`ls-credit ${className}`} href={l.credit.url} target="_blank" rel="noopener noreferrer"
+      onPointerDown={stop} onPointerUp={stop}>
+      {copy.credit(l.credit.host, l.credit.creator)}
+    </a>
+  );
+}
+
 export function ViewBar({ l, start, end }: { l: Lesson; start?: React.ReactNode; end?: React.ReactNode }) {
   const toggle = (v: { id: PanelId; label: string }) => (
     <button key={v.id} type="button" className="ls-vbtn" aria-pressed={l.panels.includes(v.id)} onClick={() => l.toggleView(v.id)}>

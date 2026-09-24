@@ -9,7 +9,7 @@ import s from "./RemoveLessonDialog.module.css";
 
 /**
  * "Report or remove this video" — the takedown (OPEN-DECISIONS D7,
- * docs/research/rights-and-privacy.md §6.1). Deletes for EVERYONE, now:
+ * docs/legal/rights-and-privacy.md §6.1). Deletes for EVERYONE, now:
  * POST /api/jobs/{jobId}/removal, which services/motion-api resolves to the
  * one canonical (deduplicated) lesson.
  *
