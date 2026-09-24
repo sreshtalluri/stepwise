@@ -79,7 +79,12 @@ export function load(lessonId: string, endS: number): StoredStructure | null {
     // authored against is the same clip, but a structure that has been edited
     // by hand in devtools, or written by an older build, must not be able to
     // put the count strip into a state the editor cannot get it out of.
-    return { structure: normalizeStructure(parsed.structure, endS), authored: parsed.authored !== false };
+    // Only a learner's own edits are restored. An untouched proposal is not
+    // theirs to keep: saving it froze the counts at whatever the pipeline
+    // proposed the first time the lesson was opened, so every later fix to the
+    // beat grid (tempo, count 1) never reached anyone who had opened it before.
+    if (parsed.authored !== true) return null;
+    return { structure: normalizeStructure(parsed.structure, endS), authored: true };
   } catch {
     // Quota, private mode, a half-written blob. Losing part names is a bad day;
     // a lesson that will not open is a worse one.

@@ -92,7 +92,9 @@ function useLesson(
     setRestored(true);
   }, [lessonId, endS]);
   useEffect(() => {
-    if (restored) save(lessonId, { structure, authored });
+    // Persist edits only; see load(). The proposal is re-read from the lesson
+    // every time, so a better grid from the pipeline reaches returning learners.
+    if (restored && authored) save(lessonId, { structure, authored });
   }, [restored, lessonId, structure, authored]);
   const editStructure = useCallback((next: LessonStructure) => {
     setStructure(next);

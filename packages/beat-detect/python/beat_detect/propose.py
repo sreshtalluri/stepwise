@@ -143,15 +143,17 @@ def _count_one(y: np.ndarray, sr: int, spc: float, phase_s: float, music_start_s
     1. The beat-of-the-bar (mod 4) with the strongest low-band (<150 Hz, kick)
        onsets is the bar downbeat. Beat This! and madmom agree with it on all
        four eval clips' bar phase.
-    2. But the dancer's 1 is not the bar's 1: on solo-02 (the one clip with an
-       owner label) the eight starts HALF A BAR before the downbeat all three
-       music models find (0.862 s vs 1.905 s). So count 1 is the EARLIEST
-       strong beat -- the downbeat or the half-bar beat, same parity -- at or
-       after the music starts: a clip is trimmed to where the dance starts, and
-       the music's strong beats are the only ones a dancer counts 1 on.
+    2. Count 1 is the first bar downbeat at or after the music starts. Checked
+       against the owner's labels (tapped/picked in a labelling page, 2026-09-23):
+       solo-01 1.292, solo-02 1.905, group-synced-01 1.120 -- all three are this
+       rule's pick. An earlier rule ("earliest strong beat, half a bar allowed")
+       came from a misread of one comment and was two counts early on two of
+       them; it is gone.
 
-    ponytail: fit to ONE labelled clip. The two rules disagree on solo-01 and
-    solo-07; the owner's set-count-1 taps on more clips decide it (README).
+    ponytail: one fixed grid per clip. solo-07 speeds up (~125 -> 129 BPM), so
+    its grid drifts and no phase of it lands on the owner's 1.03 s (Beat This!
+    gets 0.97). A tempo-following tracker is the upgrade -- check the Beat This!
+    weights licence first (code is MIT, weights unstated).
     `margin` is the downbeat phase's score over the runner-up. `alternates` are
     the other three beats of the bar, strongest accent first.
     """
@@ -171,7 +173,7 @@ def _count_one(y: np.ndarray, sr: int, spc: float, phase_s: float, music_start_s
     # Skip beats before librosa heard any music (silent intro), half a beat of slack.
     first = int(np.searchsorted(beats, music_start_s - spc / 2))
     first = min(first, len(beats) - 4)
-    one = first + (k - first) % 2  # earliest beat with the downbeat's parity
+    one = first + (k - first) % 4  # the first downbeat after the music starts
     share = scores / scores.sum() if scores.sum() > 0 else np.full(4, 0.25)
     alternates = [
         CountOneAlternate(float(beats[i]), int(i - one), round(float(share[i % 4]), 3))

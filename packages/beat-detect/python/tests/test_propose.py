@@ -53,8 +53,8 @@ def test_to_grid_requires_clip_duration(tmp_path):
 def test_solo02_shape_tempo_and_downbeat(tmp_path):
     """solo-02, the one clip with an owner label: a track at 115.07 BPM whose
     first bar downbeat (the first kick) is at 1.905 s -- Beat This!, madmom and
-    the kick heuristic all agree -- but whose dancer counts 1 at 0.862 s, half a
-    bar earlier ("exactly 2 counts late" at 1.905). The old proposal also read
+    the kick heuristic all agree, and so does the owner, who picked 1.905 s as
+    count 1 on the labelling page (2026-09-23). The old proposal also read
     117.45 BPM (librosa's nearest quantized tempo) and drifted half a beat off
     by count 25. Synthesized: a kick on every downbeat, a hi-hat on every beat,
     three pickup beats before the first kick."""
@@ -76,13 +76,12 @@ def test_solo02_shape_tempo_and_downbeat(tmp_path):
 
     result = propose_grid(wav, clip_duration_s=duration_s)
 
-    true_one = 0.862  # the owner's count 1 on solo-02 == beats[1] here
+    true_one = beats[3]  # the owner's count 1 on solo-02 (1.905 s) == the first kick
     assert abs(result.bpm - bpm) < 0.5, result.bpm
     assert abs(result.count_one_s - true_one) < 0.06, result.count_one_s
-    # "Try another 1": the bar downbeat the music models pick comes first.
+    # "Try another 1": the three pickup beats before it, as whole-count shifts.
     alt = result.count_one_alternates
-    assert [a.shift_counts for a in alt][0] == 2 and abs(alt[0].count_one_s - beats[3]) < 0.06, alt
-    assert sorted(a.shift_counts for a in alt) == [-1, 1, 2]
+    assert sorted(a.shift_counts for a in alt) == [-3, -2, -1], alt
     # No drift: count 57 (the last full eight) still lands on its beat.
     count_57 = result.count_one_s + 56 * result.seconds_per_count
     assert abs(count_57 - (true_one + 56 * spc)) < 0.06, count_57
