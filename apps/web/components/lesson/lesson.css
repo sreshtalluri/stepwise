@@ -1,0 +1,1545 @@
+/*
+ * The lesson page (components/LessonViewer.tsx and ./*). Its own file, every class
+ * prefixed `ls-`, and its own copy of the DESIGN.md §3/§5/§9 tokens scoped to `.ls`,
+ * so the landing styles in app/globals.css can change without moving this page.
+ * Values are DESIGN.md's, verbatim.
+ */
+
+.ls {
+  --paper: #f2efe9;
+  --paper-sunk: #e7e1d6;
+  --line: #d8d0c3;
+  --stage: #1c1917;
+  --stage-deep: #12100f;
+  --ink: #221e1c;
+  --ink-muted: #6b635c;
+  --ink-faint: #9a9188;
+  --on-stage: #e8e1d8;
+  --on-stage-muted: #b8aea3;
+  --glass: rgb(28 25 23 / 0.72);
+  --font-display: "Cabinet Grotesk", "Switzer", system-ui, sans-serif;
+  --font-ui: "Switzer", system-ui, sans-serif;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --t: 160ms var(--ease);
+  --r: 14px;
+
+  color: var(--ink);
+  background: var(--paper);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  -webkit-tap-highlight-color: transparent;
+}
+.ls *,
+.ls *::before,
+.ls *::after {
+  box-sizing: border-box;
+}
+:where(.ls) button,
+:where(.ls) select {
+  font: inherit;
+  color: inherit;
+  transition: transform var(--t), background-color var(--t), color var(--t), opacity var(--t);
+}
+:where(.ls) button:not(:disabled) {
+  cursor: pointer;
+}
+:where(.ls) button:active:not(:disabled) {
+  transform: scale(0.98) translateY(1px); /* DESIGN.md §8 */
+}
+.ls :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ls-icon {
+  flex: none;
+  display: block;
+}
+.ls-muted {
+  color: var(--ink-muted);
+}
+.ls-hint {
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+}
+
+/* ------------------------------------------------------------------ controls */
+
+.ls-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  flex: none;
+}
+.ls-icon-btn:hover {
+  background: var(--paper-sunk);
+}
+.ls-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--paper-sunk);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ls-btn:hover {
+  background: var(--line);
+}
+.ls-ghost {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.ls-accent,
+.ls-accent:hover {
+  background: var(--accent);
+  color: var(--stage);
+}
+
+/* Segmented pills. The state is in aria-pressed, and weight carries it too. */
+.ls-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--paper-sunk);
+}
+.ls-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.ls-seg button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+}
+.ls-seg.ls-on-dark {
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.ls-seg.ls-on-dark button {
+  color: var(--on-stage);
+}
+.ls-seg.ls-on-dark button[aria-pressed="true"] {
+  background: var(--paper);
+  color: var(--ink);
+}
+.ls-select select {
+  appearance: none;
+  min-height: 38px;
+  padding: 0 30px 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--paper-sunk)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath fill='%236b635c' d='M213.66 101.66l-80 80a8 8 0 0 1-11.32 0l-80-80a8 8 0 0 1 11.32-11.32L128 164.69l74.34-74.35a8 8 0 0 1 11.32 11.32Z'/%3E%3C/svg%3E")
+    no-repeat right 10px center / 14px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.ls-select.ls-on-dark select {
+  background-color: var(--glass);
+  color: var(--on-stage);
+  backdrop-filter: blur(8px);
+}
+.ls-tag {
+  font-size: 0.8125rem;
+  color: var(--on-stage-muted);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.6);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ stages */
+
+.ls-stage,
+.ls-pane {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r);
+  background: radial-gradient(ellipse at 50% 42%, var(--stage) 45%, var(--stage-deep) 100%);
+  isolation: isolate;
+}
+.ls-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform-origin: 50% 50%;
+  transition: opacity var(--t);
+}
+.ls-overlay,
+.ls-3d {
+  position: absolute;
+  inset: 0;
+  transition: opacity var(--t);
+}
+.ls-overlay {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.ls-3d canvas,
+.ls-pane canvas {
+  touch-action: none;
+}
+/* 3D over the video: the video stays mounted and playing (it is the clock and the
+   sound), just not seen. */
+.ls-stage[data-view="3d"] .ls-video {
+  opacity: 0;
+}
+/* Your turn: the dancer goes dark, the music and the counts keep going. */
+.ls-stage[data-turn="on"] .ls-video,
+.ls-stage[data-turn="on"] .ls-overlay,
+.ls-stage[data-turn="on"] .ls-3d,
+.ls-dim canvas {
+  opacity: 0.08;
+}
+.ls-turn {
+  position: absolute;
+  left: 50%;
+  top: 38%;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  display: grid;
+  gap: 4px;
+  width: min(80%, 320px);
+  text-align: center;
+  color: var(--paper);
+  pointer-events: none;
+}
+.ls-turn b {
+  font: 800 clamp(1.75rem, 5vw, 2.5rem) / 1 var(--font-display);
+  letter-spacing: -0.02em;
+}
+.ls-turn span {
+  color: var(--on-stage-muted);
+}
+.ls-stage-tag {
+  position: absolute;
+  left: 14px;
+  top: 12px;
+  z-index: 2;
+}
+.ls-markers {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.ls-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--c);
+  background: rgb(28 25 23 / 0.55);
+  color: var(--paper);
+  font: 800 14px/1 var(--font-display);
+  will-change: transform;
+}
+.ls-marker.ls-on {
+  background: var(--c);
+  color: var(--stage);
+}
+.ls-pane-bar {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  pointer-events: none;
+}
+.ls-pane-bar > * {
+  pointer-events: auto;
+}
+.ls-pane-bar .ls-select select {
+  background-color: var(--glass);
+  color: var(--on-stage);
+}
+.ls-pane-bar .ls-icon-btn {
+  width: 36px;
+  height: 36px;
+  background: var(--glass);
+  color: var(--on-stage);
+}
+.ls-pane-bar .ls-tag {
+  padding: 4px 8px;
+}
+
+/* ------------------------------------------------------------------ close-ups */
+
+.ls-closeups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ls-peek {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--stage);
+  padding: 0;
+  border: 0;
+  text-align: left;
+}
+.ls-peek canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.ls-peek[aria-pressed="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ls-peek-label,
+.ls-peek-cue {
+  position: absolute;
+  left: 7px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--on-stage);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.7);
+}
+.ls-peek-label {
+  top: 5px;
+}
+.ls-peek-cue {
+  bottom: 5px;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--glass);
+  text-shadow: none;
+}
+.ls-peek-cue:empty {
+  display: none;
+}
+.ls-peek-cue[data-lifted="1"] {
+  background: var(--accent);
+  color: var(--stage);
+}
+.ls-peek-off {
+  position: absolute;
+  inset: 22px 8px 8px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  color: var(--ink-faint);
+}
+
+/* ------------------------------------------------------------------ counts */
+
+/* The current eight. Weight and size carry the state: no pill, no box (DESIGN.md §7). */
+.ls-counts {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  align-items: end;
+  min-width: 0;
+}
+.ls-count {
+  display: grid;
+  place-items: end center;
+  min-height: 56px;
+  padding: 0 0 4px;
+  font: 700 clamp(1.25rem, 2.4vw, 1.75rem) / 1 var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--ink-faint);
+  border-bottom: 2px solid var(--line);
+}
+.ls-count.ls-on {
+  font-weight: 800;
+  font-size: clamp(2rem, 4.4vw, 3.25rem);
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+/* Outside the window being learned: faded toward the paper, never the inside highlighted (§7). */
+.ls-count.ls-out {
+  opacity: 0.4;
+}
+
+.ls-one {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ls-one-tap {
+  background: var(--ink);
+  color: var(--paper);
+  min-height: 48px;
+  padding: 0 20px;
+}
+.ls-one-tap:hover {
+  background: #3a3431;
+}
+.ls-one-nudge {
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0 10px;
+  font-size: 1rem;
+}
+.ls-one .ls-hint {
+  flex-basis: 100%;
+  min-height: 1.2em;
+}
+
+/* ------------------------------------------------------------------ ladder */
+
+.ls-steps {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+.ls-step {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: 72px;
+  padding: 10px 14px;
+  border-radius: var(--r);
+  background: var(--paper-sunk);
+  color: var(--ink-muted);
+  text-align: left;
+}
+.ls-step-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ls-step b {
+  font-weight: 600;
+  font-size: 1rem;
+}
+.ls-step small {
+  font-size: 0.8125rem;
+}
+.ls-pips {
+  display: flex;
+  gap: 3px;
+  margin-top: 4px;
+}
+.ls-pips i {
+  flex: 1;
+  max-width: 16px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.ls-pips i.ls-f {
+  background: var(--ink);
+}
+.ls-step.ls-on {
+  background: var(--stage);
+  color: var(--paper);
+}
+.ls-step.ls-on .ls-pips i {
+  background: #4a423c;
+}
+.ls-step.ls-on .ls-pips i.ls-f {
+  background: var(--accent);
+}
+.ls-step.ls-done {
+  color: var(--ink);
+}
+
+.ls-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: var(--r);
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+  font-size: 1.0625rem;
+}
+.ls-play-sq {
+  width: 72px;
+  min-height: 72px;
+  flex: none;
+}
+.ls-got {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 0 0 150px;
+  min-height: 72px;
+  border-radius: var(--r);
+  background: var(--paper-sunk);
+  font-weight: 600;
+  font-size: 1.0625rem;
+}
+.ls-got.ls-ready {
+  background: var(--accent);
+  color: var(--stage);
+}
+
+.ls-check {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--r);
+  background: var(--paper-sunk);
+}
+.ls-check p {
+  margin-right: auto;
+  font-weight: 600;
+  font-size: 1.0625rem;
+}
+.ls-check .ls-btn {
+  min-height: 56px;
+  padding: 0 24px;
+}
+
+/* ------------------------------------------------------------------ path */
+
+.ls-path {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ls-path::before {
+  content: "";
+  position: absolute;
+  left: 21px;
+  top: 24px;
+  bottom: 24px;
+  width: 2px;
+  background: var(--line);
+}
+.ls-node {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 10px 5px 0;
+  border-radius: 12px;
+  text-align: left;
+}
+.ls-node:hover {
+  background: var(--paper-sunk);
+}
+.ls-dot {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 2px solid var(--line);
+  font: 800 1rem var(--font-display);
+  color: var(--ink-faint);
+}
+.ls-node-lbl {
+  display: grid;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.ls-node-lbl small {
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--ink-faint);
+}
+.ls-node.ls-join .ls-dot {
+  width: 32px;
+  height: 32px;
+  margin: 0 6px;
+  font-size: 0.6875rem;
+  border-style: dashed;
+}
+.ls-node.ls-join .ls-node-lbl {
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+.ls-node.ls-done .ls-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  border-style: solid;
+  color: var(--stage);
+}
+.ls-node.ls-on .ls-dot {
+  border-color: var(--ink);
+  color: var(--ink);
+  box-shadow: 0 0 0 3px var(--paper), 0 0 0 5px var(--accent);
+}
+.ls-node.ls-on.ls-done .ls-dot {
+  color: var(--stage);
+}
+
+/* ------------------------------------------------------------------ dancers */
+
+.ls-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px 4px 4px;
+  min-height: 44px;
+  border-radius: 999px;
+  background: var(--paper-sunk);
+  font-weight: 600;
+}
+.ls-who-img {
+  position: relative;
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--c);
+  background: var(--stage) center 20% / cover no-repeat;
+}
+.ls-who-img b {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--c);
+  color: var(--stage);
+  font: 800 11px/1 var(--font-display);
+}
+
+.ls-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  overflow-y: auto;
+  background: rgb(242 239 233 / 0.97);
+}
+.ls-picker-box {
+  width: min(100%, 640px);
+  display: grid;
+  gap: 14px;
+}
+.ls-picker h2 {
+  font: 800 clamp(1.5rem, 5vw, 2.25rem) / 1.05 var(--font-display);
+  letter-spacing: -0.02em;
+}
+.ls-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+}
+.ls-pick {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border-radius: var(--r);
+  background: var(--paper-sunk);
+  text-align: left;
+}
+.ls-pick[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+.ls-pick-img {
+  position: relative;
+  display: block;
+  aspect-ratio: 3 / 4;
+  border-radius: 10px;
+  background: var(--stage) center / cover no-repeat;
+  box-shadow: inset 0 0 0 3px var(--ink-faint);
+}
+.ls-pick[aria-pressed="true"] .ls-pick-img {
+  box-shadow: inset 0 0 0 4px var(--c);
+}
+.ls-ring {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid var(--c);
+  background: rgb(28 25 23 / 0.5);
+  color: var(--paper);
+  font: 800 18px/1 var(--font-display);
+}
+.ls-pick[aria-pressed="true"] .ls-ring {
+  background: var(--c);
+  color: var(--stage);
+}
+.ls-pick-name {
+  display: grid;
+  padding: 0 4px 4px;
+  font-weight: 600;
+}
+.ls-pick-name small {
+  font-weight: 400;
+  opacity: 0.75;
+}
+.ls-start {
+  min-height: 56px;
+  font-size: 1.0625rem;
+}
+
+/* ------------------------------------------------------------------ help */
+
+.ls-help {
+  width: min(92vw, 520px);
+  max-height: min(80vh, 640px);
+  overflow: auto;
+  margin: auto;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  box-shadow: 0 18px 48px rgb(28 25 23 / 0.25);
+}
+.ls-help::backdrop {
+  background: rgb(28 25 23 / 0.3);
+}
+.ls-help p + p {
+  margin-top: 8px;
+}
+.ls-help .ls-keys {
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+.ls-help .sw-editor {
+  margin-top: 14px;
+}
+
+/* ================================================================== desktop */
+
+.ls-desk {
+  min-height: 100dvh;
+}
+.ls-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 12px 24px;
+}
+.ls-title {
+  font: 700 clamp(1.25rem, 2.2vw, 1.75rem) / 1.1 var(--font-display);
+  letter-spacing: -0.02em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ls-meter {
+  flex: none;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+.ls-head-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ls-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 4px 24px 32px;
+}
+.ls-desk .ls-path {
+  align-self: start;
+  position: sticky;
+  top: 12px;
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+}
+.ls-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 14px 16px;
+  align-content: start;
+}
+.ls-views {
+  display: grid;
+  grid-template-columns: repeat(var(--n, 1), minmax(0, 1fr));
+  gap: 12px;
+  height: clamp(340px, calc(100dvh - 370px), 680px);
+}
+.ls-views[data-n="2"] {
+  --n: 2;
+}
+.ls-views[data-n="3"] {
+  --n: 3;
+}
+.ls-views[data-n="2"] .ls-stage,
+.ls-views[data-n="3"] .ls-stage {
+  grid-column: auto;
+}
+.ls-viewbar {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ls-desk-closeups {
+  align-self: start;
+}
+.ls-countrow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 16px;
+}
+.ls-unit {
+  display: grid;
+  padding-bottom: 6px;
+}
+.ls-unit b {
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.ls-unit small {
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+.ls-countrow .ls-one {
+  max-width: 300px;
+  justify-content: flex-end;
+}
+.ls-countrow .ls-one .ls-hint {
+  text-align: right;
+}
+.ls-ladder {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.ls-ladder .ls-steps {
+  flex: 1;
+}
+.ls-free {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 999px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line), 0 10px 28px rgb(28 25 23 / 0.08);
+}
+.ls-free .ls-play-sq {
+  width: 56px;
+  min-height: 56px;
+  border-radius: 999px;
+}
+.ls-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+.ls-stepper span {
+  min-width: 96px;
+  text-align: center;
+}
+.ls-desk .ls-check {
+  grid-column: 1 / -1;
+}
+
+/* Tablet: one column, the path as a row of dots on top (DESIGN.md §6: no three rails). */
+@media (max-width: 1100px) {
+  .ls-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .ls-desk .ls-path {
+    position: static;
+    max-height: none;
+  }
+  .ls-main {
+    grid-template-columns: minmax(0, 1fr) 128px;
+  }
+  .ls-countrow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .ls-countrow .ls-unit {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    padding: 0;
+  }
+  .ls-views {
+    height: clamp(360px, calc(100dvh - 470px), 640px);
+  }
+}
+@media (max-width: 1100px), (max-width: 767px) {
+  .ls-desk .ls-path {
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 2px;
+    padding: 2px 0 6px;
+    scrollbar-width: none;
+  }
+  .ls-desk .ls-path::before {
+    left: 22px;
+    right: 22px;
+    top: 26px;
+    bottom: auto;
+    width: auto;
+    height: 2px;
+  }
+  .ls-desk .ls-node {
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px;
+    min-width: 56px;
+  }
+  .ls-desk .ls-node-lbl {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    text-align: center;
+  }
+  .ls-desk .ls-node.ls-eight .ls-node-lbl,
+  .ls-desk .ls-node-lbl small {
+    display: none;
+  }
+  .ls-desk .ls-node.ls-join .ls-dot {
+    margin: 6px 0;
+  }
+}
+
+/* ================================================================== phone */
+
+/* An app shell: the page never scrolls. The stage takes what the sheet leaves. */
+.ls-phone {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: var(--stage);
+  overscroll-behavior: none;
+}
+.ls-ph-stages {
+  position: relative;
+  min-height: 0;
+  display: grid;
+  touch-action: pan-x; /* vertical swipes are ours: next/previous 8-count */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ls-ph-stage {
+  border-radius: 0;
+  min-height: 0;
+}
+.ls-ph-stage .ls-stage-tag {
+  top: calc(env(safe-area-inset-top) + 64px);
+  left: 12px;
+  font-size: 0.75rem;
+}
+.ls-bars {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: calc(env(safe-area-inset-top) + 6px);
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+}
+.ls-bars button {
+  flex: 1;
+  height: 20px;
+  padding: 8px 0;
+  background: rgb(232 225 216 / 0.3) content-box;
+  border-radius: 2px;
+}
+.ls-bars button.ls-here {
+  background-color: var(--accent);
+}
+.ls-bars button.ls-done {
+  background-color: var(--paper);
+}
+.ls-ph-head {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(env(safe-area-inset-top) + 22px);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 0 4px;
+  color: var(--paper);
+}
+.ls-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 130px;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(rgb(18 16 15 / 0.55), transparent);
+}
+.ls-desk .ls-stage::before {
+  height: 90px;
+}
+.ls-ph-head .ls-icon-btn:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+.ls-ph-head .ls-title {
+  font-size: 1.125rem;
+  flex: 1;
+}
+.ls-ph-head .ls-meter {
+  color: var(--on-stage-muted);
+  font-size: 0.8125rem;
+}
+.ls-ph-closeups {
+  position: absolute;
+  left: 10px;
+  top: calc(env(safe-area-inset-top) + 86px);
+  z-index: 3;
+  width: 76px;
+  gap: 8px;
+}
+.ls-ph-closeups.ls-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 124px;
+  gap: 4px;
+}
+.ls-ph-closeups .ls-peek-off {
+  font-size: 0.625rem;
+  inset: 16px 4px 4px;
+}
+.ls-rail {
+  position: absolute;
+  right: 6px;
+  bottom: 84px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+.ls-rail-item {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  width: 72px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--paper);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.7);
+}
+.ls-rail-dot {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.ls-rail-item.ls-on .ls-rail-dot {
+  background: var(--paper);
+  color: var(--ink);
+}
+.ls-rail-item .ls-who {
+  padding: 0;
+  min-height: 0;
+  background: none;
+}
+.ls-rail-item .ls-who-img {
+  width: 52px;
+  height: 52px;
+  border-width: 3px;
+}
+.ls-rail-item .ls-who-img b {
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+}
+.ls-ph-counts {
+  position: absolute;
+  left: 10px;
+  right: 84px;
+  bottom: 8px;
+  z-index: 3;
+  color: var(--paper);
+  pointer-events: none;
+}
+.ls-ph-unit {
+  display: block;
+  margin-left: 4px;
+  font-size: 0.8125rem;
+  color: var(--on-stage-muted);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.7);
+}
+.ls-ph-counts .ls-counts {
+  pointer-events: auto;
+}
+.ls-ph-counts .ls-count {
+  min-height: 52px;
+  color: rgb(232 225 216 / 0.7);
+  border-bottom-color: rgb(232 225 216 / 0.25);
+  text-shadow: 0 2px 10px rgb(0 0 0 / 0.5);
+  font-size: 1.375rem;
+}
+.ls-ph-counts .ls-count.ls-on {
+  color: var(--paper);
+  font-size: 2.75rem;
+  border-bottom-color: var(--accent);
+}
+.ls-inset {
+  position: absolute;
+  right: 84px;
+  top: calc(env(safe-area-inset-top) + 86px);
+  z-index: 3;
+  width: 38%;
+  aspect-ratio: 3 / 4;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.15), 0 8px 24px rgb(0 0 0 / 0.4);
+}
+.ls-inset .ls-pane {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+}
+.ls-inset .ls-pane-bar .ls-tag {
+  font-size: 0.6875rem;
+}
+.ls-ph-hint {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  width: min(70%, 260px);
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--glass);
+  color: var(--on-stage);
+  font-size: 0.875rem;
+  text-align: center;
+  pointer-events: none;
+}
+.ls-flash {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  z-index: 6;
+  transform: translate(-50%, -50%);
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--glass);
+  color: var(--paper);
+  font-weight: 600;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t);
+}
+.ls-flash.ls-show {
+  opacity: 1;
+}
+.ls-countin {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  font: 800 min(40vw, 40vh) / 1 var(--font-display);
+  color: var(--paper);
+  text-shadow: 0 4px 30px rgb(0 0 0 / 0.5);
+  pointer-events: none;
+}
+
+/* The sheet: everything you press, in the thumb zone. */
+.ls-sheet {
+  position: relative;
+  z-index: 10;
+  display: grid;
+  gap: 8px;
+  padding: 6px 12px calc(10px + env(safe-area-inset-bottom));
+  border-radius: 20px 20px 0 0;
+  background: var(--paper);
+  max-height: 80dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ls-grab {
+  justify-self: center;
+  width: 88px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+}
+.ls-grab::before {
+  content: "";
+  width: 40px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line);
+}
+.ls-phone .ls-steps {
+  gap: 6px;
+}
+.ls-phone .ls-step {
+  min-height: 56px;
+  padding: 6px 8px;
+  align-items: center;
+  text-align: center;
+}
+.ls-phone .ls-step-top {
+  flex-direction: column;
+  gap: 2px;
+}
+.ls-phone .ls-step b {
+  font-size: 0.8125rem;
+}
+.ls-phone .ls-pips {
+  width: 100%;
+  justify-content: center;
+  margin-top: 2px;
+}
+.ls-ph-transport {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 88px;
+  gap: 8px;
+}
+.ls-big-btn {
+  display: grid;
+  place-items: center;
+  height: 88px;
+  border-radius: 18px;
+  background: var(--paper-sunk);
+}
+.ls-ph-play {
+  height: 88px;
+  border-radius: 18px;
+  font-size: 1.0625rem;
+  padding: 0 10px;
+  min-width: 0;
+}
+.ls-ph-play span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ls-ph-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.ls-tile {
+  display: grid;
+  place-content: center;
+  min-height: 60px;
+  padding: 4px 6px;
+  border-radius: 16px;
+  background: var(--paper-sunk);
+  font-weight: 600;
+  font-size: 1rem;
+  line-height: 1.15;
+  text-align: center;
+}
+.ls-tile small {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--ink-muted);
+}
+.ls-tile.ls-accent small {
+  color: var(--stage);
+}
+.ls-more {
+  display: grid;
+  gap: 14px;
+  padding: 8px 0 4px;
+}
+.ls-more[hidden] {
+  display: none;
+}
+.ls-group {
+  display: grid;
+  gap: 6px;
+}
+.ls-group-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+.ls-group-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ls-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--paper-sunk);
+  font-weight: 500;
+}
+.ls-chip[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+}
+.ls-chip small {
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+}
+.ls-group-row .ls-help-btn {
+  width: 44px;
+  height: 44px;
+  background: var(--paper-sunk);
+}
+.ls-ph-check {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: calc(env(safe-area-inset-bottom) + 12px);
+  z-index: 20;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
+  background: var(--paper);
+}
+.ls-ph-check p {
+  flex-basis: 100%;
+}
+.ls-ph-check .ls-btn {
+  flex: 1;
+  min-height: 88px;
+  border-radius: 18px;
+  font-size: 1.0625rem;
+}
+.ls-install {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: calc(env(safe-area-inset-top) + 70px);
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--paper);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.3);
+  font-size: 0.9375rem;
+}
+.ls-install p {
+  flex-basis: 100%;
+}
+
+/* Sheet open: the stage becomes a strip above it, with only the path and title on it. */
+.ls-open .ls-rail,
+.ls-open .ls-ph-hint,
+.ls-open .ls-ph-counts,
+.ls-open .ls-ph-closeups,
+.ls-open .ls-inset,
+.ls-open .ls-stage-tag {
+  display: none;
+}
+.ls-open .ls-sheet {
+  max-height: 72dvh;
+}
+
+/* Prop it up: no chrome, the count huge, the whole screen three tap zones. */
+.ls-prop .ls-sheet,
+.ls-prop .ls-ph-head,
+.ls-prop .ls-rail,
+.ls-prop .ls-ph-closeups,
+.ls-prop .ls-inset,
+.ls-prop .ls-bars,
+.ls-prop .ls-ph-unit,
+.ls-prop .ls-install {
+  display: none;
+}
+.ls-prop .ls-ph-counts {
+  right: 10px;
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+}
+.ls-prop .ls-ph-counts .ls-count {
+  min-height: 88px;
+  font-size: 2rem;
+}
+.ls-prop .ls-ph-counts .ls-count.ls-on {
+  font-size: clamp(4rem, 22vw, 7rem);
+}
+.ls-prop-top {
+  position: absolute;
+  left: 12px;
+  right: 16px;
+  top: calc(env(safe-area-inset-top) + 10px);
+  z-index: 8;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.ls-prop-exit {
+  width: 64px;
+  height: 64px;
+  background: var(--glass);
+  color: var(--paper);
+}
+.ls-prop-speed {
+  display: grid;
+  justify-items: end;
+  font: 800 clamp(3rem, 16vw, 5rem) / 1 var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--paper);
+  text-shadow: 0 2px 16px rgb(0 0 0 / 0.5);
+}
+.ls-prop-speed small {
+  font: 500 0.9375rem var(--font-ui);
+  color: var(--on-stage);
+  letter-spacing: 0;
+}
+.ls-prop-opts {
+  position: absolute;
+  right: 16px;
+  top: calc(env(safe-area-inset-top) + 120px);
+  z-index: 8;
+  display: flex;
+  gap: 8px;
+}
+.ls-prop-opts button {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+.ls-prop-opts button[aria-pressed="false"] {
+  background: var(--glass);
+  color: var(--on-stage);
+}
+.ls-zones {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1fr;
+}
+.ls-zones button:active {
+  background: rgb(255 255 255 / 0.06);
+  transform: none;
+}
+
+/* The phone on its side: video and 3D side by side, controls in a column (DESIGN.md §6). */
+.ls-phone.ls-land {
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 34%);
+}
+.ls-land .ls-ph-stages {
+  grid-template-columns: 1fr 1fr;
+  touch-action: none;
+}
+.ls-land .ls-pane {
+  border-radius: 0;
+}
+.ls-land .ls-sheet {
+  max-height: none;
+  border-radius: 0;
+  padding: calc(env(safe-area-inset-top) + 8px) calc(10px + env(safe-area-inset-right)) 10px 10px;
+}
+.ls-land .ls-grab,
+.ls-land .ls-ph-head .ls-title,
+.ls-land .ls-ph-head .ls-meter,
+.ls-land .ls-ph-hint,
+.ls-land .ls-rail-item:first-child {
+  display: none;
+}
+.ls-land .ls-steps {
+  grid-auto-flow: row;
+  grid-template-columns: 1fr 1fr;
+}
+.ls-land .ls-ph-transport {
+  grid-template-columns: 72px minmax(0, 1fr) 72px;
+}
+.ls-land .ls-big-btn,
+.ls-land .ls-ph-play {
+  height: 72px;
+}
+.ls-land .ls-ph-play span {
+  display: none;
+}
+.ls-land .ls-rail {
+  bottom: 12px;
+}
+.ls-land .ls-ph-counts {
+  right: 80px;
+}
+.ls-land .ls-ph-closeups {
+  top: calc(env(safe-area-inset-top) + 64px);
+  width: 64px;
+}
+.ls-land.ls-prop {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ls *,
+  .ls *::before,
+  .ls *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

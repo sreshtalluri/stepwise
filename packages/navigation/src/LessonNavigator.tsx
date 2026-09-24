@@ -372,7 +372,7 @@ const LoopIcon = () => (
  * vs. tap it; long-press a count vs. an explicit control). Nothing gestural is
  * invented here: every edit is a labelled button acting on the playhead.
  */
-function StructureEditor(p: LessonNavigatorProps & { endS: number }) {
+export function StructureEditor(p: LessonNavigatorProps & { endS: number }) {
   const [taps, setTaps] = useState<number[]>([]);
   const grid = p.structure.grid;
   const count = currentCount(grid, p.timeS);

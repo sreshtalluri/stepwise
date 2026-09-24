@@ -329,6 +329,125 @@ export const lesson = {
     toggleOn: "Close-up on",
     toggleOff: "Close-up off",
     toggleHint: "hands and feet",
+    /** Foot contact from the 3D (lib/footContact.ts): only down or lifted, never toe or heel. */
+    down: "down",
+    lifted: "lifted",
+    leftShort: "L",
+    rightShort: "R",
+    showIn3d: (region: string) => `Show the ${region.toLowerCase()} in 3D`,
+  },
+
+  /** The lesson path (docs/DESIGN.md §7g: true facts only, no points or streaks). */
+  path: {
+    label: "Lesson path",
+    learned: (n: number, total: number) => `${n} of ${total} learned`,
+    learnedTag: "learned",
+    steps: { watch: "Watch", slow: "Slow", build: "Build up", full: "Full speed" },
+    stepSub: { watch: "1×, once", slow: "0.5×, 3 loops", build: "0.5× to 1×", full: "1×" },
+    yourTurn: "Your turn",
+    yourTurnHint: "Keep counting and do it yourself.",
+    gotIt: "Got it",
+    again: "Again",
+    next: (label: string) => `Next: ${label}`,
+    learnedDone: (label: string) => `${label} learned`,
+    allDone: "All learned. Run the whole dance.",
+    check: (label: string) => `How was ${label}?`,
+    stepGroup: "Steps for this 8-count",
+  },
+
+  modes: { group: "How to practise", lesson: "Lesson", practise: "Just practise" },
+
+  transport: {
+    play: "Play",
+    pause: "Pause",
+    playUnit: (label: string) => `Play ${label}`,
+    prev: "Previous",
+    next: "Next",
+    speed: "speed",
+    speedLabel: "Speed",
+    building: "building up",
+    loopThis: "Loop this",
+    wholeDance: "Whole dance",
+    loopOn: "Loop on",
+    loopOff: "Loop off",
+    mirrorOn: "Mirror on",
+    mirrorOff: "Mirror off",
+    followOn: "Follow on",
+    followOff: "Follow off",
+    back: "All lessons",
+  },
+
+  views: {
+    group: "View",
+    video: "Video",
+    overlay: "On video",
+    threeD: "3D",
+    angle: "Angle",
+    addAngle: "Add an angle",
+    removeAngle: "Remove this angle",
+    inset: "Second angle",
+    insetOff: "No second angle",
+    closeups: "Close-ups",
+    dancer: "Dancer",
+  },
+
+  /**
+   * Count 1 correction. The beat tracker finds beats, not downbeats, so count 1 is
+   * often off by whole counts; fixing it has to be one tap, not a settings page.
+   */
+  countOne: {
+    tap: "Tap on 1",
+    tapHint: "Tap while it plays, on a 1 you hear",
+    earlier: "−1",
+    later: "+1",
+    earlierLabel: "Count 1 one count earlier",
+    laterLabel: "Count 1 one count later",
+    guess: "Count 1 is a guess",
+    fixed: (n: number) => `Count 1 moved ${n > 0 ? "later" : "earlier"}`,
+    heading: "Count 1",
+  },
+
+  dancers: {
+    title: "Who are you learning?",
+    lead: "Each body takes its dancer's colour. The counts stay the same when you switch.",
+    name: (n: number) => `Dancer ${n}`,
+    side: { left: "on the left", middle: "in the middle", right: "on the right" },
+    start: "Start learning",
+    change: "Change dancer",
+    marker: (n: number) => `Dancer ${n}`,
+  },
+
+  help: {
+    button: "About this view",
+    noFloor: "No floor: feet not visible in this clip.",
+    clipped: "The dancer is at the edge of the shot, so the crop stops there.",
+    estimated: "Angles other than the camera's are estimated from the tracked body.",
+    keys: "Keys: space play, arrows a count, shift and arrows an 8-count, M mirror, S speed, T tap on 1.",
+    counts: "Counts and parts",
+  },
+
+  phone: {
+    prop: "Prop it up",
+    propSub: "hands-free",
+    exitProp: "Leave prop it up",
+    countInOn: "Count-in on",
+    countInOff: "Count-in off",
+    autoOn: "Auto next 8",
+    autoOff: "Stay on this 8",
+    hint: "Tap to play. Swipe up for the next 8. Hold for half speed.",
+    hold: "Half speed while you hold",
+    paused: "Paused",
+    more: "More",
+    less: "Less",
+    zoneBack: "Back an 8-count",
+    zoneNext: "Next 8-count",
+  },
+
+  install: {
+    lead: "Practising on this phone? Keep the lesson on your home screen.",
+    ios: "Tap Share, then Add to Home Screen.",
+    android: "Add to home screen",
+    dismiss: "Not now",
   },
 };
 

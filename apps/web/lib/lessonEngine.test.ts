@@ -5,7 +5,6 @@ import {
   lessonUnits,
   loadLearned,
   nextRound,
-  parseLessonQuery,
   rampSpeeds,
   roundAt,
   saveLearned,
@@ -103,15 +102,4 @@ test("learned state round-trips, and a broken store never throws", () => {
   assert.equal(loadLearned("abc").size, 0);
   saveLearned("abc", new Set(["x"]));
   delete (globalThis as any).window;
-});
-
-test("hand-off query: speed clamps, loop reads a span or an 8-count number", () => {
-  const q = (s: string) => parseLessonQuery(new URLSearchParams(s), base);
-  assert.deepEqual(q("speed=0.5&loop=9-16"), { speed: 0.5, loop: { startCount: 9, endCount: 16 } });
-  assert.deepEqual(q("speed=4"), { speed: 1 });
-  assert.deepEqual(q("speed=0.1"), { speed: 0.25 });
-  assert.deepEqual(q("loop=2"), { loop: { startCount: 9, endCount: 16 } });
-  assert.deepEqual(q("loop=99"), {});
-  assert.deepEqual(q("speed=fast&loop=chorus"), {});
-  assert.deepEqual(q("loop=60-999"), { loop: { startCount: 60, endCount: base.grid.countTotal } });
 });

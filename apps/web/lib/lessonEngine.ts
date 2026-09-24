@@ -17,7 +17,7 @@
  * they edit them), so a count-1 correction moves every loop window with it.
  */
 import { partRanges } from "../../../packages/navigation/src/core";
-import type { LessonStructure, LoopSpan } from "../../../packages/navigation/src/core";
+import type { LessonStructure } from "../../../packages/navigation/src/core";
 
 export type Step = "watch" | "slow" | "build" | "full";
 export const STEPS: readonly Step[] = ["watch", "slow", "build", "full"];
@@ -158,29 +158,4 @@ export function saveLearned(lessonId: string, learned: ReadonlySet<string>): voi
   } catch {
     /* see loadLearned */
   }
-}
-
-// -------------------------------------------------------------- hand-off query
-
-/**
- * `/lesson/{id}?speed=0.5&loop=9-16` — the processing page hands the learner over
- * mid-practice. `speed` is clamped to 0.25–1. `loop` is either a count span `a-b`
- * or an 8-count number `n`; anything unreadable is ignored rather than guessed at.
- */
-export function parseLessonQuery(params: URLSearchParams, structure: LessonStructure): { speed?: number; loop?: LoopSpan } {
-  const out: { speed?: number; loop?: LoopSpan } = {};
-  const speed = Number(params.get("speed"));
-  if (params.has("speed") && Number.isFinite(speed) && speed > 0) out.speed = Math.min(1, Math.max(0.25, speed));
-  const loop = params.get("loop")?.trim();
-  const total = structure.grid.countTotal;
-  const span = loop?.match(/^(\d+)\s*[-–]\s*(\d+)$/);
-  if (span) {
-    const a = Math.max(1, Math.min(+span[1], total));
-    const b = Math.max(a, Math.min(+span[2], total));
-    out.loop = { startCount: a, endCount: b };
-  } else if (loop && /^\d+$/.test(loop)) {
-    const r = partRanges(structure)[+loop - 1];
-    if (r) out.loop = { startCount: r.startCount, endCount: r.endCount };
-  }
-  return out;
 }
