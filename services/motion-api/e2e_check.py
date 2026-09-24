@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,6 +36,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "motio
 
 def _req(url: str, **kw) -> tuple[int, dict, bytes]:
     req = urllib.request.Request(url, **kw)
+    # The API answers only the Worker once STEPWISE_ORIGIN_KEY is set in Modal;
+    # export the same value (~/.stepwise-secrets/origin.env) to call it direct.
+    if os.environ.get("STEPWISE_ORIGIN_KEY"):
+        req.add_header("x-stepwise-origin-key", os.environ["STEPWISE_ORIGIN_KEY"])
     try:
         with urllib.request.urlopen(req) as r:
             return r.status, dict(r.headers), r.read()

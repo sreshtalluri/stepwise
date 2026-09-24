@@ -97,6 +97,18 @@ eval_volume = modal.Volume.from_name("stepwise-eval", create_if_missing=True)
 
 app = FastAPI(title="stepwise motion-api")
 
+
+@app.middleware("http")
+async def _only_through_the_worker(request: Request, call_next):
+    # With STEPWISE_ORIGIN_KEY set, this origin answers only the Cloudflare
+    # Worker (ratelimit.origin_key_ok). That is what makes the Worker's
+    # forwarded client IP trustworthy, and so the per-IP limit real. /health
+    # stays open: it is the smoke check and reports no secrets.
+    if request.url.path != "/health" and not ratelimit.origin_key_ok(request.headers):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    return await call_next(request)
+
 # clip_id -> unix time we last recorded an access. Purely a write-throttle for
 # _touch(); losing it on restart costs one extra small Volume write.
 _TOUCHED: dict[str, float] = {}
@@ -227,6 +239,21 @@ def _find_by_source(key: str) -> dict | None:
     return None
 
 
+def _limited(http: Request, charge_as: tuple[str, str] | None = None) -> None:
+    """Rate-limit this request: record a dispatch (charge_as=(job_id, clip_id))
+    or only check. Over the limit -> 429 in the invite gate's {"error": {...}}
+    shape, which both upload doors already render verbatim."""
+    ip = ratelimit.client_ip(http.headers, http.client and http.client.host)
+    try:
+        if charge_as:
+            ratelimit.charge(ip, *charge_as)
+        else:
+            ratelimit.check(ip)
+    except ratelimit.Limited as e:
+        raise HTTPException(429, headers={"Retry-After": str(e.retry_after)}, detail={"error": {
+            "code": e.code, "message": e.message, "retryable": True}}) from None
+
+
 def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict, http: Request,
                         source_key: str | None = None) -> DispatchResponse:
     """The single path from "we have the bytes" to "a job is running".
@@ -240,14 +267,7 @@ def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict, http: Request,
     # Charged here and nowhere earlier: both dedupe layers have already said
     # "no existing lesson", so this request really will spend a GPU run. And
     # before any byte is stored, so a 429 leaves no half-made lesson behind.
-    try:
-        ratelimit.charge(ratelimit.client_ip(http.headers, http.client and http.client.host),
-                         job_id, clip_id)
-    except ratelimit.Limited as e:
-        # Same {"error": {...}} shape as the invite gate's 403, which the
-        # upload screen already renders verbatim.
-        raise HTTPException(429, headers={"Retry-After": str(e.retry_after)}, detail={"error": {
-            "code": e.code, "message": e.message, "retryable": True}}) from None
+    _limited(http, charge_as=(job_id, clip_id))
     with uploads_volume.batch_upload(force=True) as batch:
         batch.put_file(tmp_path, f"/{clip_id}.mp4")
     # The video goes to R2 here rather than at export time, because these
@@ -431,6 +451,10 @@ def ingest_clip_link(request: LinkRequest, http: Request,
         return DispatchResponse(clip_id=hit["clip_id"], job_id=hit["job_id"],
                                 deduplicated=True)
 
+    # Before the download, not only at dispatch: an IP already over its limit
+    # would otherwise still cost us a fetch per attempt.
+    _limited(http)
+
     fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
     os.close(fd)
     try:
@@ -568,8 +592,13 @@ def get_job_status(job_id: str) -> dict:
 # out of scope to build correctly right now (see report).
 # ---------------------------------------------------------------------------
 
+# Two retries, then stop: a clip that crashed three times will crash a fourth,
+# and every attempt is a paid GPU run.
+MAX_RETRIES = 2
+
+
 @app.post("/jobs/{job_id}/retry")
-def retry_job(job_id: str) -> dict:
+def retry_job(job_id: str, http: Request) -> dict:
     doc = jobstore.read_status(results_volume, job_id, _clip_id_for)
     if doc is None:
         raise HTTPException(404, "Unknown job_id.")
@@ -586,7 +615,15 @@ def retry_job(job_id: str) -> dict:
     # on its feet even if it somehow could.
     _refuse_if_removed(meta["clip_id"])
 
+    if doc["retry_count"] >= MAX_RETRIES:
+        raise HTTPException(409, detail={"error": {
+            "code": "retries_exhausted",
+            "message": "This clip failed again after two retries, so we stopped trying. "
+                       "Uploading a different recording of the dance usually works.",
+            "retryable": False}})
+
     retry_count = doc["retry_count"] + 1
+    _limited(http, charge_as=(job_id, meta["clip_id"]))  # a retry is a GPU run like any other
     jobstore.record_retry(results_volume, job_id, meta["clip_id"], retry_count)
     _run_clip_fn().spawn(clip_id=meta["clip_id"], job_id=job_id, retry_count=retry_count)
     return {"job_id": job_id, "retry_count": retry_count}

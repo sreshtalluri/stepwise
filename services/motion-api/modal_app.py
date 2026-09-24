@@ -871,6 +871,11 @@ R2_SECRET = optional_secret("stepwise-r2")
 # setting the variable is the whole cutover -- see docs/DEPLOYMENT.md.
 DB_SECRET = optional_secret("stepwise-db")
 
+# STEPWISE_ORIGIN_KEY: with it, the API answers only the Cloudflare Worker and
+# trusts the learner IP that Worker forwards (ratelimit.origin_key_ok). Absent
+# -> the API is open to anyone, as before, and per-IP limits use the socket.
+ORIGIN_SECRET = optional_secret("stepwise-origin")
+
 
 # glTF sampler interpolation, fixed up after pymomentum writes the file.
 #
@@ -1821,7 +1826,7 @@ api_image = (
 
 @app.function(
     image=api_image,
-    secrets=R2_SECRET + DB_SECRET + OBS_SECRETS,
+    secrets=R2_SECRET + DB_SECRET + ORIGIN_SECRET + OBS_SECRETS,
     # Scale to zero. A cold start is a few seconds on the upload endpoint,
     # where it is invisible, and on the first two-second job poll, where it is
     # also invisible. min_containers=1 pins ~$45/month of always-on container

@@ -9,7 +9,7 @@
     "start": "next start",
     "test": "node --import tsx --test lib/*.test.ts test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "cf:build": "npm run assets && STEPWISE_CF_BUILD=1 MOTION_API_URL=https://sreshta-talluri--stepwise-motion-web.modal.run next build && node scripts/flatten-standalone.mjs && opennextjs-cloudflare build --skipNextBuild",
+    "cf:build": "npm run assets && STEPWISE_CF_BUILD=1 next build && node scripts/flatten-standalone.mjs && opennextjs-cloudflare build --skipNextBuild",
     "cf:preview": "npm run cf:build && opennextjs-cloudflare preview",
     "cf:deploy": "npm run cf:build && opennextjs-cloudflare deploy"
   },

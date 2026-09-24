@@ -63,27 +63,36 @@ def _limit(name: str, default: int) -> int:
     return int(os.environ.get(name) or default)
 
 
+def origin_key_ok(headers) -> bool:
+    """True when this request came through the Cloudflare Worker.
+
+    The Worker (apps/web/app/api/[...path]/route.ts) adds
+    `x-stepwise-origin-key`; STEPWISE_ORIGIN_KEY (Modal Secret `stepwise-origin`)
+    is the same value. Unset means dev/local: everything is "from the Worker".
+    """
+    key = os.environ.get("STEPWISE_ORIGIN_KEY")
+    if not key:
+        return True
+    return hmac.compare_digest(headers.get("x-stepwise-origin-key", ""), key)
+
+
 def client_ip(headers, client_host: str | None) -> str:
     """The address to charge.
 
-    Modal's docs name `request.client.host` as the caller's IP for rate limits,
-    so that is the source on Modal today. CF-Connecting-IP wins when present,
-    for when the Cloudflare Worker proxies /api/* -- there, client.host is
-    Cloudflare's egress, not the learner.
-
-    SPOOFING: while the Modal origin is reachable directly, anyone can send
-    their own CF-Connecting-IP (or X-Forwarded-For) and pick a fresh "IP" per
-    request. That defeats the per-IP ceiling, not the global one. Once the
-    Worker is the only way in, lock the origin to it (a shared-secret header)
-    and this header becomes trustworthy.
+    Behind the Worker, the socket peer is Cloudflare and so is any
+    CF-Connecting-IP on a Worker subrequest (a fixed Workers egress address,
+    which would put every learner in one bucket). So the Worker forwards the
+    learner's address as `x-stepwise-client-ip`, and that header is believed
+    ONLY alongside a valid origin key -- anyone else could set it. Without
+    the Worker (dev, or no key configured) the socket peer is the caller:
+    Modal's asgi proxy puts the real address in request.client.host (checked
+    live, 2026-09-23).
     """
-    cf = headers.get("cf-connecting-ip")
-    if cf:
-        return cf.strip()
-    if client_host:
-        return client_host
-    xff = headers.get("x-forwarded-for", "")
-    return xff.split(",")[0].strip() or "unknown"
+    if os.environ.get("STEPWISE_ORIGIN_KEY") and origin_key_ok(headers):
+        forwarded = headers.get("x-stepwise-client-ip", "").strip()
+        if forwarded:
+            return forwarded
+    return client_host or "unknown"
 
 
 def _ip_hash(ip: str, today: dt.date) -> bytes:
@@ -96,8 +105,22 @@ def _loosely(seconds: int) -> str:
     return "in about an hour" if seconds <= 3600 else f"in about {round(seconds / 3600)} hours"
 
 
+def check(ip: str) -> None:
+    """Raise Limited if `ip` could not dispatch now; record nothing.
+
+    For work that costs us before the dispatch does -- the link door's
+    download. charge() still decides at dispatch; this only stops an IP that
+    is already over from making us fetch a video first.
+    """
+    _guarded(ip, None, None)
+
+
 def charge(ip: str, job_id: str, clip_id: str) -> None:
     """Record one dispatch for `ip`, or raise Limited without recording it."""
+    _guarded(ip, job_id, clip_id)
+
+
+def _guarded(ip: str, job_id: str | None, clip_id: str | None) -> None:
     global _warned
     if not jobstore.postgres_enabled():
         if not _warned:
@@ -158,5 +181,7 @@ def _charge(ip: str, job_id: str, clip_id: str) -> None:
                           f"You have started {ip_hour} lessons this hour, which is the limit. "
                           f"Try again {_loosely(s)}.", s)
 
+        if job_id is None:
+            return  # check(): nothing to record
         conn.execute("INSERT INTO events (name, clip_id, job_id, day_hash) "
                      "VALUES ('dispatch', %s, %s, %s)", (clip_id, job_id, ip_hash))

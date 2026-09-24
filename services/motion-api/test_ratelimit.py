@@ -113,8 +113,62 @@ def test_no_postgres_means_allow_and_say_so_once(monkeypatch, capsys):
     assert capsys.readouterr().out.count("limits are OFF") == 1
 
 
-def test_client_ip_prefers_cloudflare_then_the_socket():
-    assert ratelimit.client_ip({"cf-connecting-ip": "1.1.1.1", "x-forwarded-for": "2.2.2.2"}, "3.3.3.3") == "1.1.1.1"
-    assert ratelimit.client_ip({"x-forwarded-for": "2.2.2.2, 10.0.0.1"}, "3.3.3.3") == "3.3.3.3"
-    assert ratelimit.client_ip({"x-forwarded-for": "2.2.2.2, 10.0.0.1"}, None) == "2.2.2.2"
+def test_client_ip_trusts_the_forwarded_header_only_with_the_origin_key(monkeypatch):
+    fwd = {"x-stepwise-client-ip": "1.1.1.1", "cf-connecting-ip": "2.2.2.2",
+           "x-forwarded-for": "4.4.4.4"}
+    monkeypatch.delenv("STEPWISE_ORIGIN_KEY", raising=False)
+    assert ratelimit.client_ip(fwd, "3.3.3.3") == "3.3.3.3", "no key: nothing forwarded is believed"
+    monkeypatch.setenv("STEPWISE_ORIGIN_KEY", "k")
+    assert ratelimit.client_ip(fwd, "3.3.3.3") == "3.3.3.3", "forged: wrong/missing key"
+    assert ratelimit.client_ip({**fwd, "x-stepwise-origin-key": "k"}, "3.3.3.3") == "1.1.1.1"
     assert ratelimit.client_ip({}, None) == "unknown"
+
+
+def test_origin_gate_hides_everything_but_health_from_direct_callers(api, monkeypatch):  # noqa: F811
+    import json
+
+    def get(path, headers=()):
+        # Raw ASGI: TestClient needs httpx, which CI does not install here.
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+                 "method": "GET", "scheme": "http", "path": path, "raw_path": path.encode(),
+                 "query_string": b"", "root_path": "", "headers": list(headers),
+                 "client": ("127.0.0.1", 1), "server": ("testserver", 80)}
+        body = []
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(msg):
+            if msg["type"] == "http.response.body":
+                body.append(msg.get("body", b""))
+
+        asyncio.run(api.app(scope, receive, send))
+        return json.loads(b"".join(body))
+
+    monkeypatch.setenv("STEPWISE_ORIGIN_KEY", "k")
+    assert get("/jobs/job_x") == {"detail": "Not found."}  # the gate
+    assert get("/jobs/job_x", [(b"x-stepwise-origin-key", b"k")]) == \
+        {"detail": "No lesson at this link."}  # the handler
+
+
+def test_retry_stops_after_two(api):  # noqa: F811
+    import json
+    failed = {"schema_version": "1.0.0", "job_id": "job_r", "state": "failed", "stage_message": "",
+              "progress": None, "retry_count": 2,
+              "error": {"code": "pipeline_error", "message": "boom", "retryable": True}}
+    api.results_volume.files["/job_r.job-status.json"] = json.dumps(failed).encode()
+    api.results_volume.files["/job_r.job-meta.json"] = b'{"clip_id": "r"}'
+    with pytest.raises(HTTPException) as e:
+        api.retry_job("job_r", NO_REQUEST)
+    assert e.value.status_code == 409 and e.value.detail["error"]["code"] == "retries_exhausted"
+
+
+@needs_pg
+def test_check_refuses_like_charge_but_records_nothing(store, db, monkeypatch):
+    monkeypatch.setenv("STEPWISE_LIMIT_IP_HOUR", "1")
+    ratelimit.check("9.9.9.9")
+    assert _dispatches(db) == 0
+    ratelimit.charge("9.9.9.9", "job_c", "c")
+    with pytest.raises(ratelimit.Limited):
+        ratelimit.check("9.9.9.9")
+    assert _dispatches(db) == 1

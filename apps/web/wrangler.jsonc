@@ -15,6 +15,12 @@
   "compatibility_date": "2026-09-23",
   "compatibility_flags": ["nodejs_compat"],
 
+  // Where app/api/[...path]/route.ts sends /api/*. STEPWISE_ORIGIN_KEY is a
+  // secret, not a var: `wrangler secret put STEPWISE_ORIGIN_KEY`.
+  "vars": {
+    "MOTION_API_URL": "https://sreshta-talluri--stepwise-motion-web.modal.run"
+  },
+
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
