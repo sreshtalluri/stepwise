@@ -90,7 +90,6 @@ CLIENT_EVENTS: dict[str, dict] = {
     "link_copied": {},
 }
 SERVER_EVENTS = ("job_created", "job_finished")
-COUNT_ONE = ("tap_on_one", "count_one_nudged", "count_one_alternate")
 
 MAX_BATCH = 50           # events per POST; the client sends far fewer
 MAX_BODY = 16 * 1024     # bytes
@@ -269,59 +268,42 @@ def admin_ok(headers) -> bool:
 
 
 def metrics(conn, days: int = 30) -> dict:
+    """The owner's summary, read from the same report_* views (migration 002)
+    a Grafana or Metabase dashboard reads, so the two cannot disagree."""
     since = _today() - dt.timedelta(days=days - 1)
-    q = lambda sql, *a: conn.execute(sql, (since, *a)).fetchall()  # noqa: E731
-    client = list(CLIENT_EVENTS)
+    q = lambda sql: conn.execute(sql, (since,)).fetchall()  # noqa: E731
 
-    daily = {str(d): {"visitors": v} for d, v in q(
-        "SELECT occurred_at::date, count(DISTINCT day_hash) FROM events "
-        "WHERE occurred_at >= %s AND name = ANY(%s) GROUP BY 1", client)}
-    for d, created, runs, done, ok in q(
-            "SELECT occurred_at::date, "
-            "  count(*) FILTER (WHERE name = 'job_created'), "
-            "  count(*) FILTER (WHERE name = 'job_created' AND NOT coalesce((props->>'deduplicated')::bool, false)), "
-            "  count(*) FILTER (WHERE name = 'job_finished'), "
-            "  count(*) FILTER (WHERE name = 'job_finished' AND props->>'state' = 'succeeded') "
-            "FROM events WHERE occurred_at >= %s GROUP BY 1"):
-        daily.setdefault(str(d), {"visitors": 0}).update(
-            uploads=created, gpu_runs=runs, finished=done, succeeded=ok)
-
-    (finished, succeeded) = conn.execute(
-        "SELECT count(*), count(*) FILTER (WHERE props->>'state' = 'succeeded') FROM events "
-        "WHERE name = 'job_finished' AND occurred_at >= %s", (since,)).fetchone()
-    failures = q("SELECT props->>'error_code', count(*) FROM events WHERE occurred_at >= %s "
-                 "AND name = 'job_finished' AND props->>'state' = 'failed' "
+    daily = q("SELECT day, visitors, uploads, gpu_runs, finished, succeeded FROM report_daily "
+              "WHERE day >= %s ORDER BY day DESC")
+    finished = sum(r[4] or 0 for r in daily)
+    succeeded = sum(r[5] or 0 for r in daily)
+    failures = q("SELECT error_code, sum(jobs) FROM report_failures WHERE day >= %s "
                  "GROUP BY 1 ORDER BY 2 DESC LIMIT 10")
-    features = q("SELECT name, count(*), count(DISTINCT day_hash) FROM events "
-                 "WHERE occurred_at >= %s AND name = ANY(%s) GROUP BY 1 ORDER BY 2 DESC", client)
-    # A "visit" to a lesson: one visitor, one lesson, one day.
-    (opens, corrected) = conn.execute(
-        "WITH v AS (SELECT occurred_at::date d, day_hash, job_id, "
-        "  bool_or(name = 'lesson_opened') opened, bool_or(name = ANY(%s)) fixed "
-        "  FROM events WHERE occurred_at >= %s AND job_id IS NOT NULL GROUP BY 1, 2, 3) "
-        "SELECT count(*) FILTER (WHERE opened), count(*) FILTER (WHERE opened AND fixed) FROM v",
-        (list(COUNT_ONE), since)).fetchone()
-    (median_play,) = conn.execute(
-        "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY s) FROM ("
-        "  SELECT sum((props->>'seconds')::int) s FROM events "
-        "  WHERE name = 'play_seconds' AND occurred_at >= %s "
-        "  GROUP BY occurred_at::date, day_hash, job_id) t", (since,)).fetchone()
-    loops = q("SELECT props->>'via', props->>'snapped', count(*), "
-              "  percentile_cont(0.5) WITHIN GROUP (ORDER BY (props->>'counts')::float) "
-              "FROM events WHERE name = 'loop_created' AND occurred_at >= %s GROUP BY 1, 2 ORDER BY 3 DESC")
-    referrers = q("SELECT coalesce(nullif(props->>'ref', ''), '(direct)'), count(*) FROM events "
-                  "WHERE name = 'lesson_opened' AND occurred_at >= %s GROUP BY 1 ORDER BY 2 DESC LIMIT 10")
+    features = q("SELECT name, sum(events), sum(visitors) FROM report_events WHERE day >= %s "
+                  "AND name NOT IN ('job_created', 'job_finished') GROUP BY 1 ORDER BY 2 DESC")
+    (visits, corrected, median_play) = conn.execute(
+        "SELECT count(*), count(*) FILTER (WHERE corrected_count_one), "
+        "  percentile_cont(0.5) WITHIN GROUP (ORDER BY play_seconds) "
+        "FROM report_lesson_visits WHERE day >= %s", (since,)).fetchone()
+    loops = q("SELECT via, snapped, sum(loops) FROM report_loops WHERE day >= %s "
+              "GROUP BY 1, 2 ORDER BY 3 DESC")
+    lengths = q("SELECT counts, sum(loops) FROM report_loops WHERE day >= %s "
+                "GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5")
+    referrers = q("SELECT host, sum(opens) FROM report_referrers WHERE day >= %s "
+                  "GROUP BY 1 ORDER BY 2 DESC LIMIT 10")
     return {
         "since": str(since), "days": days,
-        "daily": [dict(day=d, **daily[d]) for d in sorted(daily, reverse=True)],
+        "daily": [dict(zip(("day", "visitors", "uploads", "gpu_runs", "finished", "succeeded"),
+                           (str(r[0]), *r[1:]))) for r in daily],
         "completion_rate": round(succeeded / finished, 3) if finished else None,
         "jobs_finished": finished,
-        "top_failures": [{"code": c or "(none)", "n": n} for c, n in failures],
+        "top_failures": [{"code": c, "n": n} for c, n in failures],
         "features": [{"name": n, "events": c, "visitors": v} for n, c, v in features],
-        "lesson_visits": opens,
-        "count_one_correction_rate": round(corrected / opens, 3) if opens else None,
+        "lesson_visits": visits,
+        "count_one_correction_rate": round(corrected / visits, 3) if visits else None,
         "median_play_seconds": median_play,
-        "loops": [{"via": v, "snapped": s, "n": n, "median_counts": m} for v, s, n, m in loops],
+        "loops": [{"via": v, "snapped": s, "n": n} for v, s, n in loops],
+        "loop_lengths": [{"counts": c, "n": n} for c, n in lengths],
         "referrers": [{"host": h, "n": n} for h, n in referrers],
     }
 
@@ -339,15 +321,22 @@ def rollup(conn, dry_run: bool = False) -> dict:
     with conn.transaction():
         (n,) = conn.execute(f"SELECT count(*) FROM events WHERE occurred_at < {cutoff}").fetchone()
         if n and not dry_run:
+            # detail: what report_daily / report_failures need after the rows go.
             conn.execute(
                 "INSERT INTO event_daily (day, name, detail, n, visitors, seconds) "
-                "SELECT occurred_at::date, name, "
-                "  coalesce(props->>'state', '') || coalesce(':' || (props->>'error_code'), ''), "
+                "SELECT occurred_at::date, name, CASE "
+                "    WHEN name = 'job_finished' THEN coalesce(props->>'state', '') || ':' || coalesce(props->>'error_code', '') "
+                "    WHEN name = 'job_created' AND (props->>'deduplicated')::boolean THEN 'deduplicated' "
+                "    ELSE '' END, "
                 "  count(*), count(DISTINCT day_hash), sum((props->>'seconds')::numeric) "
                 f"FROM events WHERE occurred_at < {cutoff} GROUP BY 1, 2, 3 "
-                "ON CONFLICT (day, name, detail) DO UPDATE SET n = event_daily.n + EXCLUDED.n, "
-                "  visitors = event_daily.visitors + EXCLUDED.visitors, "
-                "  seconds = coalesce(event_daily.seconds, 0) + coalesce(EXCLUDED.seconds, 0)")
+                "ON CONFLICT (day, name, detail) DO NOTHING")
+            # A day's visitors across every event: not the sum of per-event visitors.
+            conn.execute(
+                "INSERT INTO event_daily (day, name, n, visitors) "
+                "SELECT occurred_at::date, '_visitors', count(*), count(DISTINCT day_hash) "
+                f"FROM events WHERE occurred_at < {cutoff} AND name NOT IN ('dispatch', 'removal') "
+                "GROUP BY 1 ON CONFLICT (day, name, detail) DO NOTHING")
             conn.execute(f"DELETE FROM events WHERE occurred_at < {cutoff}")
         conn.execute("DELETE FROM analytics_salts WHERE day < %s", (_today(),))
     return {"rolled_up_rows": n, "dry_run": dry_run}

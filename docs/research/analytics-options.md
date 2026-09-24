@@ -30,6 +30,19 @@ public site, solo builder, /privacy states only what the code does.
 | Funnels and dashboards | no | SQL and a small /admin page | yes |
 | Retention across days | no | no, by design | no in cookieless mode |
 
+## Dashboards (owner follow-up: "I want to see dashboards of everything")
+
+| Option | Dashboards | Cost here | What it costs us |
+|---|---|---|---|
+| **(a) PostHog Cloud EU, cookieless** | Best out of the box: trends, funnels and retention over our own events | $0 inside 1M events a month | A third party receiving every event, a DPA, a new SDK in the bundle, and defaults we must turn off. Cookieless retention is limited to one day. We still write every event call by hand |
+| **(b) Our events in Neon + a BI tool** | Grafana Cloud: free, 3 users, has a PostgreSQL data source ([pricing](https://grafana.com/pricing/)). It connects over TLS to a public endpoint; Neon's is public. Grafana's own docs say to give it a user with `SELECT` only ([docs](https://grafana.com/docs/grafana/latest/datasources/postgres/configure/)). Metabase: Cloud Starter is $100 a month after a 14-day trial, or self-hosted for free (needs a server) ([pricing](https://www.metabase.com/pricing/)). Neon's console has a SQL editor but no dashboards. Evidence.dev gives static pages but means another build | $0 with Grafana Cloud | Grafana stores the charts, and the numbers it reads are aggregates we chose. We build the charts ourselves, and funnels are SQL |
+| **(c) Our own /admin** | One fixed page of totals | Already built, about 130 lines | Nothing new to trust, but charts are not worth building by hand once (b) exists |
+| **(d) Cloudflare Web Analytics** | Its own dashboard for traffic | $0 | Works alongside any of the above |
+
+**What makes (b) safe to hand to a dashboard.** Migration 002 adds six `report_*` views: daily totals, feature use, failures, loops, lesson visits and referrers. Each one aggregates per day, and none exposes a `day_hash` or a raw row. It also adds a `stepwise_reader` role that can `SELECT` those views and nothing else, and the test suite proves it. Its password is set from the owner's secrets, not in git.
+
 ## Recommendation
 
-**Confirm the hybrid.** Paste the Cloudflare Web Analytics snippet for traffic. It is free, cookieless, and on a host we already name. Adding it is a separate one-line change with a /privacy line. Keep the first-party events for product signals. The evidence gives no reason to stop: going with PostHog-cookieless now would add a processor, a DPA and an SDK, and we would still write every product event by hand. The only thing it saves is the metrics page and the retention job, about 300 lines. **Upgrade path, if we ever want funnels we don't want to write as SQL:** PostHog Cloud EU with `cookieless_mode: "always"`, autocapture, pageleave and recording off, and `person_profiles: "never"`. Forward the same allowlisted events to it, for a fixed number of weeks (§3.5).
+**For dashboards now: (b) with Grafana Cloud's free tier, plus (d) for traffic.** Keep (c) as the backup page that needs no setup. It runs on the same views, so the two always agree. Choose (a) only if hand-written SQL funnels turn out to be the bottleneck.
+
+**On the original question: confirm the hybrid.** Paste the Cloudflare Web Analytics snippet for traffic. It is free, cookieless, and on a host we already name. Adding it is a separate one-line change with a /privacy line. Keep the first-party events for product signals. The evidence gives no reason to stop: going with PostHog-cookieless now would add a processor, a DPA and an SDK, and we would still write every product event by hand. The only thing it saves is the metrics page and the retention job, about 300 lines. **Upgrade path, if we ever want funnels we don't want to write as SQL:** PostHog Cloud EU with `cookieless_mode: "always"`, autocapture, pageleave and recording off, and `person_profiles: "never"`. Forward the same allowlisted events to it, for a fixed number of weeks (§3.5).

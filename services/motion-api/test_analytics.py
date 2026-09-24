@@ -192,7 +192,26 @@ def test_metrics(pg):
     assert m["count_one_correction_rate"] == 0.5
     assert m["median_play_seconds"] == 45  # (70, 20)
     assert {"host": "tiktok.com", "n": 1} in m["referrers"]
-    assert m["loops"][0]["median_counts"] == 4
+    assert m["loops"] == [{"via": "drag", "snapped": True, "n": 1}]
+    assert m["loop_lengths"] == [{"counts": 4.0, "n": 1}]
+
+
+@needs_pg
+def test_reader_role_sees_the_report_views_and_nothing_else(pg):
+    import psycopg
+    pg.execute("INSERT INTO events (name, job_id, day_hash) VALUES ('lesson_opened', 'j1', 'h')")
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE stepwise_reader")
+        for view in ("report_daily", "report_events", "report_failures", "report_loops",
+                     "report_lesson_visits", "report_referrers"):
+            pg.execute(f"SELECT * FROM {view}").fetchall()
+        cols = [d.name for d in pg.execute("SELECT * FROM report_lesson_visits").description]
+        assert "day_hash" not in cols
+    for table in ("events", "analytics_salts", "event_daily", "jobs", "lessons"):
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with pg.transaction():
+                pg.execute("SET LOCAL ROLE stepwise_reader")
+                pg.execute(f"SELECT * FROM {table}")
 
 
 @needs_pg
@@ -213,3 +232,8 @@ def test_rollup_folds_old_days_and_keeps_recent_rows(pg):
     assert daily[("play_seconds", "")] == (3, 2, 90)
     assert daily[("job_finished", "failed:export_error")][0] == 1
     assert analytics.rollup(pg)["rolled_up_rows"] == 0  # idempotent
+    # The report views still answer for the rolled-up day.
+    (visitors, finished) = pg.execute(
+        "SELECT visitors, finished FROM report_daily WHERE day < current_date - 300").fetchone()
+    assert (visitors, finished) == (2, 1)
+    assert pg.execute("SELECT error_code, jobs FROM report_failures").fetchall() == [("export_error", 1)]
