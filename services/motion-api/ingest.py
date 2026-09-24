@@ -285,10 +285,16 @@ def source_key(info: dict) -> str:
 def download(url: str, dest_path: str) -> None:
     """Fetch the video to `dest_path`. Raises FetchRefused.
 
-    Format selection matches `evaluation/fetch.py` -- the pipeline normalises
-    to 1080p anyway (and TikTok serves 576x1024 without a login regardless,
-    per evaluation/clips.yaml's resolution note), so asking for more would
-    only cost transfer time.
+    Format selection matches `evaluation/fetch.py`: the largest H.264 stream
+    whose SHORT side is <= 1080. The old `[height<=1080]` filter read "1080p"
+    as a landscape height, so every vertical clip lost its 1920-tall stream:
+    checked with `yt-dlp --print` on 2026-09-23, YouTube Shorts came down at
+    480x854 under the old filter and 1080x1920 under this one (landscape
+    1920x1080 unchanged). Hands are ~30 px wide at 576 px across, which is
+    what caps every hand-shape model we measured (see hand_crops.py), so
+    those pixels matter. H.264 first because the file is served to browsers
+    as-is: TikTok also offers 720x1280 without a login, but only as HEVC,
+    which Firefox will not play -- so TikTok stays at 576x1024 H.264.
     """
     if not ytdlp_available():
         raise FetchRefused("fetch_failed",
@@ -301,7 +307,7 @@ def download(url: str, dest_path: str) -> None:
     try:
         proc = subprocess.run(
             ["yt-dlp",
-             "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+             "-f", "bv*+ba/b", "-S", "vcodec:h264,res:1080",
              "--merge-output-format", "mp4",
              "--no-playlist", "--no-warnings",
              "-o", os.path.join(out_dir, "clip.%(ext)s"),

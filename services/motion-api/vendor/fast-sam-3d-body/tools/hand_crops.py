@@ -49,6 +49,38 @@ Measured on the real `solo-01.npz` (291 frames, track 4) and `solo-07.npz`
    trade a flat wrong hand for a jittery, sometimes-mirrored wrong hand. See
    docs/GATE-REPORT.md's hands addendum for the full four-axis licence read.
 
+4. Re-checked 2026-09-23 against HAND-LABELLED ground truth, to see whether
+   ANY licence-clean model can draw a trustworthy 2D hand diagram or a
+   "fist / open / point" label. 107 per-side crops (these rects, 4 clips,
+   every 2 s), labelled by eye: 69 visible (33 open, 17 relaxed, 14 fist,
+   4 other, 1 point), 38 not visible (blur/occlusion). Shape = a rule on the
+   21 keypoints (per finger |tip-wrist| / |MCP-wrist|; MediaPipe's 3D world
+   landmarks also tried). 15 fps, every sample, CPU (Apple M-series):
+
+     model (all Apache-2.0)        found  labels a    5-class  flips  ms/
+                                   (vis)  hidden hand  acc     /s     sample
+     RTMW-x wholebody, person box   96%     55%       67%     3.3     92
+     RTMW-x fed the hand box         96%     32%       61%     3.4    166
+     DWPose-l wholebody              94%     42%       51%     4.4     52
+     RTMPose-m hand5, hand box       87%     66%       55%     7.6     33
+     MediaPipe Hand Landmarker       87%     42%       68%     4.5     45
+     (gate = 20th pct of each model's own score, MediaPipe its own detector
+      at 0.3; handedness by wrist proximity
+      86-97%; median frame-to-frame finger jitter 0.56-0.79 hand-lengths)
+
+   Best case: collapse to fist vs open-ish and tune the rule leave-one-clip-
+   out, and RTMW-on-the-hand-box reaches 87% against a 72% always-"open"
+   baseline -- on 14 fists, 6 of them from one clip, while still labelling a
+   third of the hands a human could not see. Overlays show why: at ~30 px
+   per hand every model draws a short, nearly straight five-finger fan and
+   varies its length, so "fist" is really "compact blob", and the finger
+   lines themselves are not the dancer's. Not good enough to draw, so
+   nothing is drawn. WiLoR (CC BY-NC-ND), HaMeR (MIT code, but MANO: no
+   commercial use) and Sapiens (CC BY-NC) are out on licence alone. What
+   would change this is pixels: ingest.py now keeps vertical clips' 1080-wide
+   stream (YouTube Shorts were arriving at 480x854); re-run the measurement
+   on 1080x1920 sources before revisiting.
+
 So: the 3D hand stays as it is and is reported as low confidence, and the
 learner is shown the actual pixels. That is `evaluation/clips.yaml`'s
 `stress-hands` EXPECTED OUTCOME reached by measurement rather than assumption.

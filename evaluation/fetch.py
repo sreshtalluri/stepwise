@@ -84,12 +84,12 @@ def fetch_one(clip: dict) -> bool:
         if not have_tool("yt-dlp"):
             sys.exit("yt-dlp not installed:  uv tool install yt-dlp")
         print(f"downloading {cid} ...")
-        # Cap at 1080p; the pipeline normalizes to that anyway, and smaller
-        # files upload faster.
+        # Same selection as services/motion-api/ingest.py download(): H.264,
+        # short side <= 1080 (so vertical clips keep their 1080x1920 stream).
         r = subprocess.run(
             [
                 "yt-dlp",
-                "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+                "-f", "bv*+ba/b", "-S", "vcodec:h264,res:1080",
                 "--merge-output-format", "mp4",
                 "-o", str(out),
                 url,
