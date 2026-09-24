@@ -1004,14 +1004,27 @@ a.ls-chip {
 }
 /* The creator credit: in the desktop bar, and over the phone stage under its tag. */
 .ls-credit {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   font-size: 0.8125rem;
+  line-height: 1.25;
   color: var(--ink-muted);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  max-width: 34ch;
+}
+.ls-credit > * {
+  color: inherit;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 34ch;
+}
+.ls-credit a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* Choreo and sound from the post's caption: a size down, no link. */
+.ls-credit-post {
+  font-size: 0.6875rem;
 }
 .ls-ph-credit {
   position: absolute;

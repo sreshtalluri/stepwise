@@ -50,13 +50,18 @@ export interface Credit {
   url: string;
   host: string;
   creator: string | null;
+  /** From the post's caption and sound (ingest.credit), only when found there. */
+  choreo: string | null;
+  track: string | null;
+  artist: string | null;
 }
 
 /** The API's answer as a Credit, or null. The URL goes in an href, so https only. */
 export function parseCredit(x: unknown): Credit | null {
   const c = x as Partial<Credit> | null;
   if (typeof c?.url !== "string" || typeof c.host !== "string" || !c.url.startsWith("https://")) return null;
-  return { url: c.url, host: c.host, creator: typeof c.creator === "string" ? c.creator : null };
+  const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+  return { url: c.url, host: c.host, creator: str(c.creator), choreo: str(c.choreo), track: str(c.track), artist: str(c.artist) };
 }
 
 export interface LessonSource {

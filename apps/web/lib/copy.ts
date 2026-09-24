@@ -272,6 +272,17 @@ export const lesson = {
   credit: (host: string, creator: string | null) =>
     creator ? `Original by ${creator} on ${host}` : `Original on ${host}`,
   /**
+   * Under that credit: who the post's caption credits with the choreography,
+   * and its sound. Only what services/motion-api found (ingest.credit), never
+   * a guess; null when neither is there. The title says where it came from.
+   */
+  postCredit: (c: { choreo: string | null; track: string | null; artist: string | null }) => {
+    const music = [c.track, c.artist].filter(Boolean).join(" · ");
+    const parts = [c.choreo && `Choreo ${c.choreo}`, music && `♪ ${music}`].filter(Boolean);
+    return parts.length ? parts.join(" · ") : null;
+  },
+  postCreditTitle: (text: string) => `From the post's caption and sound: ${text}`,
+  /**
    * Opening a lesson by its link, keyed by what services/motion-api answered.
    * An unknown job_id reads as "queued" there, not 404, so a mistyped link lands
    * on `notReady` — which is why that line does not promise the lesson exists.
@@ -603,6 +614,8 @@ export const privacy = {
         "Processing records: how the job went and how long each step took.",
         // fingerprints/index.json: sha256 + frame hashes, source_key — fingerprint.py, api._store_and_dispatch
         "A fingerprint of the video (a checksum and small frame hashes) and, for a pasted link, which post it came from. This is how the same video added twice becomes one lesson.",
+        // ingest.source_credit: shown as "Original by …" and the choreo/music line
+        "For a pasted link, the post's public credits: the poster's @handle, and any choreographer @handles and song named in its caption or sound. We keep those names, not the caption.",
         // {clip_id}.last-access.json — api._touch
         "When the lesson was last opened.",
       ],

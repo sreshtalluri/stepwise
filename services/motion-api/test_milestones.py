@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from milestones import build_detections, counts_milestone
-from test_retention import NO_REQUEST, api  # noqa: F401 -- the api fixture
+from test_retention import NO_REQUEST, _removal, api  # noqa: F401 -- the api fixture
 
 GRID = {"bpm": 117.123, "count_one_s": 0.51234, "seconds_per_count": 0.5128,
         "confidence": 0.8, "alternates": [], "warnings": [], "count_total": None}
@@ -50,7 +50,7 @@ def test_detections_404_then_served_then_gone_after_removal(api):
     r["/abc.detections.json"] = b'{"dancers":[]}'
     assert api.get_job_detections("job_abc").body == b'{"dancers":[]}'
 
-    api.remove_lesson("abc", None)
+    api.remove_lesson("abc", _removal(api), NO_REQUEST)
     assert "/abc.detections.json" not in r
     with pytest.raises(HTTPException) as e:
         api.get_job_detections("job_abc")
