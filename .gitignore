@@ -1,42 +1,51 @@
 # Dependencies
-frontend/node_modules/
-
-# Python
+node_modules/
+.pnp.*
+.venv/
 __pycache__/
-*.pyc
-*.pyo
-.pytest_cache/
+*.py[cod]
 
-# Test screenshots
-screenshots/
+# Builds
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
 
-# Playwright
-.playwright-mcp/
-
-# Environment
+# Secrets — never commit these
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
 
-# IDE
-.vscode/
-.idea/
+# Model weights and assets (fetched, never committed)
+weights/
+checkpoints/
+*.pt
+*.onnx
+*.engine
+*.glb
+*.fbx
+assets.zip
 
-# Next.js
-frontend/.next/
-frontend/out/
+# Media and job artifacts
+uploads/
+outputs/
+*.mp4
+*.mov
+!docs/**/*.mp4
+!packages/beat-detect/python/tests/fixtures/*.mp4
 
-# OS
+# Tooling
+.pytest_cache/
+.ruff_cache/
 .DS_Store
-Thumbs.db
+screenshots/
+qa-reports/
+.playwright-mcp/
 .gstack/
 
-# Model weights
-*.task
-pipeline/models/mediapipe/
-
-# random
-flow.txt.claude/worktrees/
-
-# status
-STATUS.md
+# Local evaluation clip cache
+.stepwise-clips/

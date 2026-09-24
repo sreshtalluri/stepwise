@@ -1,0 +1,494 @@
+/* Design tokens — docs/DESIGN.md §3 (colour), §5 (type), §9 (motion).
+   This file is the only place the tokens are declared; every surface reads them.
+   Values copied verbatim from DESIGN.md — do not re-pick them by eye. */
+
+:root {
+  --paper: #f2efe9;
+  --paper-sunk: #e7e1d6;
+  --line: #d8d0c3;
+  --stage: #1c1917;
+  --stage-deep: #12100f;
+  --ink: #221e1c;
+  --ink-muted: #6b635c;
+  --ink-faint: #9a9188;
+
+  /* Fallback dancer colours (DESIGN.md §3). The per-lesson accent is sampled
+     from the clip and arrives on MotionResult.accent_color.hex; surfaces that
+     have a clip override --accent inline. --dancer-1 is the fallback. */
+  --dancer-1: #f2891d; /* A2 "Count off": was #e8952f */
+  --dancer-2: #1e7a6f;
+  --dancer-3: #c2417e;
+  --dancer-4: #3f51b5;
+  --accent: var(--dancer-1);
+
+  /* Bricolage Grotesque (Google Fonts, OFL) for display and count numerals;
+     Switzer (Fontshare) for everything else. DESIGN.md §5. */
+  --font-display: "Bricolage Grotesque", "Switzer", system-ui, sans-serif;
+  --font-ui: "Switzer", system-ui, sans-serif;
+
+  /* Spacing and gutter, DESIGN.md §6 (tightened for A2). */
+  --gut: clamp(16px, 4vw, 56px);
+  --s1: 8px;
+  --s2: 12px;
+  --s3: 20px;
+  --s4: 32px;
+  --s5: clamp(48px, 7vw, 96px);
+  --r: 16px;
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --t: 160ms var(--ease);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-weight: 400;
+  line-height: 1.5;
+  font-feature-settings: "tnum" 1; /* tabular figures — DESIGN.md §5 */
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2.5px solid var(--ink);
+  outline-offset: 3px;
+}
+
+/* --- shared chrome ------------------------------------------------------- */
+
+.wrap {
+  max-width: 1400px; /* DESIGN.md §6 */
+  margin: 0 auto;
+  padding: 0 clamp(20px, 4vw, 48px);
+}
+
+.btn {
+  display: inline-block;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 12px;
+  padding: 16px 26px;
+  font-weight: 600;
+  font-size: 16px;
+  min-height: 56px;
+  transition: transform var(--t);
+}
+
+.btn:active {
+  transform: scale(0.98) translateY(1px); /* DESIGN.md §8 */
+}
+
+.btn-ghost {
+  background: none;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.btn-lg {
+  padding: 20px 34px;
+  font-size: 17px;
+  min-height: 64px;
+}
+
+.meta {
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+}
+
+.muted {
+  color: var(--ink-muted);
+}
+
+.faint {
+  color: var(--ink-faint);
+}
+
+/* The dark recessed stage — the mirror (DESIGN.md §2, §10). */
+.stage {
+  position: relative;
+  overflow: hidden;
+  background: radial-gradient(
+    ellipse at 50% 42%,
+    var(--stage) 38%,
+    var(--stage-deep) 100%
+  );
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: inset 0 2px 16px rgba(0, 0, 0, 0.55);
+  touch-action: none;
+}
+
+.stage-label {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  font-size: 0.8125rem;
+  color: var(--ink-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
+}
+
+/* --- plain app screens (/lessons, /privacy, lesson loading) -------------
+   The landing, /upload and processing are app/front.css (A2, `fd-` classes). */
+
+.btn-sm {
+  padding: 10px 16px;
+  font-size: 0.875rem;
+  min-height: 0;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.app-screen {
+  padding-top: 32px;
+  padding-bottom: 64px;
+  max-width: 1100px;
+}
+
+.app-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  letter-spacing: -0.02em;
+}
+
+/* Visible to screen readers only. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.form-error {
+  margin-top: 14px;
+  color: var(--ink);
+  background: var(--paper-sunk);
+  border-left: 3px solid var(--accent);
+  padding: 12px 14px;
+  border-radius: 0 8px 8px 0;
+  max-width: 60ch;
+}
+
+.dropzone {
+  width: 100%;
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 18px;
+  background: var(--paper-sunk);
+  border: 1.5px dashed var(--line);
+}
+
+/* Fade-in for things that arrive while you watch. Level-3 motion: one short
+   opacity step, and nothing under reduced motion. */
+.appear {
+  animation: appear 600ms var(--ease) both;
+}
+@keyframes appear {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .appear {
+    animation: none;
+  }
+}
+
+
+/* ===================================================================
+   Lesson viewer (W5). Scoped to .lesson: the viewer and the marketing
+   site both want .stage / .stages / .btn / .chip and mean different
+   things by each. All viewer markup lives under <main class="lesson">.
+   =================================================================== */
+
+.lesson {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px 14px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lesson-head { padding: 0 2px; }
+.lesson .title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.lesson .sub { font-size: 0.8125rem; color: var(--ink-muted); margin-top: 3px; }
+
+/* ------------------------------------------------------------------- stages */
+
+.lesson .stages { display: flex; flex-direction: column; gap: 10px; }
+
+/* D2: the two stages start equal and either can be promoted to full height. */
+.lesson .stage {
+  position: relative;
+  overflow: hidden;
+  background: var(--stage);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: inset 0 2px 14px rgba(0, 0, 0, 0.55);
+  height: 240px;
+  transition: height var(--t);
+}
+.lesson .stage.promoted { height: 62vh; }
+.lesson .stage.demoted { height: 96px; }
+.lesson .stage canvas { display: block; touch-action: none; }
+.lesson .video { width: 100%; height: 100%; object-fit: contain; }
+
+/* Mockup finding §13.5: anything near the canvas edge clips. Keep a safe inset. */
+.lesson .view-label {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 2;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  pointer-events: none;
+}
+.lesson .swap {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  background: rgba(242, 239, 233, 0.12);
+  color: #ede7dd;
+  border: 1px solid rgba(242, 239, 233, 0.25);
+  border-radius: 9px;
+  padding: 7px 11px;
+  font: 500 0.75rem var(--font-ui);
+  cursor: pointer;
+  transition: background var(--t);
+}
+.lesson .swap:active { transform: translateY(1px) scale(0.98); }
+
+.lesson .vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 45%, var(--stage-deep) 100%);
+  opacity: 0.75;
+}
+
+/* DESIGN.md §7b: on phone and tablet the second angle is an inset over the first. */
+.lesson .inset {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 38%;
+  aspect-ratio: 3 / 4;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(242, 239, 233, 0.22);
+  z-index: 3;
+}
+.lesson .inset .view-label { top: 6px; left: 8px; font-size: 0.65rem; }
+
+/* Hand/feet close-up (crop_rects). Bottom-right of the VIDEO stage only — the
+ * 3D stage's own `.inset` (above) lives in a different section, so the two
+ * never compete for the same corner. Sized so two side by side plus their
+ * labels fit inside the smallest stage height (240px) with room to spare;
+ * hidden entirely rather than shrunk further when the pane is demoted. */
+.lesson .crop-peek-group {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 3;
+  display: flex;
+  gap: 6px;
+  pointer-events: none;
+}
+.lesson .crop-peek {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--stage-deep);
+  border: 1px solid rgba(242, 239, 233, 0.22);
+}
+/* Per-side close-ups: four insets as a 2x2 (hands over feet) at a smaller size,
+ * so the group takes about the footprint the two combined insets did. */
+.lesson .crop-peek-group.sides {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+}
+.lesson .crop-peek-group.sides .crop-peek {
+  width: 56px;
+  height: 56px;
+}
+.lesson .crop-peek canvas { display: block; width: 100%; height: 100%; }
+.lesson .crop-peek-label {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  z-index: 1;
+  font-size: 0.6rem;
+  color: var(--ink-faint);
+}
+/* The honesty state — DESIGN.md §7h. Opaque, not a caption under the box: it
+ * has to fully replace the claim the canvas would otherwise be making, not
+ * sit beside a stale frame. */
+.lesson .crop-peek-msg {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  text-align: center;
+  font-size: 0.6rem;
+  line-height: 1.15;
+  color: var(--ink-faint);
+  background: var(--stage-deep);
+}
+
+/* --------------------------------------------------------------- annotations */
+
+.lesson .legend { font-size: 0.8125rem; color: var(--ink-muted); }
+.lesson .note { font-size: 0.8125rem; color: var(--ink-muted); }
+
+/* -------------------------------------------------------------------- chips */
+
+.lesson .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.lesson .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--paper-sunk);
+  color: var(--ink);
+  font: 500 0.9375rem var(--font-ui);
+  cursor: pointer;
+  transition: background var(--t), color var(--t);
+}
+/* State is weight and paper/sunk contrast, never a second saturated colour. */
+.lesson .chip.on { background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 600; }
+.lesson .chip small { font-size: 0.72rem; font-weight: 400; color: var(--ink-faint); }
+.lesson .chip.on small { color: #c9c2b7; }
+.lesson .chip:active { transform: translateY(1px) scale(0.98); }
+
+/* ---------------------------------------------------------------- transport
+ *
+ * The overview bar, the dancer chips, their swatch and the A–B loop veil used
+ * to live here as placeholders for W6. `<LessonNavigator>` renders all four now
+ * (`.sw-overview`, `.sw-chips`, `.sw-swatch`, `.sw-veil` in
+ * packages/navigation/src/navigation.css), so those rules are deleted rather
+ * than left to rot — two stylesheets describing the same bar is how a phantom
+ * style survives long enough to confuse someone.
+ *
+ * `.btn` stays: the viewer's own controls (speed, mirror, follow, compare) are
+ * passed into the navigator's transport row through `children`, which is the
+ * seam W6 left for them.
+ */
+
+/* The host's buttons share the row with `.sw-btn`, so they share its metrics.
+ * They keep their own stacked label/`small` layout — the second line is a
+ * measured fact ("travels 3.2 m") or a key hint, not a caption. */
+.lesson .sw-transport .btn { flex: 1 1 auto; border-radius: 12px; }
+
+.lesson .btn {
+  min-height: 88px; /* DESIGN.md §8 — the phone is on the floor three metres away */
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--paper-sunk);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font: 600 0.9375rem var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: background var(--t), color var(--t);
+}
+.lesson .btn small { font-weight: 400; font-size: 0.72rem; color: var(--ink-muted); }
+.lesson .btn.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.lesson .btn.active small { color: #c9c2b7; }
+.lesson .btn:active { transform: translateY(1px) scale(0.98); }
+
+/* ------------------------------------------------- tablet / landscape phone */
+
+@media (min-width: 768px) {
+  .lesson .stages { flex-direction: row; }
+  .lesson .stages > .stage { flex: 1; height: 44vh; }
+  .lesson .stage.promoted { flex: 3; }
+  .lesson .stage.demoted { flex: 1; height: 44vh; }
+}
+
+/* -------------------------------------------------------------- desktop */
+
+@media (min-width: 1024px) {
+  .lesson { padding: 22px 24px 28px; }
+  .lesson .stages > .stage { height: 56vh; }
+  .lesson .stage.demoted { height: 56vh; }
+  /* The second angle earns an equal panel instead of an inset. */
+  .lesson[data-compare="on"] .inset {
+    /* relative, not static: the inset's own "estimated view" label is absolutely
+       positioned, and against a static parent it would stack on top of the primary
+       panel's label instead of sitting in its own corner. */
+    position: relative;
+    inset: auto;
+    width: auto;
+    aspect-ratio: auto;
+    flex: 1;
+    border: none;
+    border-left: 1px solid rgba(242, 239, 233, 0.22);
+  }
+  .lesson[data-compare="on"] .stages > .stage:first-child {
+    display: flex;
+    padding: 0;
+  }
+  .lesson[data-compare="on"] .stages > .stage:first-child > :not(.view-label):not(.swap) { flex: 1; }
+}

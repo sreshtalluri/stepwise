@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Marketing landing + share card</title>
+<link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@700,800,900&f[]=switzer@400,500,600,700&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#F2EFE9;--sunk:#E7E1D6;--line:#D8D0C3;--stage:#1C1917;
+--ink:#221E1C;--muted:#6B635C;--faint:#9A9188;--accent:#E8952F;
+--fd:'Cabinet Grotesk',sans-serif;--fu:'Switzer',sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#cfc9be;font-family:var(--fu);color:var(--ink);padding:22px;
+display:flex;gap:22px;justify-content:center;align-items:flex-start;flex-wrap:wrap}
+.cap{text-align:center;font-size:12px;color:#5c564e;margin-top:9px;font-weight:500}
+
+/* ===== marketing page ===== */
+.site{width:760px;background:var(--paper);border-radius:16px;overflow:hidden;
+box-shadow:0 20px 60px -24px rgba(0,0,0,.45)}
+.nav{display:flex;align-items:center;justify-content:space-between;padding:18px 26px}
+.logo{font-family:var(--fd);font-weight:800;font-size:19px;letter-spacing:-.03em}
+.navr{display:flex;gap:20px;align-items:center;font-size:14px;color:var(--muted)}
+.navcta{background:var(--ink);color:var(--paper);border-radius:9px;padding:9px 15px;font-weight:600;font-size:13.5px}
+
+.hero{padding:16px 26px 0;display:grid;grid-template-columns:1.05fr .95fr;gap:24px;align-items:center}
+h1{font-family:var(--fd);font-weight:900;font-size:60px;line-height:.92;letter-spacing:-.045em}
+h1 em{font-style:normal;color:var(--accent)}
+.lede{font-size:16.5px;color:var(--muted);margin-top:16px;line-height:1.55;max-width:34ch}
+.herocta{display:flex;gap:11px;align-items:center;margin-top:22px}
+.big{background:var(--ink);color:var(--paper);border-radius:12px;padding:15px 24px;font-weight:600;font-size:16px}
+.ghostb{border:1px solid var(--line);border-radius:12px;padding:15px 20px;font-weight:600;font-size:15px}
+.free{font-size:13.5px;color:var(--muted);margin-top:11px}
+
+.demo{background:var(--stage);border-radius:16px;height:330px;position:relative;overflow:hidden;
+border:1px solid var(--line);box-shadow:inset 0 2px 16px rgba(0,0,0,.55)}
+.fl{position:absolute;left:0;right:0;bottom:0;height:92px;background:linear-gradient(#252118,#2E2920)}
+.hz{position:absolute;left:0;right:0;bottom:92px;height:2px;background:rgba(216,208,195,.28)}
+.sh{position:absolute;bottom:52px;left:50%;transform:translateX(-50%);width:120px;height:17px;
+border-radius:50%;background:radial-gradient(ellipse,rgba(0,0,0,.65),transparent 70%)}
+.chips{position:absolute;bottom:11px;left:11px;right:11px;display:flex;gap:6px}
+.chip{flex:1;background:rgba(242,239,233,.13);border:1px solid rgba(242,239,233,.24);
+border-radius:8px;padding:8px 0;text-align:center;font-size:11.5px;color:#EDE7DD}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#231a0c;font-weight:700}
+.spin{position:absolute;top:12px;right:13px;font-size:11.5px;color:var(--faint)}
+
+/* proof band */
+.band{margin:34px 26px 0;background:var(--ink);border-radius:18px;padding:26px 28px;color:var(--paper)}
+.bandh{font-family:var(--fd);font-weight:800;font-size:27px;letter-spacing:-.03em;line-height:1.1}
+.bandp{font-size:15px;color:#BDB5AA;margin-top:9px;max-width:46ch;line-height:1.55}
+.ba{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:20px}
+.bx{background:#2A2622;border-radius:12px;height:132px;position:relative;overflow:hidden}
+.bxl{position:absolute;top:9px;left:11px;font-size:11px;color:#9A9188}
+.bxm{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+color:#7d766d;font-size:12px}
+
+/* steps — asymmetric, not 3 equal cards */
+.steps{margin:34px 26px 0}
+.sh2{font-family:var(--fd);font-weight:800;font-size:27px;letter-spacing:-.03em}
+.srow{display:flex;gap:16px;align-items:flex-start;padding:16px 0;border-bottom:1px solid var(--line)}
+.snum{font-family:var(--fd);font-weight:800;font-size:19px;color:var(--accent);width:26px;flex:none;padding-top:1px}
+.sttl{font-weight:600;font-size:16px}
+.sdesc{font-size:14.5px;color:var(--muted);margin-top:3px;line-height:1.5}
+
+.foot{margin:30px 26px 28px;background:var(--sunk);border-radius:16px;padding:26px;text-align:center}
+.footh{font-family:var(--fd);font-weight:800;font-size:31px;letter-spacing:-.035em}
+.footp{font-size:14.5px;color:var(--muted);margin:9px 0 17px}
+
+/* ===== share card ===== */
+.share{width:300px;background:var(--stage);border-radius:22px;overflow:hidden;position:relative;
+box-shadow:0 20px 60px -24px rgba(0,0,0,.5);height:534px}
+.sp{position:absolute;inset:0;display:grid;grid-template-rows:1fr 1fr}
+.half{position:relative;overflow:hidden}
+.half.b{border-top:1px solid rgba(242,239,233,.14)}
+.hl{position:absolute;top:11px;left:13px;font-size:11.5px;color:#C9C2B7;font-weight:500}
+.sfl{position:absolute;left:0;right:0;bottom:0;height:62px;background:linear-gradient(#252118,#2E2920)}
+.shz{position:absolute;left:0;right:0;bottom:62px;height:2px;background:rgba(216,208,195,.26)}
+.ssh{position:absolute;bottom:34px;left:50%;transform:translateX(-50%);width:86px;height:13px;
+border-radius:50%;background:radial-gradient(ellipse,rgba(0,0,0,.6),transparent 70%)}
+.scount{position:absolute;bottom:74px;left:0;right:0;text-align:center;
+font-family:var(--fd);font-weight:800;font-size:40px;color:var(--paper)}
+.smark{position:absolute;bottom:14px;left:0;right:0;text-align:center;
+font-family:var(--fd);font-weight:800;font-size:13px;color:#EDE7DD;letter-spacing:-.02em}
+.smark span{color:var(--accent)}
+</style></head><body>
+
+<div><div class="site">
+  <div class="nav">
+    <div class="logo">stepwise</div>
+    <div class="navr"><span>Examples</span><span>How it works</span><div class="navcta">Open the app</div></div>
+  </div>
+
+  <div class="hero">
+    <div>
+      <h1>Learn the<br>dance from<br><em>every angle.</em></h1>
+      <div class="lede">Drop in any TikTok. Get the dancer back in 3D — spin them around, slow it down, take it one count at a time.</div>
+      <div class="herocta"><div class="big">Try it free</div><div class="ghostb">Watch 30s</div></div>
+      <div class="free">No account. Works in your browser.</div>
+    </div>
+    <div class="demo">
+      <div class="spin">drag to spin →</div>
+      <div class="fl"></div><div class="hz"></div><div class="sh"></div>
+      <svg style="position:absolute;bottom:46px;left:50%;transform:translateX(-50%)" width="132" height="182" viewBox="0 0 132 182">
+        <defs><linearGradient id="m" x1="0" x2="1"><stop offset="0" stop-color="#E8952F"/>
+        <stop offset="55%" stop-color="#E8952F"/><stop offset="55%" stop-color="#A3651F"/>
+        <stop offset="1" stop-color="#A3651F"/></linearGradient></defs>
+        <circle cx="66" cy="18" r="14" fill="url(#m)"/><path d="M53 36h26l7 52H46z" fill="url(#m)"/>
+        <rect x="50" y="88" width="14" height="54" rx="7" fill="url(#m)"/>
+        <rect x="68" y="88" width="14" height="54" rx="7" fill="url(#m)"/>
+        <rect x="30" y="40" width="13" height="45" rx="6" fill="url(#m)" transform="rotate(16 36 40)"/>
+        <rect x="89" y="40" width="13" height="45" rx="6" fill="url(#m)" transform="rotate(-16 95 40)"/>
+      </svg>
+      <div class="chips"><div class="chip on">Front</div><div class="chip">Side</div>
+      <div class="chip">Back</div><div class="chip">Top</div></div>
+    </div>
+  </div>
+
+  <div class="band">
+    <div class="bandh">Filmed from the front. Watch it from the side.</div>
+    <div class="bandp">A phone films one angle. The step you need is often side-on or from above. Spin the body and look from there instead of guessing.</div>
+    <div class="ba">
+      <div class="bx"><div class="bxl">the clip — front only</div><div class="bxm">hard to read the footwork</div></div>
+      <div class="bx"><div class="bxl">same moment, from the side</div><div class="bxm">the weight shift is clear</div></div>
+    </div>
+  </div>
+
+  <div class="steps">
+    <div class="sh2">Three steps.</div>
+    <div class="srow"><div class="snum">1</div><div><div class="sttl">Paste or upload a clip</div>
+      <div class="sdesc">One dancer, filmed from the front, up to a minute.</div></div></div>
+    <div class="srow"><div class="snum">2</div><div><div class="sttl">We build the body</div>
+      <div class="sdesc">Takes about two minutes. Your video is playable the whole time — slow it, mirror it, loop it.</div></div></div>
+    <div class="srow"><div class="snum">3</div><div><div class="sttl">Learn it count by count</div>
+      <div class="sdesc">The dance splits into parts. Loop the one that's fighting you until it isn't.</div></div></div>
+  </div>
+
+  <div class="foot">
+    <div class="footh">Put a dance in.</div>
+    <div class="footp">It takes two minutes and costs nothing.</div>
+    <div class="big" style="display:inline-block">Try it free</div>
+  </div>
+</div><div class="cap">Marketing site — loud front door (760px shown, real width 1200+)</div></div>
+
+<div><div class="share">
+  <div class="sp">
+    <div class="half"><div class="hl">the clip</div>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#6a635b;font-size:12px">original video</div>
+    </div>
+    <div class="half b"><div class="hl">same move, from the side</div>
+      <div class="sfl"></div><div class="shz"></div><div class="ssh"></div>
+      <svg style="position:absolute;bottom:28px;left:50%;transform:translateX(-50%)" width="104" height="146" viewBox="0 0 104 146">
+        <defs><linearGradient id="s2" x1="0" x2="1"><stop offset="0" stop-color="#E8952F"/>
+        <stop offset="55%" stop-color="#E8952F"/><stop offset="55%" stop-color="#A3651F"/>
+        <stop offset="1" stop-color="#A3651F"/></linearGradient></defs>
+        <circle cx="52" cy="14" r="11" fill="url(#s2)"/><path d="M42 29h20l6 42H36z" fill="url(#s2)"/>
+        <rect x="39" y="71" width="11" height="44" rx="6" fill="url(#s2)"/>
+        <rect x="55" y="71" width="11" height="44" rx="6" fill="url(#s2)"/>
+        <rect x="23" y="32" width="10" height="36" rx="5" fill="url(#s2)" transform="rotate(16 28 32)"/>
+        <rect x="70" y="32" width="10" height="36" rx="5" fill="url(#s2)" transform="rotate(-16 75 32)"/>
+      </svg>
+      <div class="scount">5</div>
+    </div>
+  </div>
+  <div class="smark">made with <span>stepwise</span></div>
+</div><div class="cap">Share clip — 9:16, auto-made, postable</div></div>
+
+</body></html>

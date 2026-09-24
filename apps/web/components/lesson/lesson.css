@@ -1,0 +1,1410 @@
+/*
+ * The lesson page (components/LessonViewer.tsx and ./*). Its own file, every class
+ * prefixed `ls-`, and its own copy of the DESIGN.md §3/§9 colour and motion tokens
+ * scoped to `.ls`, so the landing styles can change without moving this page.
+ * The two type families (--font-display, --font-ui) are NOT copied: they come
+ * from app/globals.css, so the lesson and the front door share one typeface
+ * pair. Values are DESIGN.md's, verbatim.
+ */
+
+.ls {
+  --paper: #f2efe9;
+  --paper-sunk: #e7e1d6;
+  --line: #d8d0c3;
+  --stage: #1c1917;
+  --stage-deep: #12100f;
+  --ink: #221e1c;
+  --ink-muted: #6b635c;
+  --ink-faint: #9a9188;
+  --on-stage: #e8e1d8;
+  --on-stage-muted: #b8aea3;
+  --glass: rgb(28 25 23 / 0.72);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --t: 160ms var(--ease);
+  --r: 14px;
+
+  color: var(--ink);
+  background: var(--paper);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  -webkit-tap-highlight-color: transparent;
+}
+.ls *,
+.ls *::before,
+.ls *::after {
+  box-sizing: border-box;
+}
+:where(.ls) button,
+:where(.ls) select {
+  font: inherit;
+  color: inherit;
+  transition: transform var(--t), background-color var(--t), color var(--t), opacity var(--t);
+}
+:where(.ls) button:not(:disabled) {
+  cursor: pointer;
+}
+:where(.ls) button:active:not(:disabled) {
+  transform: scale(0.98) translateY(1px); /* DESIGN.md §8 */
+}
+.ls :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ls-icon {
+  flex: none;
+  display: block;
+}
+.ls-muted {
+  color: var(--ink-muted);
+}
+.ls-hint {
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+}
+
+/* ------------------------------------------------------------------ controls */
+
+.ls-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  flex: none;
+}
+.ls-icon-btn:hover {
+  background: var(--paper-sunk);
+}
+.ls-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--paper-sunk);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ls-btn:hover {
+  background: var(--line);
+}
+.ls-ghost {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.ls-accent,
+.ls-accent:hover {
+  background: var(--accent);
+  color: var(--stage);
+}
+
+/* Segmented pills. The state is in aria-pressed, and weight carries it too. */
+.ls-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--paper-sunk);
+}
+.ls-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.ls-seg button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+}
+.ls-seg.ls-on-dark {
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.ls-seg.ls-on-dark button {
+  color: var(--on-stage);
+}
+.ls-seg.ls-on-dark button[aria-pressed="true"] {
+  background: var(--paper);
+  color: var(--ink);
+}
+.ls-select select {
+  appearance: none;
+  min-height: 38px;
+  padding: 0 30px 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--paper-sunk)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath fill='%236b635c' d='M213.66 101.66l-80 80a8 8 0 0 1-11.32 0l-80-80a8 8 0 0 1 11.32-11.32L128 164.69l74.34-74.35a8 8 0 0 1 11.32 11.32Z'/%3E%3C/svg%3E")
+    no-repeat right 10px center / 14px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.ls-select.ls-on-dark select {
+  background-color: var(--glass);
+  color: var(--on-stage);
+  backdrop-filter: blur(8px);
+}
+.ls-tag {
+  font-size: 0.8125rem;
+  color: var(--on-stage-muted);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.6);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ stages */
+
+.ls-stage,
+.ls-pane {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r);
+  background: radial-gradient(ellipse at 50% 42%, var(--stage) 45%, var(--stage-deep) 100%);
+  isolation: isolate;
+}
+.ls-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform-origin: 50% 50%;
+  transition: opacity var(--t);
+}
+.ls-overlay,
+.ls-3d {
+  position: absolute;
+  inset: 0;
+  transition: opacity var(--t);
+}
+.ls-overlay {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.ls-3d canvas,
+.ls-pane canvas {
+  touch-action: none;
+}
+/* 3D over the video: the video stays mounted and playing (it is the clock and the
+   sound), just not seen. */
+.ls-stage[data-view="3d"] .ls-video {
+  opacity: 0;
+}
+.ls-stage-tag {
+  position: absolute;
+  left: 14px;
+  top: 12px;
+  z-index: 2;
+}
+.ls-markers {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.ls-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--c);
+  background: rgb(28 25 23 / 0.55);
+  color: var(--paper);
+  font: 800 14px/1 var(--font-display);
+  will-change: transform;
+}
+.ls-marker.ls-on {
+  background: var(--c);
+  color: var(--stage);
+}
+.ls-pane-bar {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  pointer-events: none;
+}
+.ls-pane-bar > * {
+  pointer-events: auto;
+}
+.ls-pane-bar .ls-select {
+  min-width: 0;
+}
+.ls-pane-bar .ls-select select {
+  max-width: 100%;
+  text-overflow: ellipsis;
+  background-color: var(--glass);
+  color: var(--on-stage);
+}
+.ls-pane-bar .ls-icon-btn {
+  width: 36px;
+  height: 36px;
+  background: var(--glass);
+  color: var(--on-stage);
+}
+.ls-pane-bar .ls-tag {
+  padding: 4px 8px;
+}
+
+/* ------------------------------------------------------------------ close-ups */
+
+.ls-closeups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ls-peek {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--stage);
+  padding: 0;
+  border: 0;
+  text-align: left;
+}
+.ls-peek canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.ls-peek[aria-pressed="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ls-peek-label,
+.ls-peek-cue {
+  position: absolute;
+  left: 7px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--on-stage);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.7);
+}
+.ls-peek-label {
+  top: 5px;
+}
+.ls-peek-cue {
+  bottom: 5px;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--glass);
+  text-shadow: none;
+}
+.ls-peek-cue:empty {
+  display: none;
+}
+.ls-peek-cue[data-lifted="1"] {
+  background: var(--accent);
+  color: var(--stage);
+}
+.ls-peek-off {
+  position: absolute;
+  inset: 22px 8px 8px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  color: var(--ink-faint);
+}
+
+/* ------------------------------------------------------------------ counts */
+
+/* The current eight. Weight and size carry the state: no pill, no box (DESIGN.md §7). */
+.ls-counts {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  align-items: end;
+  min-width: 0;
+}
+.ls-count {
+  display: grid;
+  place-items: end center;
+  min-height: 56px;
+  padding: 0 0 4px;
+  font: 700 clamp(1.25rem, 2.4vw, 1.75rem) / 1 var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--ink-faint);
+  border-bottom: 2px solid var(--line);
+}
+.ls-count.ls-on {
+  font-weight: 800;
+  font-size: clamp(2rem, 4.4vw, 3.25rem);
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+/* Outside the window being learned: faded toward the paper, never the inside highlighted (§7). */
+.ls-count.ls-out {
+  opacity: 0.4;
+}
+/* Looped at full speed: a quiet dot, the count's own tick (§7g). */
+.ls-count {
+  position: relative;
+}
+.ls-count.ls-done::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.ls-stage-counts .ls-count {
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ------------------------------------------------------------------ dancers */
+
+.ls-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px 4px 4px;
+  min-height: 44px;
+  border-radius: 999px;
+  background: var(--paper-sunk);
+  font-weight: 600;
+}
+.ls-who-img {
+  position: relative;
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--c);
+  background: var(--stage) center 20% / cover no-repeat;
+}
+.ls-who-img b {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--c);
+  color: var(--stage);
+  font: 800 11px/1 var(--font-display);
+}
+
+.ls-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  overflow-y: auto;
+  background: rgb(242 239 233 / 0.97);
+}
+.ls-picker-box {
+  width: min(100%, 640px);
+  display: grid;
+  gap: 14px;
+}
+.ls-picker h2 {
+  font: 800 clamp(1.5rem, 5vw, 2.25rem) / 1.05 var(--font-display);
+  letter-spacing: -0.02em;
+}
+.ls-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+}
+.ls-pick {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border-radius: var(--r);
+  background: var(--paper-sunk);
+  text-align: left;
+}
+.ls-pick[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+.ls-pick-img {
+  position: relative;
+  display: block;
+  aspect-ratio: 3 / 4;
+  border-radius: 10px;
+  background: var(--stage) center / cover no-repeat;
+  box-shadow: inset 0 0 0 3px var(--ink-faint);
+  overflow: hidden;
+}
+/* The live-video fallback, cropped to the same window as a captured still. */
+.ls-live-still {
+  position: absolute;
+  max-width: none;
+  object-fit: fill;
+  pointer-events: none;
+}
+.ls-pick-img .ls-ring {
+  z-index: 1;
+}
+.ls-pick-img::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inherit;
+  pointer-events: none;
+}
+.ls-pick[aria-pressed="true"] .ls-pick-img {
+  box-shadow: inset 0 0 0 4px var(--c);
+}
+.ls-ring {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid var(--c);
+  background: rgb(28 25 23 / 0.5);
+  color: var(--paper);
+  font: 800 18px/1 var(--font-display);
+}
+.ls-pick[aria-pressed="true"] .ls-ring {
+  background: var(--c);
+  color: var(--stage);
+}
+.ls-pick-name {
+  display: grid;
+  padding: 0 4px 4px;
+  font-weight: 600;
+}
+.ls-pick-name small {
+  font-weight: 400;
+  opacity: 0.75;
+}
+.ls-start {
+  min-height: 56px;
+  font-size: 1.0625rem;
+}
+
+/* ================================================================== phone */
+
+/* An app shell: the page never scrolls. The stage takes what the sheet leaves. */
+.ls-phone {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: var(--stage);
+  overscroll-behavior: none;
+}
+.ls-ph-stages {
+  position: relative;
+  min-height: 0;
+  display: grid;
+  touch-action: pan-x; /* vertical swipes are ours: next/previous 8-count */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ls-ph-stage {
+  border-radius: 0;
+  min-height: 0;
+}
+.ls-ph-stage .ls-stage-tag {
+  top: calc(env(safe-area-inset-top) + 64px);
+  left: 12px;
+  font-size: 0.75rem;
+}
+.ls-bars {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: calc(env(safe-area-inset-top) + 6px);
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+}
+.ls-bars button {
+  flex: 1;
+  height: 20px;
+  padding: 8px 0;
+  background: rgb(232 225 216 / 0.3) content-box;
+  border-radius: 2px;
+}
+.ls-bars button.ls-here {
+  background-color: var(--accent);
+}
+.ls-bars button.ls-done {
+  background-color: var(--paper);
+}
+.ls-ph-head {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(env(safe-area-inset-top) + 22px);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 0 4px;
+  color: var(--paper);
+}
+.ls-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 130px;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(rgb(18 16 15 / 0.55), transparent);
+}
+.ls-desk .ls-stage::before {
+  height: 90px;
+}
+.ls-ph-head .ls-icon-btn:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+.ls-ph-head .ls-title {
+  font-size: 1.125rem;
+  flex: 1;
+}
+.ls-ph-head .ls-meter {
+  color: var(--on-stage-muted);
+  font-size: 0.8125rem;
+}
+.ls-ph-closeups {
+  position: absolute;
+  left: 10px;
+  top: calc(env(safe-area-inset-top) + 86px);
+  z-index: 3;
+  width: 76px;
+  gap: 8px;
+}
+.ls-ph-closeups.ls-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 124px;
+  gap: 4px;
+}
+.ls-ph-closeups .ls-peek-off {
+  font-size: 0.625rem;
+  inset: 16px 4px 4px;
+}
+.ls-rail {
+  position: absolute;
+  right: 6px;
+  bottom: 84px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+.ls-rail-item {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  width: 72px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--paper);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.7);
+}
+.ls-rail-dot {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.ls-rail-item.ls-on .ls-rail-dot {
+  background: var(--paper);
+  color: var(--ink);
+}
+.ls-rail-item .ls-who {
+  padding: 0;
+  min-height: 0;
+  background: none;
+}
+.ls-rail-item .ls-who-img {
+  width: 52px;
+  height: 52px;
+  border-width: 3px;
+}
+.ls-rail-item .ls-who-img b {
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+}
+.ls-ph-counts {
+  position: absolute;
+  left: 10px;
+  right: 84px;
+  bottom: 8px;
+  z-index: 3;
+  color: var(--paper);
+  pointer-events: none;
+}
+.ls-ph-unit {
+  display: block;
+  margin-left: 4px;
+  font-size: 0.8125rem;
+  color: var(--on-stage-muted);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.7);
+}
+.ls-ph-counts .ls-counts {
+  pointer-events: auto;
+}
+.ls-ph-counts .ls-count {
+  min-height: 52px;
+  color: rgb(232 225 216 / 0.7);
+  border-bottom-color: rgb(232 225 216 / 0.25);
+  text-shadow: 0 2px 10px rgb(0 0 0 / 0.5);
+  font-size: 1.375rem;
+}
+.ls-ph-counts .ls-count.ls-on {
+  color: var(--paper);
+  font-size: 2.75rem;
+  border-bottom-color: var(--accent);
+}
+.ls-inset {
+  position: absolute;
+  right: 84px;
+  top: calc(env(safe-area-inset-top) + 86px);
+  z-index: 3;
+  width: 38%;
+  aspect-ratio: 3 / 4;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.15), 0 8px 24px rgb(0 0 0 / 0.4);
+}
+.ls-inset .ls-pane {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+}
+.ls-inset .ls-pane-bar .ls-tag {
+  font-size: 0.6875rem;
+}
+.ls-ph-hint {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  width: min(70%, 260px);
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--glass);
+  color: var(--on-stage);
+  font-size: 0.875rem;
+  text-align: center;
+  pointer-events: none;
+}
+.ls-flash {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  z-index: 6;
+  transform: translate(-50%, -50%);
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--glass);
+  color: var(--paper);
+  font-weight: 600;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t);
+}
+.ls-flash.ls-show {
+  opacity: 1;
+}
+.ls-countin {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  font: 800 min(40vw, 40vh) / 1 var(--font-display);
+  color: var(--paper);
+  text-shadow: 0 4px 30px rgb(0 0 0 / 0.5);
+  pointer-events: none;
+}
+
+/* The sheet: everything you press, in the thumb zone. */
+.ls-sheet {
+  position: relative;
+  z-index: 10;
+  display: grid;
+  gap: 8px;
+  padding: 6px 12px calc(10px + env(safe-area-inset-bottom));
+  border-radius: 20px 20px 0 0;
+  background: var(--paper);
+  max-height: 80dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ls-group {
+  display: grid;
+  gap: 6px;
+}
+.ls-group-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+.ls-group-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ls-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--paper-sunk);
+  font-weight: 500;
+}
+.ls-chip[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+}
+.ls-chip small {
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+}
+.ls-install {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: calc(env(safe-area-inset-top) + 70px);
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--paper);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.3);
+  font-size: 0.9375rem;
+}
+.ls-install p {
+  flex-basis: 100%;
+}
+
+/* Sheet open: the stage becomes a strip above it, with only the path and title on it. */
+.ls-open .ls-rail,
+.ls-open .ls-ph-hint,
+.ls-open .ls-ph-counts,
+.ls-open .ls-ph-closeups,
+.ls-open .ls-inset,
+.ls-open .ls-stage-tag {
+  display: none;
+}
+.ls-open .ls-sheet {
+  max-height: 78dvh;
+}
+
+/* Prop it up: no chrome, the count huge, the whole screen three tap zones. */
+.ls-prop .ls-sheet,
+.ls-prop .ls-ph-head,
+.ls-prop .ls-rail,
+.ls-prop .ls-ph-closeups,
+.ls-prop .ls-inset,
+.ls-prop .ls-bars,
+.ls-prop .ls-ph-unit,
+.ls-prop .ls-install {
+  display: none;
+}
+.ls-prop .ls-ph-counts {
+  right: 10px;
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+}
+.ls-prop .ls-ph-counts .ls-count {
+  min-height: 88px;
+  font-size: 2rem;
+}
+.ls-prop .ls-ph-counts .ls-count.ls-on {
+  font-size: clamp(4rem, 22vw, 7rem);
+}
+.ls-prop-top {
+  position: absolute;
+  left: 12px;
+  right: 16px;
+  top: calc(env(safe-area-inset-top) + 10px);
+  z-index: 8;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.ls-prop-exit {
+  width: 64px;
+  height: 64px;
+  background: var(--glass);
+  color: var(--paper);
+}
+.ls-prop-speed {
+  display: grid;
+  justify-items: end;
+  font: 800 clamp(3rem, 16vw, 5rem) / 1 var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--paper);
+  text-shadow: 0 2px 16px rgb(0 0 0 / 0.5);
+}
+.ls-prop-speed small {
+  font: 500 0.9375rem var(--font-ui);
+  color: var(--on-stage);
+  letter-spacing: 0;
+}
+.ls-prop-opts {
+  position: absolute;
+  right: 16px;
+  top: calc(env(safe-area-inset-top) + 120px);
+  z-index: 8;
+  display: flex;
+  gap: 8px;
+}
+.ls-prop-opts button {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+.ls-prop-opts button[aria-pressed="false"] {
+  background: var(--glass);
+  color: var(--on-stage);
+}
+.ls-zones {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1fr;
+}
+.ls-zones button:active {
+  background: rgb(255 255 255 / 0.06);
+  transform: none;
+}
+
+/* The phone on its side: video and 3D side by side, controls in a column (DESIGN.md §6). */
+.ls-phone.ls-land {
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 34%);
+}
+.ls-land .ls-ph-stages {
+  grid-template-columns: 1fr 1fr;
+  touch-action: none;
+}
+.ls-land .ls-pane {
+  border-radius: 0;
+}
+.ls-land .ls-sheet {
+  max-height: none;
+  border-radius: 0;
+  padding: calc(env(safe-area-inset-top) + 8px) calc(10px + env(safe-area-inset-right)) 10px 10px;
+}
+.ls-land .ls-ph-head .ls-title,
+.ls-land .ls-ph-head .ls-meter,
+.ls-land .ls-ph-hint,
+.ls-land .ls-rail-item:first-child {
+  display: none;
+}
+.ls-land .ls-rail {
+  bottom: 12px;
+}
+.ls-land .ls-ph-counts {
+  right: 80px;
+}
+.ls-land .ls-ph-closeups {
+  top: calc(env(safe-area-inset-top) + 88px);
+  width: 64px;
+}
+.ls-land .ls-ph-stage .ls-stage-tag {
+  top: calc(env(safe-area-inset-top) + 62px);
+}
+.ls-land .ls-rail-dot {
+  width: 44px;
+  height: 44px;
+}
+/* Short portrait screens (375x667): a tighter rail so it clears the title. */
+@media (max-height: 740px) {
+  /* Hung from under the title instead of stacked up from the counts, which sit
+     left of it, so the two never meet. */
+  .ls-phone:not(.ls-land) .ls-rail {
+    gap: 6px;
+    top: calc(env(safe-area-inset-top) + 70px);
+    bottom: auto;
+  }
+  .ls-rail-dot,
+  .ls-rail-item .ls-who-img {
+    width: 44px;
+    height: 44px;
+  }
+  .ls-rail-item {
+    font-size: 0.6875rem;
+  }
+}
+.ls-prop .ls-ph-stage .ls-stage-tag {
+  top: calc(env(safe-area-inset-top) + 84px);
+}
+.ls-land.ls-prop {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ls *,
+  .ls *::before,
+  .ls *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ================================================================== chips + transport */
+
+.ls-chips-wrap {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+/* A plain scrubber for the whole clip; the chips are the navigation. */
+.ls-scrub {
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.ls-chips-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.ls-chips-top .ls-scrub {
+  flex: 1;
+  min-width: 0;
+}
+/* "Loop 2 · 4 · 8 counts": small, beside the scrubber, so it costs no row. */
+.ls-looplen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+.ls-looplen .ls-seg {
+  padding: 2px;
+}
+.ls-looplen .ls-seg button {
+  min-height: 32px;
+  min-width: 36px;
+  padding: 0 10px;
+  justify-content: center;
+  font-weight: 600;
+}
+.ls-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+.ls-chips::-webkit-scrollbar {
+  display: none;
+}
+.ls-chip8 {
+  position: relative;
+  flex: 1 0 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 48px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: var(--paper-sunk);
+  color: var(--ink-muted);
+  font: 700 1.125rem/1 var(--font-display);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ls-chip8 .ls-icon {
+  color: var(--ink);
+}
+.ls-chip8.ls-on {
+  background: var(--ink);
+  color: var(--paper);
+}
+.ls-chip8.ls-on .ls-icon {
+  color: var(--accent);
+}
+/* Where the playhead is, when that is not the loop: a line, not a second colour. */
+.ls-chip8.ls-here::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 5px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.ls-chip8.ls-all {
+  flex: 0 0 auto;
+  font: 600 0.9375rem/1 var(--font-ui);
+}
+
+.ls-transport {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ls-play {
+  display: inline-grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+}
+.ls-speeds button {
+  min-width: 56px;
+  justify-content: center;
+  font-weight: 600;
+}
+.ls-build,
+.ls-next,
+.ls-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--paper-sunk);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ls-build.ls-on {
+  background: var(--ink);
+  color: var(--paper);
+}
+.ls-build b {
+  color: var(--accent);
+}
+.ls-next {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-weight: 500;
+}
+.ls-more-btn {
+  margin-left: auto;
+}
+
+/* More: a panel on a desktop, the open sheet on a phone. */
+.ls-more {
+  display: grid;
+  gap: 16px;
+  padding: 4px 0;
+}
+.ls-panel {
+  inset: auto 24px 110px auto;
+  margin: 0;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(78vh, 720px);
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 18px 48px rgb(28 25 23 / 0.25);
+}
+.ls-chip:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+}
+.ls-chip.ls-strong {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+}
+.ls-chip.ls-accent {
+  background: var(--accent);
+  color: var(--stage);
+}
+.ls-group-label small {
+  font-weight: 400;
+  color: var(--ink-faint);
+}
+.ls-about summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink-muted);
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.ls-about p {
+  margin-top: 8px;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+}
+.ls-about .ls-keys {
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+.ls-about .sw-editor {
+  margin-top: 12px;
+}
+
+/* ================================================================== desktop */
+
+.ls-desk {
+  min-height: 100dvh;
+}
+.ls-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 12px 24px;
+}
+.ls-title {
+  font: 700 clamp(1.25rem, 2.2vw, 1.75rem) / 1.1 var(--font-display);
+  letter-spacing: -0.02em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ls-meter {
+  flex: none;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+.ls-head-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ls-who {
+  white-space: nowrap;
+}
+.ls-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 12px 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 24px 24px;
+}
+.ls-views {
+  display: flex;
+  gap: 12px;
+  height: clamp(300px, calc(100dvh - 300px), 720px);
+  min-width: 0;
+}
+.ls-views > .ls-stage,
+.ls-views > .ls-pane {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.ls-views > .ls-stage {
+  flex-grow: 1.4;
+}
+/* The stage area decides how many views fit, live, as the window changes: three
+   panes need ~900px, two ~540px. The learner's picks are kept, just not drawn. */
+.ls-body {
+  container: ls-body / inline-size;
+}
+@container ls-body (max-width: 900px) {
+  .ls-views > .ls-pane:nth-child(3),
+  .ls-views > .ls-pane:nth-child(2) ~ .ls-add-angle {
+    display: none;
+  }
+}
+@container ls-body (max-width: 560px) {
+  .ls-views > .ls-pane,
+  .ls-add-angle {
+    display: none;
+  }
+}
+.ls-add-angle {
+  flex: 0 0 44px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r);
+  background: var(--paper-sunk);
+  color: var(--ink-muted);
+}
+.ls-add-angle:hover {
+  background: var(--line);
+}
+.ls-desk-closeups {
+  align-self: start;
+}
+.ls-stage-counts {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 8px;
+  z-index: 3;
+  pointer-events: none;
+}
+.ls-stage-counts .ls-counts {
+  pointer-events: auto;
+  max-width: 460px;
+}
+.ls-stage-counts .ls-count,
+.ls-ph-counts .ls-count {
+  color: rgb(232 225 216 / 0.7);
+  border-bottom-color: rgb(232 225 216 / 0.25);
+  text-shadow: 0 2px 10px rgb(0 0 0 / 0.5);
+}
+.ls-stage-counts .ls-count.ls-on,
+.ls-ph-counts .ls-count.ls-on {
+  color: var(--paper);
+  border-bottom-color: var(--accent);
+}
+.ls-desk .ls-chips-wrap,
+.ls-desk .ls-transport {
+  grid-column: 1 / -1;
+}
+
+/* Tablet: close-ups under the stage, no side column. */
+@media (max-width: 1100px) {
+  .ls-head {
+    padding: 10px 16px;
+  }
+  .ls-body {
+    grid-template-columns: minmax(0, 1fr) 120px;
+    padding: 0 16px 20px;
+  }
+  .ls-head .ls-who > span:last-child {
+    display: none;
+  }
+  .ls-head .ls-who {
+    padding-right: 4px;
+  }
+}
+
+/* ================================================================== phone sheet */
+
+.ls-sheet {
+  gap: 10px;
+  padding-top: 12px;
+}
+.ls-sheet .ls-scrub {
+  height: 20px;
+}
+.ls-ph-transport {
+  flex-wrap: nowrap;
+}
+.ls-ph-transport .ls-play {
+  width: 88px;
+  height: 88px;
+  border-radius: 22px;
+}
+.ls-ph-transport .ls-speeds button {
+  min-width: 0;
+  padding: 0 10px;
+  min-height: 44px;
+}
+.ls-ph-transport {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  grid-template-areas: "play speeds more" "play build more";
+  align-items: center;
+  gap: 6px 8px;
+}
+.ls-ph-transport .ls-play {
+  grid-area: play;
+}
+.ls-ph-transport .ls-speeds {
+  grid-area: speeds;
+  justify-self: stretch;
+}
+.ls-ph-transport .ls-speeds button {
+  flex: 1;
+}
+.ls-ph-transport .ls-build {
+  grid-area: build;
+  justify-content: center;
+}
+.ls-ph-transport .ls-next {
+  display: none;
+}
+.ls-ph-next {
+  position: absolute;
+  right: 84px;
+  bottom: 92px;
+  z-index: 4;
+  background: var(--paper);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.3);
+}
+.ls-ph-transport .ls-more-btn {
+  grid-area: more;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  height: 88px;
+  width: 64px;
+  padding: 0;
+  border-radius: 18px;
+  font-size: 0.75rem;
+  margin: 0;
+}
+.ls-land .ls-ph-transport {
+  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-areas: "play speeds" "play build" "more more";
+}
+.ls-land .ls-ph-transport .ls-more-btn {
+  display: none;
+}

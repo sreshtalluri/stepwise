@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Processing + landing</title>
+<link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@700,800&f[]=switzer@400,500,600&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#F2EFE9;--sunk:#E7E1D6;--line:#D8D0C3;--stage:#1C1917;
+--ink:#221E1C;--muted:#6B635C;--faint:#9A9188;--accent:#E8952F;
+--fd:'Cabinet Grotesk',sans-serif;--fu:'Switzer',sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#cfc9be;font-family:var(--fu);color:var(--ink);padding:24px;
+display:flex;gap:24px;justify-content:center;align-items:flex-start;flex-wrap:wrap}
+.ph{width:380px;background:var(--paper);border-radius:26px;overflow:hidden;
+box-shadow:0 18px 50px -22px rgba(0,0,0,.45)}
+.cap{text-align:center;font-size:12px;color:#5c564e;margin-top:9px;font-weight:500}
+.hd{padding:16px 18px 12px}
+.t{font-family:var(--fd);font-weight:700;font-size:21px;letter-spacing:-.02em;line-height:1.15}
+.s{font-size:13.5px;color:var(--muted);margin-top:4px;line-height:1.45}
+.stage{background:var(--stage);border:1px solid var(--line);border-radius:13px;margin:0 14px;
+position:relative;overflow:hidden;box-shadow:inset 0 2px 14px rgba(0,0,0,.5)}
+.vl{position:absolute;top:9px;left:11px;font-size:11px;color:var(--faint)}
+.mid{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#6a635b;font-size:12.5px}
+/* processing */
+.build{height:216px}
+.ghost{position:absolute;bottom:34px;left:50%;transform:translateX(-50%);opacity:.45}
+.bar{height:3px;background:var(--sunk);border-radius:2px;margin:14px 16px 0;overflow:hidden}
+.bar i{display:block;height:100%;width:58%;background:var(--accent);border-radius:2px}
+.steps{padding:12px 16px 4px;font-size:13.5px;line-height:1.9}
+.step{display:flex;gap:9px;color:var(--muted)}
+.step b{font-weight:600;color:var(--ink)}
+.mk{width:15px;text-align:center}
+.done{color:var(--muted)}
+.now{color:var(--ink);font-weight:600}
+.note{font-size:12.5px;color:var(--muted);padding:8px 16px 0;line-height:1.5}
+.pill{display:inline-block;background:var(--sunk);border:1px solid var(--line);border-radius:9px;
+padding:9px 13px;font-size:13px;font-weight:500;margin:12px 16px 18px}
+.mini{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px 14px 0}
+.mb{border:1px solid var(--line);border-radius:10px;background:var(--sunk);padding:11px 6px;
+text-align:center;font-size:13px;font-weight:600}
+/* landing */
+.hero{height:230px}
+.demo{position:absolute;bottom:10px;left:10px;right:10px;display:flex;gap:6px}
+.dchip{flex:1;background:rgba(242,239,233,.13);border:1px solid rgba(242,239,233,.26);
+border-radius:8px;padding:8px 0;text-align:center;font-size:11.5px;color:#EDE7DD}
+.dchip.on{background:var(--accent);border-color:var(--accent);color:#231a0c;font-weight:600}
+.cta{display:block;margin:14px;background:var(--ink);color:var(--paper);border-radius:12px;
+padding:16px;text-align:center;font-weight:600;font-size:15.5px}
+.alt{text-align:center;font-size:13.5px;color:var(--muted);margin:-4px 0 14px}
+.rows{padding:2px 18px 18px;font-size:13.5px;color:var(--muted);line-height:1.85}
+.rows b{color:var(--ink);font-weight:600}
+svg text{font-family:'Switzer',sans-serif}
+</style></head><body>
+
+<div><div class="ph">
+  <div class="hd"><div class="t">Building your lesson</div>
+    <div class="s">You can already use the video while the 3D is made.</div></div>
+  <div class="stage build">
+    <div class="vl">your clip · playing now</div>
+    <div class="mid">original video — scrub, slow, mirror</div>
+    <svg class="ghost" width="92" height="128" viewBox="0 0 92 128">
+      <circle cx="46" cy="13" r="10" fill="#E8952F"/><path d="M37 26h18l5 38H32z" fill="#E8952F"/>
+      <rect x="34" y="64" width="10" height="40" rx="5" fill="#E8952F"/>
+      <rect x="48" y="64" width="10" height="40" rx="5" fill="#E8952F"/>
+      <rect x="22" y="28" width="9" height="32" rx="4" fill="#E8952F" transform="rotate(14 26 28)"/>
+      <rect x="61" y="28" width="9" height="32" rx="4" fill="#E8952F" transform="rotate(-14 65 28)"/>
+    </svg>
+  </div>
+  <div class="bar"><i></i></div>
+  <div class="steps">
+    <div class="step done"><span class="mk">✓</span><span>Checked your clip — one dancer, 14 seconds</span></div>
+    <div class="step done"><span class="mk">✓</span><span>Found the dancer in every frame</span></div>
+    <div class="step now"><span class="mk">◐</span><span>Building the body — count 9 of 32</span></div>
+    <div class="step"><span class="mk">·</span><span>Working out the floor</span></div>
+    <div class="step"><span class="mk">·</span><span>Finding the counts</span></div>
+  </div>
+  <div class="note">About 2 minutes left. You can close this — we'll keep the link, and it works when you come back.</div>
+  <div class="pill">Copy the link</div>
+  <div class="mini">
+    <div class="mb">0.5× speed</div><div class="mb">Mirror</div><div class="mb">Loop</div>
+  </div>
+  <div class="note" style="padding-bottom:18px">These work on the video right now.</div>
+</div><div class="cap">Processing — the wait is usable</div></div>
+
+<div><div class="ph">
+  <div class="hd"><div class="t">Learn a dance from any clip</div>
+    <div class="s">See the steps from any angle, slow them down, and take them one count at a time.</div></div>
+  <div class="stage hero">
+    <div class="vl">try it — a real lesson</div>
+    <div style="position:absolute;left:0;right:0;bottom:0;height:70px;background:linear-gradient(#252118,#2E2920)"></div>
+    <div style="position:absolute;left:0;right:0;bottom:70px;height:2px;background:rgba(216,208,195,.3)"></div>
+    <div style="position:absolute;bottom:38px;left:50%;transform:translateX(-50%);width:96px;height:14px;border-radius:50%;background:radial-gradient(ellipse,rgba(0,0,0,.6),transparent 70%)"></div>
+    <svg style="position:absolute;bottom:32px;left:50%;transform:translateX(-50%)" width="112" height="152" viewBox="0 0 112 152">
+      <defs><linearGradient id="h" x1="0" x2="1"><stop offset="0" stop-color="#E8952F"/>
+      <stop offset="55%" stop-color="#E8952F"/><stop offset="55%" stop-color="#A3651F"/>
+      <stop offset="1" stop-color="#A3651F"/></linearGradient></defs>
+      <circle cx="56" cy="15" r="12" fill="url(#h)"/><path d="M45 30h22l6 44H39z" fill="url(#h)"/>
+      <rect x="42" y="74" width="12" height="46" rx="6" fill="url(#h)"/>
+      <rect x="58" y="74" width="12" height="46" rx="6" fill="url(#h)"/>
+      <rect x="26" y="33" width="11" height="38" rx="5" fill="url(#h)" transform="rotate(15 31 33)"/>
+      <rect x="75" y="33" width="11" height="38" rx="5" fill="url(#h)" transform="rotate(-15 80 33)"/>
+    </svg>
+    <div class="demo">
+      <div class="dchip on">Front</div><div class="dchip">Side</div>
+      <div class="dchip">Top</div><div class="dchip">Mirror</div>
+    </div>
+  </div>
+  <div class="cta">Add your own clip</div>
+  <div class="alt">No account needed to try.</div>
+  <div class="rows">
+    <b>Works best with</b><br>
+    One dancer, filmed from the front.<br>
+    Up to 60 seconds, camera held still.<br><br>
+    <b>What you get</b><br>
+    Every angle, from the one video you have.<br>
+    Counts and parts you can loop one at a time.<br><br>
+    Only upload video you have the right to use.
+  </div>
+</div><div class="cap">Landing — touch a real lesson first</div></div>
+
+</body></html>

@@ -1,0 +1,30 @@
+{
+  "name": "@stepwise/navigation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Two-tier lesson navigation and count/part authoring surface. Renderer-free.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./navigation.css": "./src/navigation.css"
+  },
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "demo": "vite"
+  },
+  "peerDependencies": {
+    "react": ">=19 <19.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.7.3",
+    "vite": "^7.1.0"
+  }
+}

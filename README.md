@@ -1,67 +1,76 @@
-# Stepwise
+# stepwise
 
-Upload any dance video, get an interactive 3D step-by-step breakdown — synced to the beat, viewable from any angle.
+Learn a dance from any clip, in 3D.
 
-## How It Works
+Upload a short video filmed on one front-facing camera. Get the dancer back as a
+stylized 3D body you can orbit, mirror, slow down, and step through part by part
+and count by count — alongside the original video.
 
-1. **Paste a URL** — TikTok, Instagram Reels, or YouTube
-2. **Pipeline processes** — downloads video, extracts 3D pose with MediaPipe, detects beats, analyzes difficulty
-3. **Interactive viewer** — 8 view presets, ghost overlay, timeline with loop/speed controls
+**Status: rebuild in progress.** This branch is a fresh start. The previous
+implementation is preserved at tag `archive/mock-pipeline-2026-03` and branch
+`archive/v1`; it used mock adapters and never had a working CV pipeline, because
+every viable model depended on SMPL (non-commercial) and the planned detector was
+AGPL. Both problems are now solved — see `docs/PRD.md`.
 
-## Architecture
+## What it does, honestly
+
+A single camera sees one side of a dancer. From that, the pipeline recovers a 3D
+body and tracks it — including through turns, so you can orbit round and see what
+their arms were doing when their back was to the camera. That is the point of the
+product.
+
+What it does **not** do is invent what it never saw. Parts blocked by another
+dancer, or outside the frame, are marked as uncertain or absent and rendered as
+such. See `docs/DESIGN.md` §7h for the exact boundary.
+
+## Layout
 
 ```
-Frontend (Next.js 14 + Three.js)     Pipeline (Python/FastAPI on Modal)
-┌─────────────────────────┐          ┌──────────────────────────┐
-│ Landing page             │          │ yt-dlp download          │
-│ Viewer (8 presets)       │◄────────►│ MediaPipe Pose Landmarker│
-│ Timeline + beat markers  │  API     │ Beat detection (librosa) │
-│ Ghost overlay (2D canvas)│          │ Difficulty scoring       │
-│ 3D skeleton (Three.js)   │          │ Foot contact heuristic   │
-└─────────────────────────┘          │ R2 storage (pose + video)│
-                                     └──────────────────────────┘
+packages/motion-contract/   MotionResult schema, generated types, fixtures
+services/motion-api/        FastAPI job service + GPU worker
+apps/web/                   Next.js + React Three Fiber viewer
+docs/                       PRD, design system, open decisions, task breakdown
 ```
 
-## View Presets
+The contract is frozen early on purpose: the web app builds against a recorded
+fixture, so the frontend and the pipeline can be developed in parallel.
 
-| # | Name | Description |
-|---|------|-------------|
-| 1 | Front | Full-screen front skeleton view |
-| 2 | Mirror | Mirrored skeleton (practice facing) |
-| 3 | Side by Side | Original video + front skeleton (default) |
-| 4 | Front + Back | Front and back skeleton views |
-| 5 | Ghost | Skeleton overlaid on dimmed video (2D canvas, pixel-perfect) |
-| 6 | Video + PiP | Full video with skeleton picture-in-picture |
-| 7 | Freeze | Pause to orbit/rotate the skeleton in 3D |
-| 8 | Split Mirror | Front + mirrored side by side |
+## Start here
 
-## Dual Coordinate System
+| You want to | Read |
+|---|---|
+| Understand the plan and the feasibility gate | `docs/PRD.md` |
+| Make any visual decision | `docs/DESIGN.md` (required before touching UI) |
+| Know what is still undecided | `docs/OPEN-DECISIONS.md` |
+| Pick up a work package | `docs/TASKS.md` |
+| Look up a term | `docs/CONCEPTS.md` |
 
-The pipeline outputs two coordinate sets per frame:
-- **`joints`** — image-space coordinates for pixel-perfect ghost overlay alignment
-- **`joints_3d`** — world-blended coordinates for correct 3D body proportions in perspective views
+## Licensing
 
-## Tech Stack
+This repository is **mixed-licence, and cannot be honestly labeled MIT or
+Apache-2.0 as a whole.** Code written here is MIT (`LICENSE`). It also depends
+on Meta's SAM 3D Body, distributed under the **SAM License** — a custom,
+non-OSI-approved licence, verbatim copy at `SAM Materials/LICENSE` — and the
+SAM-derived parts of this project stay under that licence forever, regardless
+of what licence the surrounding code carries. See `NOTICE` for the short
+version.
 
-- **Frontend:** Next.js 14, React Three Fiber, Three.js, Tailwind CSS
-- **Pipeline:** Python, FastAPI, MediaPipe Pose Landmarker, librosa, yt-dlp
-- **Infrastructure:** Modal (serverless GPU), Cloudflare R2 (storage)
-- **Design:** Clash Grotesk + Instrument Sans + Geist Mono, dark theme with cyan accent
+The SAM License carries obligations that pass through to anyone who receives
+this work:
 
-## Development
+- It **prohibits** use for ITAR-controlled purposes or military/warfare,
+  nuclear, espionage, or illegal-weapons end uses.
+- It requires acknowledging the SAM Materials **if you publish research
+  results** produced using them — this applies to research papers, not to
+  running stepwise as a hosted product.
+- Meta may amend the licence unilaterally at any time; continued use counts
+  as accepting the amendment.
 
-```bash
-# Frontend
-cd frontend && npm install && npm run dev
+Making this repository public is our choice, not something the licence
+requires.
 
-# Pipeline (local)
-cd pipeline && pip install -r requirements.txt
-modal serve pipeline/modal_app.py
-
-# Pipeline (deploy)
-modal deploy pipeline/modal_app.py
-```
-
-## Project Status
-
-See [TODOS.md](TODOS.md) for the full roadmap and prioritized backlog.
+`docs/LICENSES.md` maps every dependency and its obligations in full,
+including the MHR body-model assets, whose licence has not yet been verified
+(it ships inside a separate `assets.zip` download). The detector is RTMO
+(Apache-2.0) via rtmlib, deliberately chosen over Ultralytics YOLO because
+AGPL-3.0 and the SAM License cannot be combined in one program.

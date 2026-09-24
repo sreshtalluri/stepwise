@@ -1,0 +1,245 @@
+# Evaluation clip manifest
+#
+# THIS FILE IS VERSIONED. THE VIDEOS ARE NOT.
+#
+# Store the manifest here (text, reviewable, diffable). Keep the actual video
+# files in the Modal Volume "stepwise-eval" — never in git. Videos are large
+# binaries and, more importantly, they are other people's work.
+#
+# Rights, plainly:
+#   - Downloading a clip to test a pipeline privately is one thing.
+#   - Redistributing it, or putting it on a public landing page, is another.
+#   - Anything that becomes a PUBLIC demo needs actual permission. The easiest
+#     source of that is the builder's own community: the dance school, the DJ's
+#     teams. Ask, get a yes in writing, record it in `rights:` below.
+#
+# Add a clip:
+#   1. Add an entry here with a stable id.
+#   2. python evaluation/fetch.py <id>     (downloads + uploads to the Volume)
+#   3. Commit this file. Never commit the video.
+
+version: 1
+
+# RESOLUTION FINDING (2026-09-18): TikTok serves 576x1024 without a login, not
+# 1080p. The PRD's hand-size estimate assumed ~30px per hand at 1080p; at 576
+# wide it is closer to 15-20px. That makes the decision to show a video crop
+# rather than articulated 3D hands more clearly correct, not less.
+# Do not assume 1080p inputs anywhere in the pipeline.
+
+clips:
+  # ---- core set: 10 clips matching the MVP assumption ----
+  # one dancer, front camera, <=60s, steady, no cuts
+
+  - id: solo-01
+    url: "https://www.tiktok.com/t/ZP83Enx4b/"                      # TikTok/YouTube URL
+    title: ""
+    duration_s: 19.7
+    tests: [baseline]            # what this clip is here to exercise
+    why: "Clean easy case. If this fails, nothing else matters."
+    rights: untested             # untested | personal-test-only | permission-granted
+    notes: "576x1024 @30fps. Downloaded 2026-09-18."
+
+  - id: solo-02
+    url: "https://www.tiktok.com/t/ZP83E7BJD/"
+    title: ""
+    duration_s: 32.5
+    tests: [baseline, fast-motion]
+    why: "Fast choreography. Motion blur is the known weak point of a per-frame model."
+    rights: untested
+    notes: "576x1024 @30fps. Downloaded 2026-09-18."
+
+  - id: solo-03
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [turn, back-facing]
+    why: >
+      Contains a full turn where the dancer's back faces the camera. This is the
+      product's best claim — turning away IS tracked — so it must work. Watch
+      for left/right flips, which are the classic monocular failure here.
+    rights: untested
+    notes: ""
+
+  - id: solo-04
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [low-light]
+    why: "Dim or coloured lighting. Common on TikTok, degrades detection."
+    rights: untested
+    notes: ""
+
+  - id: solo-05
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [loose-clothing]
+    why: "Baggy clothes hide the body outline. Known hard case for mesh recovery."
+    rights: untested
+    notes: ""
+
+  - id: solo-06
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [full-body-small]
+    why: "Dancer far from camera, small in frame. Tests the detector's floor."
+    rights: untested
+    notes: ""
+
+  - id: solo-07
+    url: "https://www.tiktok.com/t/ZP83ECgYC/"
+    title: ""
+    duration_s: 23.6
+    tests: [floor-work]
+    why: "Dancer goes to the floor. Breaks the standing-on-a-plane assumption."
+    rights: untested
+    notes: "576x1022 @24fps. Downloaded 2026-09-18."
+
+  - id: solo-08
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [self-occlusion]
+    why: "Arms cross the torso. Parts genuinely invisible — must render uncertain, not confident."
+    rights: untested
+    notes: ""
+
+  - id: solo-09
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [baseline, longer]
+    why: "Near the 60s cap. Tests cost, memory, and whether counts stay aligned over time."
+    rights: untested
+    notes: ""
+
+  - id: solo-10
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [mirror-ambiguity]
+    why: "Symmetric choreography. Bone-length checks CANNOT reliably catch mirror flips here."
+    rights: untested
+    notes: ""
+
+  # ---- stress cases: these are expected to be hard or to fail ----
+  # Their value is proving the product degrades honestly rather than confidently.
+
+  - id: stress-hands
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [hands]
+    why: >
+      Specific hand shapes carry meaning. A hand is ~30px in a full-body 1080p
+      phone clip and articulated hand pose is the weakest link in every model
+      surveyed. EXPECTED OUTCOME: hands are unreliable, get marked approximate,
+      and the learner is shown a video crop instead. A confident wrong hand is
+      worse than an honest unknown.
+    rights: untested
+    notes: >
+      STILL NOT SOURCED as of 2026-09-18 (branch `hands`). The expected outcome
+      above was CONFIRMED by measurement on solo-01/solo-07 instead -- MHR's
+      finger knuckles span only ~22 deg over a whole clip (elbows span ~140),
+      and against an independent hand landmarker the predicted hand shape is
+      indistinguishable from randomly paired frames. Full numbers in
+      docs/GATE-REPORT.md's hands addendum. But those are INCIDENTAL hand poses:
+      nobody in either clip is deliberately making a shape, so this entry is
+      still needed. What to film: deliberate, held, distinguishable shapes
+      (fist / flat palm / point / two-finger), 1080p or better so the hand crop
+      lands above 200px, front-on, each shape held ~0.5s+ so motion blur is not
+      the dominant error. Filming it at the builder's dance school also solves
+      the `rights:` problem that blocks every scraped clip.
+      One correction to the `why:` above: the hand is not the binding
+      constraint at ~30px. Measured hand crops are 110-121px median even on
+      576x1024 source; the landmarker still mislabels which hand it is looking
+      at 20-34% of the time at EVERY crop size, so blur and compression are the
+      real limit, not pixel count.
+
+  - id: stress-footwork
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [feet, grounding]
+    why: "Fast footwork. Tests the floor solve and whether feet slide."
+    rights: untested
+    notes: ""
+
+  - id: stress-cropped-feet
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [out-of-frame, suppression, grounding-none]
+    why: >
+      A Short framed from the knees up. THE SUCCESS CRITERION IS NEGATIVE: no
+      foot may ever be drawn solid, the suppression must show, and grounding
+      must report "none" with no fake floor. If the app invents feet here, the
+      honesty design has failed.
+    rights: untested
+    notes: ""
+
+  - id: group-synced-01
+    url: "https://www.tiktok.com/t/ZP83En7tv/"
+    title: ""
+    duration_s: 33.1
+    tests: [multi-dancer, synced-group, identity-swap]
+    why: >
+      TWO dancers performing the SAME choreography in sync. As of the
+      2026-09-18 scope revision this is an MVP case, not a v2 one: both dancers
+      should be reconstructed, rendered in different colours, and selectable.
+      What stays v2 is the consensus/sync-check logic that would use one dancer
+      to correct the other. Watch specifically for IDENTITY SWAPS where the two
+      dancers cross - the correct behaviour is to mark that span uncertain on
+      both, never to silently swap them.
+    rights: untested
+    notes: "Supplied by the builder 2026-09-18. 576x1024 @30fps. Downloaded 2026-09-18."
+
+  # ---- violators: must be REFUSED, not processed ----
+
+  # Renamed from `violator-duet` (2026-09-18 multi-dancer scope revision, see
+  # docs/GATE-REPORT.md and W8's report): a duet where two dancers do DIFFERENT
+  # parts is no longer a violation at all -- a learner just picks which dancer
+  # to learn from, per PersonResult now carrying a per-person animation ref.
+  # Kept the same empty-URL slot rather than adding a new one, since this was
+  # never sourced and the old "different roles" test case doesn't exist
+  # anymore -- what still needs refusing is too many confidently-tracked
+  # dancers to reasonably pick from (cap: 6, PRD §5 revised scope).
+  - id: violator-crowd
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [multi-dancer, too-many-dancers]
+    why: >
+      More than 6 confidently-tracked dancers in frame (e.g. a crowd shot or a
+      large group routine) -- past the point where "pick a dancer to learn
+      from" is a reasonable ask, and past the cap where per-dancer full SAM 3D
+      Body reconstruction cost stays linear/affordable. The pipeline must
+      refuse the clip before running reconstruction on any of them, not
+      silently truncate to 6 or reconstruct a subset.
+    rights: untested
+    notes: ""
+
+  - id: violator-cuts
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [shot-boundaries]
+    why: "Edited with hard cuts. The shot-boundary check must reject it with a clear reason."
+    rights: untested
+    notes: ""
+
+  # ---- the demo clip: needs REAL permission ----
+
+  - id: demo-public
+    url: ""
+    title: ""
+    duration_s: null
+    tests: [baseline, showcase]
+    why: >
+      This is the clip that goes on the public landing page as the live demo
+      lesson. It MUST have explicit permission from the dancer. Best source is
+      the builder's own community — the dance school or the DJ's teams. Record
+      who gave permission and when.
+    rights: needs-permission
+    notes: ""

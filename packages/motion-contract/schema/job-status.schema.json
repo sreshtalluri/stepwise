@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stepwise.dev/schema/motion-contract/job-status/v1.json",
+  "title": "JobStatus",
+  "description": "Deliberately separate from MotionResult (which only ever describes a finished job). services/motion-api polls/pushes this while a job is queued, processing, or failed; once `state` is \"succeeded\", the job's MotionResult document is fetched separately by job_id. Keeping these two contracts apart means a MotionResult document is never in a partially-valid state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "job_id", "state", "stage_message", "progress", "error", "retry_count"],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Same immutable id that will appear as MotionResult.job_id once the job succeeds."
+    },
+    "state": {
+      "enum": ["queued", "processing", "succeeded", "failed"],
+      "description": "\"succeeded\" and \"failed\" are terminal. A retried job stays at job_id and moves back to \"queued\", incrementing retry_count, rather than minting a new id."
+    },
+    "stage_message": {
+      "type": "string",
+      "description": "Plain-language current stage for display, per DESIGN.md §7c — e.g. \"Building the body, count 9 of 32\". Never a bare percentage or an internal stage enum. Empty string when state is \"queued\"."
+    },
+    "progress": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "number", "minimum": 0, "maximum": 1 }
+      ],
+      "description": "Rough fraction complete, for a progress bar's width only. DESIGN.md §7c: display as loose relative time (\"about 2 minutes left\"), never as false-precision countdown. null when state is \"queued\" or \"failed\"."
+    },
+    "error": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message", "retryable"],
+          "properties": {
+            "code": { "type": "string", "minLength": 1, "description": "Stable machine-readable code, e.g. \"no_dancer_found\", \"clip_too_long\", \"pipeline_error\". Drives which OPEN-DECISIONS.md B1/B2 recovery UI is shown." },
+            "message": { "type": "string", "minLength": 1, "description": "Human-readable, says what happened — never blame the user, never apologize (DESIGN.md §11)." },
+            "retryable": { "type": "boolean", "description": "Whether re-submitting the same clip could plausibly succeed (true for transient GPU/queue errors, false for e.g. \"no dancer found\")." }
+          }
+        }
+      ],
+      "description": "Required to be null unless state is \"failed\"."
+    },
+    "retry_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of times this job has been retried. 0 for a job's first attempt."
+    },
+    "milestones": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "OPTIONAL. Real intermediate results a live job already has, so the processing screen can show them instead of a spinner (DESIGN.md §7c). Every key is independently optional and appears only once it is true; a consumer detects each by checking for it. Only meaningful while state is \"queued\" or \"processing\" — the finished job's MotionResult supersedes all of it. Additive and optional, so schema_version stays 1.0.0 (see README, \"When to bump\").",
+      "properties": {
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bpm", "count_one_s", "seconds_per_count", "confidence"],
+          "description": "The beat proposal from the clip's audio, on the source video's own timeline — the same PROPOSAL that later becomes MotionResult.proposed_counts, never a decision. Can land while state is still \"queued\": it is computed on CPU from the upload itself.",
+          "properties": {
+            "bpm": { "type": "number", "exclusiveMinimum": 0 },
+            "count_one_s": { "type": "number", "description": "Seconds from the start of the video to count 1. May be negative when the music starts before the video." },
+            "seconds_per_count": { "type": "number", "exclusiveMinimum": 0 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "dancers": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Confidently-tracked dancers found by the detection pass. Its presence also means the detector's 2D keypoints are fetchable at GET /jobs/{job_id}/detections."
+        },
+        "frames_done": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sampled frames the 3D body has been built for so far. Always sent with frames_total."
+        },
+        "frames_total": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

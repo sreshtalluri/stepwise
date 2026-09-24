@@ -1,0 +1,44 @@
+stepwise
+Copyright (c) 2026 stepwise contributors
+
+This repository is mixed-licence. Original code in this repository is
+licensed under the MIT License (see `LICENSE`). It is not, as a whole,
+MIT- or Apache-licensed, because it depends on and redistributes materials
+under Meta's SAM License, a non-OSI-approved licence with obligations that
+pass through to anyone who receives this work.
+
+SAM 3D Body (model code and weights, from `facebookresearch/sam-3d-body` and
+`facebook/sam-3d-body-dinov3`) is licensed under the SAM License, reproduced
+verbatim at `SAM Materials/LICENSE`. That agreement:
+
+- must accompany any distribution of the SAM Materials or derivative works
+  of them (SAM License §1.b.i) — this NOTICE and the copy in
+  `SAM Materials/LICENSE` satisfy that;
+- prohibits use for ITAR-controlled or military/warfare, nuclear, espionage,
+  or illegal-weapons purposes (§1.b.v);
+- requires acknowledgment of SAM Materials in any research publication of
+  results produced using them (§1.b.ii) — this applies to research papers,
+  not to operating this software as a hosted product or service;
+- may be amended by Meta at any time, with continued use constituting
+  acceptance (§8).
+
+This project also depends on the following third-party components,
+distributed under their own permissive licences (Apache-2.0 or MIT). Their
+full terms are not reproduced here; see `docs/LICENSES.md` for the complete
+mapping and each project's own repository for its licence text:
+
+- rtmlib / mmpose — Apache License 2.0
+- ByteTrack (upstream, ifzhang/ByteTrack) — MIT License
+- Fast-SAM-3D-Body — MIT License
+- MHR (code) — Apache License 2.0 (asset licence unverified — see
+  `docs/LICENSES.md`)
+- momentum / pymomentum — MIT License
+- three.js, @react-three/fiber, drei — MIT License
+- Next.js — MIT License
+- React — MIT License
+
+Apache License 2.0 is a permissive licence that does not require this file
+to carry the upstream projects' own NOTICE text unless we redistribute their
+source directly; none of the Apache-licensed dependencies above are vendored
+into this repository. If that changes, copy the relevant upstream NOTICE
+content into this file.
