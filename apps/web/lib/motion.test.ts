@@ -33,6 +33,8 @@ import {
   soleLift,
   projectBoxToFrame,
   cropTransform,
+  stageBasis,
+  orbitPosition,
   MAX_CROP_ZOOM,
   CROP_TARGET_HEIGHT,
   FOLLOW,
@@ -449,4 +451,39 @@ test("a real (MHR, 127-joint) document resolves every region, not just the fixtu
     persons: [{ samples: [{ joints: mhr.joints.map(() => ({ visibility: "observed" })) }] }],
   } as unknown as MotionResult;
   assert.deepEqual(absentNotes(regionVisibility(doc, 0, 0)), []);
+});
+
+test("stageBasis levels the orbit to the floor, not the phone (solo-02's 13.6-degree pitch)", () => {
+  const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  const pitched = {
+    camera: { camera_to_world: I },
+    // Real solo-02 plane, flipped: the sign must come back pointing at the camera's side.
+    grounding: { status: "grounded", floor_plane: { normal: [0.016404, -0.971887, 0.234874], point: [0.006925, -1.401026, -4.624315] } },
+  } as unknown as MotionResult;
+  const b = stageBasis(pitched);
+  const dot = (a: Vec3, c: Vec3) => a[0] * c[0] + a[1] * c[1] + a[2] * c[2];
+  const n = Math.hypot(0.016404, 0.971887, 0.234874);
+  // up IS the (re-signed) floor normal: the rotation taking basis -> xyz maps it to +Y.
+  assert.ok(Math.abs(dot(b.up, [-0.016404 / n, 0.971887 / n, -0.234874 / n]) - 1) < 1e-9);
+  // Orthonormal, right-handed.
+  for (const [u, v] of [[b.up, b.back], [b.up, b.right], [b.back, b.right]] as [Vec3, Vec3][]) assert.ok(Math.abs(dot(u, v)) < 1e-9);
+  for (const v of [b.up, b.back, b.right]) assert.ok(Math.abs(dot(v, v) - 1) < 1e-9);
+  // Camera +Z laid on the floor: stays (to within solo-02's ~1-degree roll) in the
+  // camera's vertical y-z plane, tipped by exactly the pitch.
+  assert.ok(Math.abs(b.back[0]) < 0.005);
+  assert.ok(Math.abs((Math.acos(b.back[2]) * 180) / Math.PI - 13.6) < 0.1);
+  // A side view built in this basis is horizontal to the floor: zero elevation = zero height over it.
+  const side = orbitPosition(b, [0, 0, 0], Math.PI / 2, 0, 3);
+  assert.ok(Math.abs(dot(side, b.up)) < 1e-9);
+  // Top view looks down the normal by exactly its elevation.
+  const top = orbitPosition(b, [0, 0, 0], 0, Math.PI / 2, 1);
+  assert.ok(Math.abs(dot(top, b.up) - 1) < 1e-9);
+});
+
+test("stageBasis is the camera's own axes on a level floor, with no floor, and for the camera view", () => {
+  const axes = { right: [1, 0, 0], up: [0, 1, 0], back: [0, 0, 1] };
+  for (const [doc, level] of [[good, true], [failure, true], [good, false]] as const) {
+    const b = stageBasis(doc, level);
+    for (const k of ["right", "up", "back"] as const) b[k].forEach((c, i) => assert.ok(Math.abs(c - axes[k][i]) < 1e-12, `${k}`));
+  }
 });

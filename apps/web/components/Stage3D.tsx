@@ -18,6 +18,8 @@ import {
   rootPositionAt,
   soleLift,
   sourceProjection,
+  stageBasis,
+  orbitPosition,
   FOLLOW,
   VIEW_PRESETS,
   type MotionResult,
@@ -590,12 +592,14 @@ function SourceCamera({ doc }: { doc: MotionResult }) {
  * With follow off this is byte-for-byte the old one-shot behaviour.
  */
 function ViewRig({
+  doc,
   view,
   follow,
   selectedIndex,
   focusRef,
   controlsRef,
 }: {
+  doc: MotionResult;
   view: ViewId;
   follow: boolean;
   selectedIndex: number;
@@ -635,6 +639,10 @@ function ViewRig({
   const delta = useRef(new THREE.Vector3());
   const offset = useRef(new THREE.Vector3());
   const extent = useRef(new THREE.Vector3());
+  // Every estimated view orbits the FLOOR's up, not the phone's (see `stageBasis`);
+  // "camera" keeps the source camera's own axes. The follow and orbit code below is
+  // direction-agnostic, so this basis and `camera.up` are all that change.
+  const basis = useMemo(() => stageBasis(doc, view !== "camera"), [doc, view]);
 
   useFrame((_, dt) => {
     const focus = focusRef.current;
@@ -670,11 +678,12 @@ function ViewRig({
       aim.current = [subject.current.x, subject.current.y, subject.current.z];
       autoDist.current = radius;
       lastDist.current = radius * zoomBias.current;
-      camera.position.set(
-        subject.current.x + Math.sin(preset.azimuth) * Math.cos(preset.elevation) * lastDist.current,
-        subject.current.y + Math.sin(preset.elevation) * lastDist.current,
-        subject.current.z + Math.cos(preset.azimuth) * Math.cos(preset.elevation) * lastDist.current,
-      );
+      camera.position.set(...orbitPosition(basis, aim.current, preset.azimuth, preset.elevation, lastDist.current));
+      // OrbitControls caches the rotation from `camera.up` to +Y at construction and
+      // orbits (and clamps polar angle, i.e. "never under the floor") in that frame.
+      camera.up.set(...basis.up);
+      controls._quat.setFromUnitVectors(camera.up, UP);
+      controls._quatInverse.copy(controls._quat).invert();
       controls.target.copy(subject.current);
       controls.update();
       return;
@@ -814,6 +823,7 @@ export default function Stage3D({
           follow on a nearby dancer should be glided to instead. ViewRig decides. */}
       {!overlay && <ViewRig
         key={`${view}-${resetKey}`}
+        doc={doc}
         view={view}
         follow={follow}
         selectedIndex={selectedIndex}
