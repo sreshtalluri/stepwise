@@ -679,17 +679,12 @@ function ViewRig({
       autoDist.current = radius;
       lastDist.current = radius * zoomBias.current;
       camera.position.set(...orbitPosition(basis, aim.current, preset.azimuth, preset.elevation, lastDist.current));
-      // OrbitControls caches the rotation from `camera.up` to +Y at construction and
-      // orbits (and clamps polar angle, i.e. "never under the floor") in that frame.
+      // drei's OrbitControls is three-stdlib's, whose update() re-reads `camera.up` on
+      // every call, so orbit, the polar clamp ("never under the floor") and lookAt all
+      // follow this with nothing else to patch. (three's own OrbitControls caches it at
+      // construction instead; writing its private `_quat` here threw on stdlib, which
+      // left the target stale and turned "side" into a near-frontal view in 4ba6fcc.)
       camera.up.set(...basis.up);
-      // drei's OrbitControls is three-stdlib's, which keeps this rotation in a closure
-      // (no `_quat`), so it cannot be re-levelled here; only three's own exposes it.
-      // ponytail: guarded so it stops throwing every view change; re-level stdlib by
-      // remounting OrbitControls with camera.up already set if the tilt shows.
-      if (controls._quat) {
-        controls._quat.setFromUnitVectors(camera.up, UP);
-        controls._quatInverse.copy(controls._quat).invert();
-      }
       controls.target.copy(subject.current);
       controls.update();
       return;
