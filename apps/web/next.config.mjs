@@ -94,7 +94,7 @@ export default {
    * 6. Lessons and processing pages stay out of search
    * (docs/legal/legal-public-learning.md §6(a)1). The header covers what a
    * meta tag cannot (a crawler that skips HTML); the pages' layouts carry the
-   * meta tag too, and app/robots.ts disallows both. OpenNext applies these
+   * meta tag too; robots.ts leaves them crawlable so the noindex is seen. OpenNext applies these
    * (@opennextjs/aws core/routing/matcher.js getNextConfigHeaders).
    */
   async headers() {
