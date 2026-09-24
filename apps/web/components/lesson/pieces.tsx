@@ -23,11 +23,11 @@ import {
 import { accentForPerson, countLabel, eightStartCount, timeOfCount } from "../../../../packages/navigation/src/core";
 import { footContact, type FootContact } from "../../lib/footContact";
 import { dancerBox, firstWellObserved, markerPoint, sideWord } from "../../lib/dancers";
-import { STEPS, stepProgress, type Step } from "../../lib/lessonEngine";
-import { legend, lesson as copy } from "../../lib/copy";
+import { chipLoop, spanLabel, type Eight } from "../../lib/lessonEngine";
+import { lesson as copy } from "../../lib/copy";
 import { prefersReducedMotion } from "../../lib/reveal";
 import { useCount, useFrameGrabs } from "./hooks";
-import type { Lesson } from "../LessonViewer";
+import type { Lesson, MainView } from "../LessonViewer";
 import { StructureEditor } from "../../../../packages/navigation/src/LessonNavigator";
 import "../../../../packages/navigation/src/navigation.css";
 
@@ -42,8 +42,6 @@ export const ANGLES = VIEW_PRESETS.filter((p) => p.id !== "overlay");
 const P = {
   play: "M232.4,114.49,88.32,26.35a16,16,0,0,0-16.2-.3A15.86,15.86,0,0,0,64,39.87V216.13A15.94,15.94,0,0,0,80,232a16.07,16.07,0,0,0,8.36-2.35L232.4,141.51a15.81,15.81,0,0,0,0-27ZM80,215.94V40l143.83,88Z",
   pause: "M200,32H160a16,16,0,0,0-16,16V208a16,16,0,0,0,16,16h40a16,16,0,0,0,16-16V48A16,16,0,0,0,200,32Zm0,176H160V48h40ZM96,32H56A16,16,0,0,0,40,48V208a16,16,0,0,0,16,16H96a16,16,0,0,0,16-16V48A16,16,0,0,0,96,32Zm0,176H56V48H96Z",
-  up: "M213.66,165.66a8,8,0,0,1-11.32,0L128,91.31,53.66,165.66a8,8,0,0,1-11.32-11.32l80-80a8,8,0,0,1,11.32,0l80,80A8,8,0,0,1,213.66,165.66Z",
-  down: "M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z",
   left: "M165.66,202.34a8,8,0,0,1-11.32,11.32l-80-80a8,8,0,0,1,0-11.32l80-80a8,8,0,0,1,11.32,11.32L91.31,128Z",
   right: "M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z",
   check: "M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z",
@@ -55,11 +53,7 @@ const P = {
   stack: "M230.91,172A8,8,0,0,1,228,182.91l-96,56a8,8,0,0,1-8.06,0l-96-56A8,8,0,0,1,36,169.09l92,53.65,92-53.65A8,8,0,0,1,230.91,172ZM220,121.09l-92,53.65L36,121.09A8,8,0,0,0,28,134.91l96,56a8,8,0,0,0,8.06,0l96-56A8,8,0,1,0,220,121.09ZM24,80a8,8,0,0,1,4-6.91l96-56a8,8,0,0,1,8.06,0l96,56a8,8,0,0,1,0,13.82l-96,56a8,8,0,0,1-8.06,0l-96-56A8,8,0,0,1,24,80Zm23.88,0L128,126.74,208.12,80,128,33.26Z",
   dots: "M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128Zm56-12a12,12,0,1,0,12,12A12,12,0,0,0,196,116ZM60,116a12,12,0,1,0,12,12A12,12,0,0,0,60,116Z",
   plus: "M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z",
-  question: "M140,180a12,12,0,1,1-12-12A12,12,0,0,1,140,180ZM128,72c-22.06,0-40,16.15-40,36v4a8,8,0,0,0,16,0v-4c0-11,10.77-20,24-20s24,9,24,20-10.77,20-24,20a8,8,0,0,0-8,8v8a8,8,0,0,0,16,0v-.72c18.24-3.35,32-17.9,32-35.28C168,88.15,150.06,72,128,72Zm104,56A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z",
-  eye: "M247.31,124.76c-.35-.79-8.82-19.58-27.65-38.41C194.57,61.26,162.88,48,128,48S61.43,61.26,36.34,86.35C17.51,105.18,9,124,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208s66.57-13.26,91.66-38.34c18.83-18.83,27.3-37.61,27.65-38.4A8,8,0,0,0,247.31,124.76ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.47,133.47,0,0,1,25,128,133.33,133.33,0,0,1,48.07,97.25C70.33,75.19,97.22,64,128,64s57.67,11.19,79.93,33.25A133.46,133.46,0,0,1,231.05,128C223.84,141.46,192.43,192,128,192Zm0-112a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Z",
-  hourglass: "M200,75.64V40a16,16,0,0,0-16-16H72A16,16,0,0,0,56,40V76a16.07,16.07,0,0,0,6.4,12.8L114.67,128,62.4,167.2A16.07,16.07,0,0,0,56,180v36a16,16,0,0,0,16,16H184a16,16,0,0,0,16-16V180.36a16.09,16.09,0,0,0-6.35-12.77L141.27,128l52.38-39.6A16.05,16.05,0,0,0,200,75.64ZM184,216H72V180l56-42,56,42.35Zm0-140.36L128,118,72,76V40H184Z",
   trend: "M240,56v64a8,8,0,0,1-16,0V75.31l-82.34,82.35a8,8,0,0,1-11.32,0L96,123.31,29.66,189.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L136,140.69,212.69,64H168a8,8,0,0,1,0-16h64A8,8,0,0,1,240,56Z",
-  gauge: "M207.06,72.67A111.24,111.24,0,0,0,128,40h-.4C66.07,40.21,16,91,16,153.13V176a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V152A111.25,111.25,0,0,0,207.06,72.67ZM224,176H119.71l54.76-75.3a8,8,0,0,0-12.94-9.42L99.92,176H32V153.13c0-3.08.15-6.12.43-9.13H56a8,8,0,0,0,0-16H35.27c10.32-38.86,44-68.24,84.73-71.66V80a8,8,0,0,0,16,0V56.33A96.14,96.14,0,0,1,221,128H200a8,8,0,0,0,0,16h23.67c.21,2.65.33,5.31.33,8Z",
 };
 export type IconName = keyof typeof P;
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
@@ -69,7 +63,6 @@ export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
     </svg>
   );
 }
-export const STEP_ICON: Record<Step, IconName> = { watch: "eye", slow: "hourglass", build: "trend", full: "gauge" };
 
 // ------------------------------------------------------------------ 3D panes
 
@@ -94,7 +87,7 @@ export function AnglePane({
   focus?: boolean;
 }) {
   return (
-    <div className={`ls-pane${compact ? " ls-compact" : ""}${l.yourTurn ? " ls-dim" : ""}`}>
+    <div className={`ls-pane${compact ? " ls-compact" : ""}`}>
       <Stage
         doc={l.doc}
         selectedIndex={l.selected}
@@ -157,7 +150,7 @@ export function MainStage({
           ? "camera view, cropped"
           : "camera view";
   return (
-    <div className={`ls-stage ${className}`} data-view={view} data-turn={l.yourTurn ? "on" : "off"}>
+    <div className={`ls-stage ${className}`} data-view={view}>
       <video
         ref={l.setVideo}
         className="ls-video"
@@ -194,12 +187,6 @@ export function MainStage({
         {tag}
         {view === "3d" && l.doc.grounding.status === "none" ? `, ${copy.help.noFloor.toLowerCase()}` : ""}
       </span>
-      {l.yourTurn && (
-        <div className="ls-turn" aria-live="polite">
-          <b>{copy.path.yourTurn}</b>
-          <span>{copy.path.yourTurnHint}</span>
-        </div>
-      )}
       {/* Not in frame / unsure, for screen readers; sighted learners get it under "?". */}
       <p className="sr-only" aria-live="polite">
         {l.absent.join(", ")}
@@ -383,8 +370,7 @@ export function CloseUps({ l, className = "", onRegion }: { l: Lesson; className
   if (!l.showCrops) return null;
   const regions = cropRegions(l.doc, l.selected, l.mirrored);
   return (
-    // Dimmed on "your turn" too: a close-up of the dancer is still the answer.
-    <div className={`ls-closeups ${regions.length > 2 ? "ls-sides" : ""} ${l.yourTurn ? "ls-dim" : ""} ${className}`}>
+    <div className={`ls-closeups ${regions.length > 2 ? "ls-sides" : ""} ${className}`}>
       {regions.map((r) => (
         <CropPeek key={r} l={l} region={r} contacts={contacts} onClick={onRegion ? () => onRegion(r) : undefined} />
       ))}
@@ -395,23 +381,23 @@ export function CloseUps({ l, className = "", onRegion }: { l: Lesson; className
 // ------------------------------------------------------------------ counts
 
 /**
- * The current eight, large. Weight and size carry the state (DESIGN.md §7), and the
- * numerals turn over on the beat (`useCount`), not on the page's 10 Hz tick.
- * Tapping a numeral seeks to that count.
+ * The current eight's counts, large, over the stage. Weight and size carry the state
+ * (DESIGN.md §7), and the numerals turn over on the beat (`useCount`), not on the
+ * page's 10 Hz tick. Tapping a numeral seeks to that count.
  */
 export function CountBar({ l, big = false }: { l: Lesson; big?: boolean }) {
   const grid = l.structure.grid;
   const count = useCount(l.timeRef, grid);
   const inDance = count >= 1 && count <= grid.countTotal;
-  const first = eightStartCount(inDance ? count : l.unit.startCount);
+  const first = eightStartCount(inDance ? count : (l.loop?.startCount ?? 1));
   return (
-    <div className={`ls-counts${big ? " ls-big" : ""}`} role="group" aria-label={`Count ${inDance ? countLabel(count) : ""}`}>
+    <div className={`ls-counts${big ? " ls-big" : ""}`} role="group" aria-label={copy.countOne.now(inDance ? countLabel(count) : 0)}>
       {Array.from({ length: 8 }, (_, i) => first + i).map((c) => (
         <button
           key={c}
           type="button"
           tabIndex={-1}
-          className={c === count ? "ls-count ls-on" : c < l.unit.startCount || c > l.unit.endCount ? "ls-count ls-out" : "ls-count"}
+          className={c === count ? "ls-count ls-on" : "ls-count"}
           onClick={() => l.seek(timeOfCount(grid, c))}
           disabled={c > grid.countTotal}
         >
@@ -423,137 +409,167 @@ export function CountBar({ l, big = false }: { l: Lesson; big?: boolean }) {
 }
 
 /**
- * Count 1, fixed in one tap: "Tap on 1" while it plays (snaps to the nearest beat),
- * or nudge a whole count either way. Both are `setCountOne` in packages/navigation.
+ * The one row that drives the lesson: a chip per 8-count. Tap = loop it; tap the
+ * looped one again (or "All") = the whole dance; shift-tap or drag across chips =
+ * loop the range. A quiet tick marks an eight already looped at full speed. Above
+ * it, a plain scrubber for the whole clip.
  */
-export function CountOneTools({ l, className = "" }: { l: Lesson; className?: string }) {
-  const [flash, setFlash] = useState("");
-  const note = (s: string) => {
-    setFlash(s);
-    window.setTimeout(() => setFlash(""), 1400);
+export function EightChips({ l }: { l: Lesson }) {
+  const drag = useRef<{ anchor: number; moved: boolean } | null>(null);
+  const chipAt = (x: number, y: number) => {
+    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-eight]");
+    return el ? Number(el.dataset.eight) : -1;
   };
+  const inLoop = (e: Eight) => !!l.loop && e.startCount >= l.loop.startCount && e.endCount <= l.loop.endCount;
+  const endS = l.endS;
   return (
-    <div className={`ls-one ${className}`} role="group" aria-label={copy.countOne.heading}>
+    <div className="ls-chips-wrap">
+      <input
+        className="ls-scrub"
+        type="range"
+        min={0}
+        max={endS}
+        step={0.01}
+        value={Math.min(l.displayTime, endS)}
+        onChange={(e) => l.seek(Number(e.target.value))}
+        aria-label={copy.chips.scrub}
+      />
+      <div
+        className="ls-chips"
+        role="group"
+        aria-label={copy.chips.group}
+        onPointerMove={(e) => {
+          const d = drag.current;
+          if (!d) return;
+          const k = chipAt(e.clientX, e.clientY);
+          if (k < 0 || (k === d.anchor && !d.moved)) return;
+          d.moved = true;
+          l.setLoop(chipLoop(l.loop, l.eights[k], l.eights[d.anchor]));
+        }}
+        onPointerUp={() => (drag.current = null)}
+        onPointerCancel={() => (drag.current = null)}
+      >
+        {l.eights.map((e, k) => {
+          const looped = inLoop(e);
+          const playing = l.here?.id === e.id;
+          return (
+            <button
+              key={e.id}
+              type="button"
+              data-eight={k}
+              className={`ls-chip8${looped ? " ls-on" : ""}${playing ? " ls-here" : ""}`}
+              aria-pressed={looped}
+              aria-label={`${e.label}, ${spanLabel(e)}${l.done.has(e.id) ? `, ${copy.chips.done}` : ""}`}
+              onPointerDown={(ev) => {
+                if (ev.pointerType === "mouse" && ev.button !== 0) return;
+                drag.current = { anchor: k, moved: false };
+              }}
+              onClick={(ev) => {
+                const d = drag.current;
+                drag.current = null;
+                if (d?.moved) return;
+                const anchor = ev.shiftKey && l.loop ? (l.eights.find((x) => x.startCount === l.loop!.startCount) ?? null) : null;
+                l.setLoop(chipLoop(l.loop, e, anchor), { play: l.playing });
+              }}
+            >
+              <span>{e.n}</span>
+              {l.done.has(e.id) && <Icon name="check" size={12} />}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className={`ls-chip8 ls-all${!l.loop ? " ls-on" : ""}`}
+          aria-pressed={!l.loop}
+          onClick={() => l.setLoop(null)}
+        >
+          {copy.chips.all}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Play · speed · Build up · More. Everything else lives under More. */
+export function Transport({ l, more, className = "" }: { l: Lesson; more: React.ReactNode; className?: string }) {
+  return (
+    <div className={`ls-transport ${className}`}>
+      <button type="button" className="ls-play" onClick={l.togglePlay} aria-label={l.playing ? copy.transport.pause : copy.transport.play}>
+        <Icon name={l.playing ? "pause" : "play"} size={26} />
+      </button>
+      <div className="ls-seg ls-speeds" role="group" aria-label={copy.transport.speedLabel}>
+        {TRANSPORT_SPEEDS.map((s) => (
+          <button key={s} type="button" aria-pressed={!l.buildUp && l.speedPick === s} onClick={() => (l.setBuildUp(false), l.setSpeed(s))}>
+            {s}×
+          </button>
+        ))}
+      </div>
       <button
         type="button"
-        className="ls-btn ls-one-tap"
-        onClick={() => {
-          l.tapOne();
-          note(copy.countOne.tap);
-        }}
-        title={copy.countOne.tapHint}
-        aria-describedby="ls-one-hint"
+        className={`ls-build${l.buildUp ? " ls-on" : ""}`}
+        aria-pressed={l.buildUp}
+        onClick={() => l.setBuildUp(!l.buildUp)}
+        title={copy.transport.buildHint}
       >
-        {copy.countOne.tap}
+        <Icon name="trend" size={18} />
+        <span>
+          {copy.transport.build}
+          {l.buildUp && <b> {l.speed}×</b>}
+        </span>
       </button>
-      <button type="button" className="ls-btn ls-one-nudge" onClick={() => (l.nudgeOne(-1), note(copy.countOne.fixed(-1)))} aria-label={copy.countOne.earlierLabel}>
-        {copy.countOne.earlier}
-      </button>
-      <button type="button" className="ls-btn ls-one-nudge" onClick={() => (l.nudgeOne(1), note(copy.countOne.fixed(1)))} aria-label={copy.countOne.laterLabel}>
-        {copy.countOne.later}
-      </button>
-      <span id="ls-one-hint" className="ls-hint" aria-live="polite">
-        {flash || (l.countsFrom !== "hand" ? copy.countOne.guess : "")}
+      {l.next && (
+        <button type="button" className="ls-next" onClick={() => l.setLoop({ startCount: l.next!.startCount, endCount: l.next!.endCount }, { play: l.playing })}>
+          {copy.chips.next(spanLabel(l.next))}
+          <Icon name="right" size={16} />
+        </button>
+      )}
+      {more}
+    </div>
+  );
+}
+const TRANSPORT_SPEEDS = [0.5, 0.75, 1] as const;
+
+/**
+ * Count 1: one tap while it plays ("Tap on 1", snaps to the nearest beat), a whole
+ * count either way, or one of the beat tracker's other candidates for the 1. All of
+ * them are `setCountOne` in packages/navigation.
+ */
+export function CountOneTools({ l }: { l: Lesson }) {
+  const alts = l.alternates.filter((a) => a.shift_counts !== 0);
+  return (
+    <div className="ls-group" role="group" aria-labelledby="ls-one-h">
+      <span className="ls-group-label" id="ls-one-h">
+        {copy.countOne.heading}
+        {l.countsFrom !== "hand" && <small> {copy.countOne.guess}</small>}
       </span>
+      <div className="ls-group-row">
+        <button type="button" className="ls-chip ls-strong" onClick={l.tapOne} title={copy.countOne.tapHint}>
+          {copy.countOne.tap}
+        </button>
+        <button type="button" className="ls-chip" onClick={() => l.nudgeOne(-1)} aria-label={copy.countOne.earlierLabel}>
+          {copy.countOne.earlier}
+        </button>
+        <button type="button" className="ls-chip" onClick={() => l.nudgeOne(1)} aria-label={copy.countOne.laterLabel}>
+          {copy.countOne.later}
+        </button>
+      </div>
+      {alts.length > 0 && (
+        <div className="ls-group-row">
+          <span className="ls-hint">{copy.countOne.tryAnother}</span>
+          {alts.map((a) => (
+            <button key={a.count_one_s} type="button" className="ls-chip" onClick={() => l.tryOne(a.count_one_s)} aria-label={copy.countOne.altLabel(a.shift_counts)}>
+              {a.shift_counts > 0 ? `+${a.shift_counts}` : `−${-a.shift_counts}`}
+            </button>
+          ))}
+        </div>
+      )}
+      <span className="ls-hint">{copy.countOne.tapHint}</span>
     </div>
   );
 }
 
-// ------------------------------------------------------------------ the ladder
-
-export function Steps({ l, compact = false }: { l: Lesson; compact?: boolean }) {
-  const here = l.mode === "lesson" ? (l.complete ? "done" : l.current.step) : null;
-  return (
-    <div className="ls-steps" role="group" aria-label={copy.path.stepGroup}>
-      {STEPS.map((s) => {
-        const prog = stepProgress(l.rounds, l.round, s);
-        if (!prog.total) return null;
-        const on = here === s;
-        const done = l.mode === "lesson" && (here === "done" || prog.done === prog.total);
-        return (
-          <button
-            key={s}
-            type="button"
-            className={`ls-step${on ? " ls-on" : ""}${done && !on ? " ls-done" : ""}`}
-            aria-pressed={on}
-            onClick={() => l.setStep(s)}
-          >
-            <span className="ls-step-top">
-              {compact && <Icon name={STEP_ICON[s]} size={18} />}
-              <b>{copy.path.steps[s]}</b>
-            </span>
-            {!compact && <small>{on && s === "build" ? `${l.speed}×` : copy.path.stepSub[s]}</small>}
-            <span className="ls-pips" aria-hidden="true">
-              {Array.from({ length: prog.total }, (_, k) => (
-                <i key={k} className={k < prog.done || (l.mode === "lesson" && here === "done") ? "ls-f" : ""} />
-              ))}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-export function PlayButton({ l, className = "", label = true, short = false }: { l: Lesson; className?: string; label?: boolean; short?: boolean }) {
-  return (
-    <button type="button" className={`ls-play ${className}`} onClick={l.togglePlay} aria-label={l.playing ? copy.transport.pause : copy.transport.play}>
-      <Icon name={l.playing ? "pause" : "play"} size={26} />
-      {label && <span>{l.playing ? copy.transport.pause : short ? copy.transport.play : copy.transport.playUnit(l.unit.label)}</span>}
-    </button>
-  );
-}
-
-export function CheckIn({ l, className = "" }: { l: Lesson; className?: string }) {
-  if (!l.checkIn) return null;
-  return (
-    <div className={`ls-check ${className}`} role="dialog" aria-label={copy.path.check(l.unit.label)}>
-      <p>{copy.path.check(l.unit.label)}</p>
-      <button type="button" className="ls-btn ls-ghost" onClick={l.again}>
-        {copy.path.again}
-      </button>
-      <button type="button" className="ls-btn ls-accent" onClick={l.gotIt}>
-        <Icon name="check" size={18} /> {copy.path.gotIt}
-      </button>
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ path
-
-export function PathNav({ l, row = false }: { l: Lesson; row?: boolean }) {
-  const onRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => {
-    onRef.current?.scrollIntoView?.({ block: "nearest", inline: "center" });
-  }, [l.unitIndex]);
-  return (
-    <nav className={`ls-path${row ? " ls-row" : ""}`} aria-label={copy.path.label}>
-      {l.units.map((u, i) => {
-        const on = i === l.unitIndex;
-        const done = l.learned.has(u.id);
-        return (
-          <button
-            key={u.id}
-            ref={on ? onRef : undefined}
-            type="button"
-            className={`ls-node ls-${u.kind}${on ? " ls-on" : ""}${done ? " ls-done" : ""}`}
-            aria-current={on ? "step" : undefined}
-            onClick={() => l.goUnit(i, { play: false })}
-          >
-            <span className="ls-dot">{done ? <Icon name="check" size={16} /> : u.kind === "join" ? u.short : u.short}</span>
-            <span className="ls-node-lbl">
-              {u.label}
-              <small>{done ? copy.path.learnedTag : ""}</small>
-            </span>
-          </button>
-        );
-      })}
-    </nav>
-  );
-}
-
-export function learnedLine(l: Lesson) {
-  return copy.path.learned(l.eights.filter((u) => l.learned.has(u.id)).length, l.eights.length);
+export function doneLine(l: Lesson) {
+  return copy.chips.doneCount(l.eights.filter((e) => l.done.has(e.id)).length, l.eights.length);
 }
 
 // ------------------------------------------------------------------ dancers
@@ -648,15 +664,22 @@ export function WhoChip({ l, shots, withName = true }: { l: Lesson; shots: Dance
   );
 }
 
-// ------------------------------------------------------------------ help
+// ------------------------------------------------------------------ more
+
+const VIEWS: { id: MainView; label: string }[] = [
+  { id: "overlay", label: copy.views.overlay },
+  { id: "video", label: copy.views.video },
+  { id: "3d", label: copy.views.threeD },
+];
+const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 /**
- * Everything the old page printed in paragraphs under the stage — the legend, what
- * is out of frame, where the counts came from, the keys — behind one "?", so the
- * default view is the dance and not the caveats. Native `popover`: no focus trap to
- * get wrong, Escape closes it.
+ * Everything that is not play, speed or the loop, in one place: "More" is a panel
+ * on a desktop and the expanded bottom sheet on a phone. The legend, what is out of
+ * frame and where the counts came from — the paragraphs the old page printed under
+ * the stage — sit at the bottom of it, so the default view is the dance.
  */
-export function Help({ l, id }: { l: Lesson; id: string }) {
+export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }) {
   const perMinute = Math.round(60 / l.structure.grid.secondsPerCount);
   const counts =
     l.countsFrom === "music"
@@ -667,12 +690,67 @@ export function Help({ l, id }: { l: Lesson; id: string }) {
           ? copy.counts.placeholder(perMinute)
           : null;
   return (
-    <>
-      <button type="button" className="ls-icon-btn ls-help-btn" popoverTarget={id} aria-label={copy.help.button}>
-        <Icon name="question" size={20} />
-      </button>
-      <div id={id} popover="auto" className="ls-help">
-        <p>{legend}</p>
+    <div className="ls-more">
+      <div className="ls-group" role="group" aria-label={copy.views.group}>
+        <span className="ls-group-label">{copy.views.group}</span>
+        <div className="ls-group-row">
+          {VIEWS.map((v) => (
+            <button key={v.id} type="button" className="ls-chip" aria-pressed={l.view === v.id} onClick={() => l.setView(v.id)}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+        {l.view === "3d" && (
+          <div className="ls-group-row">
+            {ANGLES.map((a) => (
+              <button key={a.id} type="button" className="ls-chip" aria-pressed={l.angle === a.id} onClick={() => l.setAngle(a.id)}>
+                {cap(a.label)}
+                {a.id !== "camera" && <small>{copy.views.est}</small>}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="ls-group-row">
+          <button type="button" className="ls-chip" aria-pressed={l.mirrored} onClick={() => l.setMirrored((v) => !v)}>
+            {l.mirrored ? copy.transport.mirrorOn : copy.transport.mirrorOff}
+          </button>
+          <button type="button" className="ls-chip" aria-pressed={l.showCrops} onClick={() => l.setShowCrops((v) => !v)}>
+            {l.showCrops ? copy.crop.toggleOn : copy.crop.toggleOff}
+          </button>
+          <button type="button" className="ls-chip" aria-pressed={l.follow} onClick={() => l.setFollow((v) => !v)}>
+            {l.follow ? copy.transport.followOn : copy.transport.followOff}
+          </button>
+          <button type="button" className="ls-chip" aria-pressed={l.speedPick === 0.25 && !l.buildUp} onClick={() => (l.setBuildUp(false), l.setSpeed(0.25))}>
+            0.25×
+          </button>
+        </div>
+      </div>
+      {extra}
+      <CountOneTools l={l} />
+      {l.multi && (
+        <div className="ls-group">
+          <span className="ls-group-label">{copy.views.dancer}</span>
+          <div className="ls-group-row">
+            <button type="button" className="ls-chip" onClick={() => l.setPickerOpen(true)}>
+              {copy.dancers.change}
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="ls-group">
+        <span className="ls-group-label">{copy.menu.heading}</span>
+        <div className="ls-group-row">
+          <button type="button" className="ls-chip" disabled={!l.onRemoveFromMyLessons} onClick={() => l.onRemoveFromMyLessons?.()}>
+            {copy.menu.removeMine}
+          </button>
+          <button type="button" className="ls-chip" disabled={!l.onReportOrRemove} onClick={() => l.onReportOrRemove?.()}>
+            {copy.menu.report}
+          </button>
+        </div>
+      </div>
+      <details className="ls-about">
+        <summary>{copy.help.button}</summary>
+        <p>{copy.help.legend}</p>
         <p>{copy.help.estimated}</p>
         {l.doc.grounding.status === "none" && <p>{copy.help.noFloor}</p>}
         {l.absent.length > 0 && <p>{l.absent.join(", ")}.</p>}
@@ -688,46 +766,22 @@ export function Help({ l, id }: { l: Lesson; id: string }) {
           onSeek={l.seek}
           playing={l.playing}
           onPlayingChange={(p) => (p ? l.play() : l.pause())}
-          mode="loop"
+          mode={l.loop ? "loop" : "all"}
           onModeChange={() => {}}
-          loop={{ startCount: l.unit.startCount, endCount: l.unit.endCount }}
-          onLoopChange={() => {}}
+          loop={l.loop ?? { startCount: 1, endCount: l.structure.grid.countTotal }}
+          onLoopChange={(s) => l.setLoop(s)}
           selectedPersonId={l.doc.persons[l.selected].person_id}
           onSelectPerson={() => {}}
           endS={l.endS}
         />
-      </div>
-    </>
-  );
-}
-
-/**
- * "⋯": the two things that are about the lesson rather than the dance. The actions
- * come in from the host (LessonViewer props); until they are wired an entry is shown
- * disabled rather than pretending to work.
- */
-export function LessonMenu({ l, id }: { l: Lesson; id: string }) {
-  const close = () => (document.getElementById(id) as (HTMLElement & { hidePopover?: () => void }) | null)?.hidePopover?.();
-  return (
-    <>
-      <button type="button" className="ls-icon-btn ls-menu-btn" popoverTarget={id} aria-label={copy.menu.button}>
-        <Icon name="dots" size={22} />
-      </button>
-      <div id={id} popover="auto" className="ls-menu" role="menu">
-        <button type="button" role="menuitem" disabled={!l.onRemoveFromMyLessons} onClick={() => (close(), l.onRemoveFromMyLessons?.())}>
-          {copy.menu.removeMine}
-        </button>
-        <button type="button" role="menuitem" disabled={!l.onReportOrRemove} onClick={() => (close(), l.onReportOrRemove?.())}>
-          {copy.menu.report}
-        </button>
-      </div>
-    </>
+      </details>
+    </div>
   );
 }
 
 // ------------------------------------------------------------------ keyboard
 
-/** DESIGN.md §8 keys, plus T for "Tap on 1". Never while a field has focus. */
+/** DESIGN.md §8 keys, plus B for build up and T for "Tap on 1". Never while a field has focus. */
 export function useLessonKeys(l: Lesson) {
   const ref = useRef(l);
   ref.current = l;
@@ -748,19 +802,15 @@ export function useLessonKeys(l: Lesson) {
         if (e.shiftKey) x.stepEight(d);
         else x.seek(x.timeRef.current + d * x.structure.grid.secondsPerCount);
       } else if (k === "m") x.setMirrored((v) => !v);
-      else if (k === "s") x.cycleFreeSpeed();
+      else if (k === "s") x.cycleSpeed();
+      else if (k === "b") x.setBuildUp(!x.buildUp);
       else if (k === "f") x.setFollow((v) => !v);
       else if (k === "t") x.tapOne();
-      else if (k === "l") {
-        x.setMode("free");
-        x.setFreeLoop((v) => (v === "all" ? "unit" : "all"));
-      }
+      else if (k === "l") x.setLoop(x.loop ? null : x.here ? { startCount: x.here.startCount, endCount: x.here.endCount } : null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 }
 
-/** Speed options for free practice: the old 0.25–1 set (lib/motion SPEEDS). */
-export { SPEEDS } from "../../lib/motion";
 export type { MotionResult };

@@ -199,33 +199,6 @@
 .ls-stage[data-view="3d"] .ls-video {
   opacity: 0;
 }
-/* Your turn: the dancer goes dark, the music and the counts keep going. */
-.ls-stage[data-turn="on"] .ls-video,
-.ls-stage[data-turn="on"] .ls-overlay,
-.ls-stage[data-turn="on"] .ls-3d,
-.ls-dim canvas {
-  opacity: 0.08;
-}
-.ls-turn {
-  position: absolute;
-  left: 50%;
-  top: 38%;
-  z-index: 3;
-  transform: translate(-50%, -50%);
-  display: grid;
-  gap: 4px;
-  width: min(80%, 320px);
-  text-align: center;
-  color: var(--paper);
-  pointer-events: none;
-}
-.ls-turn b {
-  font: 800 clamp(1.75rem, 5vw, 2.5rem) / 1 var(--font-display);
-  letter-spacing: -0.02em;
-}
-.ls-turn span {
-  color: var(--on-stage-muted);
-}
 .ls-stage-tag {
   position: absolute;
   left: 14px;
@@ -382,226 +355,6 @@
   opacity: 0.4;
 }
 
-.ls-one {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.ls-one-tap {
-  background: var(--ink);
-  color: var(--paper);
-  min-height: 48px;
-  padding: 0 20px;
-}
-.ls-one-tap:hover {
-  background: #3a3431;
-}
-.ls-one-nudge {
-  min-width: 48px;
-  min-height: 48px;
-  padding: 0 10px;
-  font-size: 1rem;
-}
-.ls-one .ls-hint {
-  flex-basis: 100%;
-  min-height: 1.2em;
-}
-
-/* ------------------------------------------------------------------ ladder */
-
-.ls-steps {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  gap: 8px;
-  min-width: 0;
-}
-.ls-step {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
-  min-height: 72px;
-  padding: 10px 14px;
-  border-radius: var(--r);
-  background: var(--paper-sunk);
-  color: var(--ink-muted);
-  text-align: left;
-}
-.ls-step-top {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.ls-step b {
-  font-weight: 600;
-  font-size: 1rem;
-}
-.ls-step small {
-  font-size: 0.8125rem;
-}
-.ls-pips {
-  display: flex;
-  gap: 3px;
-  margin-top: 4px;
-}
-.ls-pips i {
-  flex: 1;
-  max-width: 16px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--line);
-}
-.ls-pips i.ls-f {
-  background: var(--ink);
-}
-.ls-step.ls-on {
-  background: var(--stage);
-  color: var(--paper);
-}
-.ls-step.ls-on .ls-pips i {
-  background: #4a423c;
-}
-.ls-step.ls-on .ls-pips i.ls-f {
-  background: var(--accent);
-}
-.ls-step.ls-done {
-  color: var(--ink);
-}
-
-.ls-play {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  border-radius: var(--r);
-  background: var(--ink);
-  color: var(--paper);
-  font-weight: 600;
-  font-size: 1.0625rem;
-}
-.ls-play-sq {
-  width: 72px;
-  min-height: 72px;
-  flex: none;
-}
-.ls-got {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  flex: 0 0 150px;
-  min-height: 72px;
-  border-radius: var(--r);
-  background: var(--paper-sunk);
-  font-weight: 600;
-  font-size: 1.0625rem;
-}
-.ls-got.ls-ready {
-  background: var(--accent);
-  color: var(--stage);
-}
-
-.ls-check {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 14px 16px;
-  border-radius: var(--r);
-  background: var(--paper-sunk);
-}
-.ls-check p {
-  margin-right: auto;
-  font-weight: 600;
-  font-size: 1.0625rem;
-}
-.ls-check .ls-btn {
-  min-height: 56px;
-  padding: 0 24px;
-}
-
-/* ------------------------------------------------------------------ path */
-
-.ls-path {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.ls-path::before {
-  content: "";
-  position: absolute;
-  left: 21px;
-  top: 24px;
-  bottom: 24px;
-  width: 2px;
-  background: var(--line);
-}
-.ls-node {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 5px 10px 5px 0;
-  border-radius: 12px;
-  text-align: left;
-}
-.ls-node:hover {
-  background: var(--paper-sunk);
-}
-.ls-dot {
-  position: relative;
-  z-index: 1;
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: var(--paper);
-  border: 2px solid var(--line);
-  font: 800 1rem var(--font-display);
-  color: var(--ink-faint);
-}
-.ls-node-lbl {
-  display: grid;
-  font-weight: 600;
-  line-height: 1.25;
-}
-.ls-node-lbl small {
-  font-size: 0.8125rem;
-  font-weight: 400;
-  color: var(--ink-faint);
-}
-.ls-node.ls-join .ls-dot {
-  width: 32px;
-  height: 32px;
-  margin: 0 6px;
-  font-size: 0.6875rem;
-  border-style: dashed;
-}
-.ls-node.ls-join .ls-node-lbl {
-  font-weight: 500;
-  font-size: 0.875rem;
-  color: var(--ink-muted);
-}
-.ls-node.ls-done .ls-dot {
-  background: var(--accent);
-  border-color: var(--accent);
-  border-style: solid;
-  color: var(--stage);
-}
-.ls-node.ls-on .ls-dot {
-  border-color: var(--ink);
-  color: var(--ink);
-  box-shadow: 0 0 0 3px var(--paper), 0 0 0 5px var(--accent);
-}
-.ls-node.ls-on.ls-done .ls-dot {
-  color: var(--stage);
-}
-
 /* ------------------------------------------------------------------ dancers */
 
 .ls-who {
@@ -714,292 +467,6 @@
 .ls-start {
   min-height: 56px;
   font-size: 1.0625rem;
-}
-
-/* ------------------------------------------------------------------ help */
-
-.ls-help {
-  width: min(92vw, 520px);
-  max-height: min(80vh, 640px);
-  overflow: auto;
-  margin: auto;
-  padding: 18px 20px;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: var(--paper);
-  color: var(--ink);
-  font-size: 0.9375rem;
-  line-height: 1.45;
-  box-shadow: 0 18px 48px rgb(28 25 23 / 0.25);
-}
-.ls-help::backdrop {
-  background: rgb(28 25 23 / 0.3);
-}
-.ls-help p + p {
-  margin-top: 8px;
-}
-.ls-help .ls-keys {
-  color: var(--ink-muted);
-  font-size: 0.8125rem;
-}
-.ls-help .sw-editor {
-  margin-top: 14px;
-}
-
-.ls-menu {
-  inset: calc(env(safe-area-inset-top) + 60px) 12px auto auto;
-  margin: 0;
-  min-width: 240px;
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: var(--paper);
-  color: var(--ink);
-  box-shadow: 0 18px 48px rgb(28 25 23 / 0.25);
-}
-.ls-menu button {
-  display: block;
-  width: 100%;
-  min-height: 48px;
-  padding: 0 14px;
-  border-radius: 10px;
-  text-align: left;
-  font-weight: 500;
-}
-.ls-menu button:hover:not(:disabled) {
-  background: var(--paper-sunk);
-}
-.ls-menu button:disabled {
-  color: var(--ink-faint);
-}
-.ls-ph-head .ls-menu-btn {
-  color: var(--paper);
-}
-
-/* ================================================================== desktop */
-
-.ls-desk {
-  min-height: 100dvh;
-}
-.ls-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 12px 24px;
-}
-.ls-title {
-  font: 700 clamp(1.25rem, 2.2vw, 1.75rem) / 1.1 var(--font-display);
-  letter-spacing: -0.02em;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ls-meter {
-  flex: none;
-  font-size: 0.875rem;
-  color: var(--ink-muted);
-}
-.ls-head-end {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.ls-body {
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 24px;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 4px 24px 32px;
-}
-.ls-desk .ls-path {
-  align-self: start;
-  position: sticky;
-  top: 12px;
-  max-height: calc(100dvh - 24px);
-  overflow-y: auto;
-}
-.ls-main {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px;
-  gap: 14px 16px;
-  align-content: start;
-}
-.ls-views {
-  display: grid;
-  grid-template-columns: repeat(var(--n, 1), minmax(0, 1fr));
-  gap: 12px;
-  height: clamp(340px, calc(100dvh - 370px), 680px);
-}
-.ls-views[data-n="2"] {
-  --n: 2;
-}
-.ls-views[data-n="3"] {
-  --n: 3;
-}
-.ls-views[data-n="2"] .ls-stage,
-.ls-views[data-n="3"] .ls-stage {
-  grid-column: auto;
-}
-.ls-viewbar {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.ls-desk-closeups {
-  align-self: start;
-}
-.ls-countrow {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: 150px minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 16px;
-}
-.ls-unit {
-  display: grid;
-  padding-bottom: 6px;
-}
-.ls-unit b {
-  font-size: 1.125rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.ls-unit small {
-  font-size: 0.875rem;
-  color: var(--ink-muted);
-}
-.ls-countrow .ls-one {
-  max-width: 300px;
-  justify-content: flex-end;
-}
-.ls-countrow .ls-one .ls-hint {
-  text-align: right;
-}
-.ls-ladder {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-.ls-ladder .ls-steps {
-  flex: 1;
-}
-.ls-free {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 10px;
-  border-radius: 999px;
-  background: var(--paper);
-  box-shadow: 0 0 0 1px var(--line), 0 10px 28px rgb(28 25 23 / 0.08);
-}
-.ls-free .ls-play-sq {
-  width: 56px;
-  min-height: 56px;
-  border-radius: 999px;
-}
-.ls-stepper {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-weight: 600;
-}
-.ls-stepper span {
-  min-width: 96px;
-  text-align: center;
-}
-.ls-desk .ls-check {
-  grid-column: 1 / -1;
-}
-
-/* Tablet: one column, the path as a row of dots on top (DESIGN.md §6: no three rails). */
-@media (max-width: 1100px) {
-  .ls-body {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
-  }
-  .ls-desk .ls-path {
-    position: static;
-    max-height: none;
-  }
-  .ls-main {
-    grid-template-columns: minmax(0, 1fr) 128px;
-  }
-  .ls-countrow {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .ls-countrow .ls-unit {
-    grid-column: 1 / -1;
-    display: flex;
-    gap: 10px;
-    align-items: baseline;
-    padding: 0;
-  }
-  .ls-views {
-    height: clamp(360px, calc(100dvh - 470px), 640px);
-  }
-  .ls-head {
-    padding: 10px 16px;
-  }
-  .ls-body {
-    padding: 4px 16px 24px;
-  }
-  .ls-head .ls-who > span:last-child {
-    display: none;
-  }
-  .ls-head .ls-who {
-    padding-right: 4px;
-  }
-}
-.ls-who {
-  white-space: nowrap;
-}
-@media (max-width: 1100px), (max-width: 767px) {
-  .ls-desk .ls-path {
-    flex-direction: row;
-    overflow-x: auto;
-    gap: 2px;
-    padding: 2px 0 6px;
-    scrollbar-width: none;
-  }
-  .ls-desk .ls-path::before {
-    left: 22px;
-    right: 22px;
-    top: 26px;
-    bottom: auto;
-    width: auto;
-    height: 2px;
-  }
-  .ls-desk .ls-node {
-    flex-direction: column;
-    gap: 2px;
-    padding: 4px;
-    min-width: 56px;
-  }
-  .ls-desk .ls-node-lbl {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--ink-faint);
-    white-space: nowrap;
-    text-align: center;
-  }
-  .ls-desk .ls-node.ls-eight .ls-node-lbl,
-  .ls-desk .ls-node-lbl small {
-    display: none;
-  }
-  .ls-desk .ls-node.ls-join .ls-dot {
-    margin: 6px 0;
-  }
 }
 
 /* ================================================================== phone */
@@ -1263,98 +730,6 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.ls-grab {
-  justify-self: center;
-  width: 88px;
-  height: 20px;
-  display: grid;
-  place-items: center;
-}
-.ls-grab::before {
-  content: "";
-  width: 40px;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--line);
-}
-.ls-phone .ls-steps {
-  gap: 6px;
-}
-.ls-phone .ls-step {
-  min-height: 56px;
-  padding: 6px 8px;
-  align-items: center;
-  text-align: center;
-}
-.ls-phone .ls-step-top {
-  flex-direction: column;
-  gap: 2px;
-}
-.ls-phone .ls-step b {
-  font-size: 0.8125rem;
-}
-.ls-phone .ls-pips {
-  width: 100%;
-  justify-content: center;
-  margin-top: 2px;
-}
-.ls-ph-transport {
-  display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) 88px;
-  gap: 8px;
-}
-.ls-big-btn {
-  display: grid;
-  place-items: center;
-  height: 88px;
-  border-radius: 18px;
-  background: var(--paper-sunk);
-}
-.ls-ph-play {
-  height: 88px;
-  border-radius: 18px;
-  font-size: 1.0625rem;
-  padding: 0 10px;
-  min-width: 0;
-}
-.ls-ph-play span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ls-ph-row {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-.ls-tile {
-  display: grid;
-  place-content: center;
-  min-height: 60px;
-  padding: 4px 6px;
-  border-radius: 16px;
-  background: var(--paper-sunk);
-  font-weight: 600;
-  font-size: 1rem;
-  line-height: 1.15;
-  text-align: center;
-}
-.ls-tile small {
-  font-size: 0.6875rem;
-  font-weight: 500;
-  color: var(--ink-muted);
-}
-.ls-tile.ls-accent small {
-  color: var(--stage);
-}
-.ls-more {
-  display: grid;
-  gap: 14px;
-  padding: 8px 0 4px;
-}
-.ls-more[hidden] {
-  display: none;
-}
 .ls-group {
   display: grid;
   gap: 6px;
@@ -1388,29 +763,6 @@
   font-size: 0.75rem;
   color: var(--ink-faint);
 }
-.ls-group-row .ls-help-btn {
-  width: 44px;
-  height: 44px;
-  background: var(--paper-sunk);
-}
-.ls-ph-check {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: calc(env(safe-area-inset-bottom) + 12px);
-  z-index: 20;
-  box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
-  background: var(--paper);
-}
-.ls-ph-check p {
-  flex-basis: 100%;
-}
-.ls-ph-check .ls-btn {
-  flex: 1;
-  min-height: 88px;
-  border-radius: 18px;
-  font-size: 1.0625rem;
-}
 .ls-install {
   position: absolute;
   left: 10px;
@@ -1441,7 +793,7 @@
   display: none;
 }
 .ls-open .ls-sheet {
-  max-height: 72dvh;
+  max-height: 78dvh;
 }
 
 /* Prop it up: no chrome, the count huge, the whole screen three tap zones. */
@@ -1545,21 +897,10 @@
   border-radius: 0;
   padding: calc(env(safe-area-inset-top) + 8px) calc(10px + env(safe-area-inset-right)) 10px 10px;
 }
-.ls-land .ls-grab,
 .ls-land .ls-ph-head .ls-title,
 .ls-land .ls-ph-head .ls-meter,
 .ls-land .ls-ph-hint,
 .ls-land .ls-rail-item:first-child {
-  display: none;
-}
-.ls-land .ls-steps {
-  grid-auto-flow: row;
-  grid-template-columns: 1fr 1fr;
-}
-.ls-land .ls-ph-transport {
-  grid-template-columns: 1fr 1fr 1fr;
-}
-.ls-land .ls-ph-play span {
   display: none;
 }
 .ls-land .ls-rail {
@@ -1574,9 +915,6 @@
 }
 .ls-land .ls-ph-stage .ls-stage-tag {
   top: calc(env(safe-area-inset-top) + 62px);
-}
-.ls-land .ls-tile {
-  font-size: 0.875rem;
 }
 .ls-land .ls-rail-dot {
   width: 44px;
@@ -1614,4 +952,368 @@
     transition: none !important;
     animation: none !important;
   }
+}
+
+/* ================================================================== chips + transport */
+
+.ls-chips-wrap {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+/* A plain scrubber for the whole clip; the chips are the navigation. */
+.ls-scrub {
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.ls-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+.ls-chips::-webkit-scrollbar {
+  display: none;
+}
+.ls-chip8 {
+  position: relative;
+  flex: 1 0 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 48px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: var(--paper-sunk);
+  color: var(--ink-muted);
+  font: 700 1.125rem/1 var(--font-display);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ls-chip8 .ls-icon {
+  color: var(--ink);
+}
+.ls-chip8.ls-on {
+  background: var(--ink);
+  color: var(--paper);
+}
+.ls-chip8.ls-on .ls-icon {
+  color: var(--accent);
+}
+/* Where the playhead is, when that is not the loop: a line, not a second colour. */
+.ls-chip8.ls-here::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 5px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.ls-chip8.ls-all {
+  flex: 0 0 auto;
+  font: 600 0.9375rem/1 var(--font-ui);
+}
+
+.ls-transport {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ls-play {
+  display: inline-grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+}
+.ls-speeds button {
+  min-width: 56px;
+  justify-content: center;
+  font-weight: 600;
+}
+.ls-build,
+.ls-next,
+.ls-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--paper-sunk);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ls-build.ls-on {
+  background: var(--ink);
+  color: var(--paper);
+}
+.ls-build b {
+  color: var(--accent);
+}
+.ls-next {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-weight: 500;
+}
+.ls-more-btn {
+  margin-left: auto;
+}
+
+/* More: a panel on a desktop, the open sheet on a phone. */
+.ls-more {
+  display: grid;
+  gap: 16px;
+  padding: 4px 0;
+}
+.ls-panel {
+  inset: auto 24px 110px auto;
+  margin: 0;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(78vh, 720px);
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 18px 48px rgb(28 25 23 / 0.25);
+}
+.ls-chip:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+}
+.ls-chip.ls-strong {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+}
+.ls-chip.ls-accent {
+  background: var(--accent);
+  color: var(--stage);
+}
+.ls-group-label small {
+  font-weight: 400;
+  color: var(--ink-faint);
+}
+.ls-about summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink-muted);
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.ls-about p {
+  margin-top: 8px;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+}
+.ls-about .ls-keys {
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+.ls-about .sw-editor {
+  margin-top: 12px;
+}
+
+/* ================================================================== desktop */
+
+.ls-desk {
+  min-height: 100dvh;
+}
+.ls-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 12px 24px;
+}
+.ls-title {
+  font: 700 clamp(1.25rem, 2.2vw, 1.75rem) / 1.1 var(--font-display);
+  letter-spacing: -0.02em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ls-meter {
+  flex: none;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+.ls-head-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ls-who {
+  white-space: nowrap;
+}
+.ls-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 12px 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 24px 24px;
+}
+.ls-views {
+  display: flex;
+  gap: 12px;
+  height: clamp(320px, calc(100dvh - 260px), 720px);
+  min-width: 0;
+}
+.ls-views > .ls-stage,
+.ls-views > .ls-pane {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.ls-views > .ls-stage {
+  flex-grow: 1.4;
+}
+.ls-add-angle {
+  flex: 0 0 44px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r);
+  background: var(--paper-sunk);
+  color: var(--ink-muted);
+}
+.ls-add-angle:hover {
+  background: var(--line);
+}
+.ls-desk-closeups {
+  align-self: start;
+}
+.ls-stage-counts {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 8px;
+  z-index: 3;
+  pointer-events: none;
+}
+.ls-stage-counts .ls-counts {
+  pointer-events: auto;
+  max-width: 460px;
+}
+.ls-stage-counts .ls-count,
+.ls-ph-counts .ls-count {
+  color: rgb(232 225 216 / 0.7);
+  border-bottom-color: rgb(232 225 216 / 0.25);
+  text-shadow: 0 2px 10px rgb(0 0 0 / 0.5);
+}
+.ls-stage-counts .ls-count.ls-on,
+.ls-ph-counts .ls-count.ls-on {
+  color: var(--paper);
+  border-bottom-color: var(--accent);
+}
+.ls-desk .ls-chips-wrap,
+.ls-desk .ls-transport {
+  grid-column: 1 / -1;
+}
+
+/* Tablet: close-ups under the stage, no side column. */
+@media (max-width: 1100px) {
+  .ls-head {
+    padding: 10px 16px;
+  }
+  .ls-body {
+    grid-template-columns: minmax(0, 1fr) 120px;
+    padding: 0 16px 20px;
+  }
+  .ls-head .ls-who > span:last-child {
+    display: none;
+  }
+  .ls-head .ls-who {
+    padding-right: 4px;
+  }
+}
+
+/* ================================================================== phone sheet */
+
+.ls-sheet {
+  gap: 10px;
+  padding-top: 12px;
+}
+.ls-sheet .ls-scrub {
+  height: 20px;
+}
+.ls-ph-transport {
+  flex-wrap: nowrap;
+}
+.ls-ph-transport .ls-play {
+  width: 88px;
+  height: 88px;
+  border-radius: 22px;
+}
+.ls-ph-transport .ls-speeds button {
+  min-width: 0;
+  padding: 0 10px;
+  min-height: 44px;
+}
+.ls-ph-transport {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  grid-template-areas: "play speeds more" "play build more";
+  align-items: center;
+  gap: 6px 8px;
+}
+.ls-ph-transport .ls-play {
+  grid-area: play;
+}
+.ls-ph-transport .ls-speeds {
+  grid-area: speeds;
+  justify-self: stretch;
+}
+.ls-ph-transport .ls-speeds button {
+  flex: 1;
+}
+.ls-ph-transport .ls-build {
+  grid-area: build;
+  justify-content: center;
+}
+.ls-ph-transport .ls-next {
+  display: none;
+}
+.ls-ph-next {
+  position: absolute;
+  right: 84px;
+  bottom: 92px;
+  z-index: 4;
+  background: var(--paper);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.3);
+}
+.ls-ph-transport .ls-more-btn {
+  grid-area: more;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  height: 88px;
+  width: 64px;
+  padding: 0;
+  border-radius: 18px;
+  font-size: 0.75rem;
+  margin: 0;
+}
+.ls-land .ls-ph-transport {
+  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-areas: "play speeds" "play build" "more more";
+}
+.ls-land .ls-ph-transport .ls-more-btn {
+  display: none;
 }

@@ -4,38 +4,39 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { Lesson, MainView } from "../LessonViewer";
 import { lesson as copy } from "../../lib/copy";
-import { SPEEDS, type ViewId } from "../../lib/motion";
+import type { ViewId } from "../../lib/motion";
+import { spanLabel } from "../../lib/lessonEngine";
 import {
   accentOf,
   AnglePane,
-  ANGLES,
-  CheckIn,
   CloseUps,
   CountBar,
   DancerPicker,
-  Help,
+  doneLine,
+  EightChips,
   Icon,
-  learnedLine,
-  LessonMenu,
   MainStage,
-  PlayButton,
-  Steps,
+  MoreContent,
+  Transport,
   useDancerShots,
   WhoChip,
   type IconName,
 } from "./pieces";
 import { useMedia, useWakeLock } from "./hooks";
 
-const NEXT_VIEW: Record<MainView, MainView> = { video: "3d", "3d": "overlay", overlay: "video" };
+const NEXT_VIEW: Record<MainView, MainView> = { overlay: "video", video: "3d", "3d": "overlay" };
 const VIEW_ICON: Record<MainView, IconName> = { video: "video", "3d": "cube", overlay: "stack" };
 const VIEW_NAME: Record<MainView, string> = { video: copy.views.video, "3d": copy.views.threeD, overlay: copy.views.overlay };
+/** Build up reaches 1× on its sixth pass; one more pass at 1× and prop mode moves on. */
+const PASSES_TO_FULL_AND_ONCE_MORE = 6;
 
 /**
  * The phone lesson (docs/DESIGN.md §6, mockups/phone): the page never scrolls. The clip
- * is full-bleed, everything you press sits in a bottom sheet in the thumb zone, and the
- * stage itself takes TikTok's gestures — tap to play, swipe up or down for the next or
- * previous 8-count, hold for half speed. On its side it is video and 3D side by side.
- * "Prop it up" drops all chrome for a phone leaning on the wall across the room.
+ * is full-bleed and the stage takes TikTok's gestures — tap to play, swipe up or down
+ * for the next or previous 8-count, hold for half speed. The bottom sheet holds the
+ * 8-count chips and the transport; More opens it the rest of the way. On its side it
+ * is video and 3D side by side. "Prop it up" drops all chrome for a phone leaning on
+ * the wall across the room.
  */
 export default function PhoneLesson({ l }: { l: Lesson }) {
   const land = useMedia("(orientation: landscape)");
@@ -63,14 +64,14 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
    * runs now (and is paused at once) to unlock it, and the first spoken count is
    * queued now too, for the same reason.
    */
-  const countInThen = (go: () => void) => {
+  const countInThen = (go: () => void, speed = l.speed) => {
     cancelCountIn();
     const v = l.video;
     if (!v) return;
     if (!voice) return go();
     v.play().catch(() => {});
     v.pause();
-    const beat = (l.structure.grid.secondsPerCount / l.speed) * 1000;
+    const beat = (l.structure.grid.secondsPerCount / speed) * 1000;
     const say = (n: number) => {
       setCountIn(n);
       try {
@@ -93,14 +94,14 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
   };
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
-  // ---- prop it up: build-up runs on its own and moves on to the next 8.
+  // ---- prop it up: build up runs on its own and moves on to the next 8.
   const enterProp = () => {
     setProp(true);
     setOpen(false);
-    document.documentElement.requestFullscreen?.().catch(() => {}); // Android; iOS only as a home-screen app
-    l.setMode("lesson");
-    l.goUnit(l.unitIndex, { play: false, step: "build" });
-    countInThen(l.play);
+    document.documentElement.requestFullscreen?.().catch(() => {}); // Android; iOS only from the Home Screen
+    if (!l.loop) l.stepEight(0);
+    l.setBuildUp(true);
+    countInThen(l.play, 0.5);
   };
   const exitProp = () => {
     cancelCountIn();
@@ -108,24 +109,23 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
     l.pause();
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
   };
+  const propNext = (d: number) => {
+    l.pause();
+    l.stepEight(d);
+    countInThen(l.play, 0.5);
+  };
   useEffect(() => {
-    if (!prop || !auto || !l.checkIn) return;
-    const last = l.eights[l.eights.length - 1];
-    if (l.unit.id === last?.id) return;
+    if (!prop || !auto || !l.buildUp || l.passes < PASSES_TO_FULL_AND_ONCE_MORE) return;
+    if (!l.loopEight || l.loopEight.n === l.eights.length) return;
+    l.pause();
+    show(copy.phone.zoneNext);
     const t = window.setTimeout(() => {
-      l.stepEight(1, { play: false, step: "build" });
-      show(copy.phone.zoneNext);
+      l.stepEight(1);
+      countInThen(l.play, 0.5);
     }, 900);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires on the check-in edge only
-  }, [prop, auto, l.checkIn]);
-  // ...and once the next 8 is open, count it in.
-  const lastUnit = useRef(l.unitIndex);
-  useEffect(() => {
-    if (prop && lastUnit.current !== l.unitIndex && l.video?.paused) countInThen(l.play);
-    lastUnit.current = l.unitIndex;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- unit change edge
-  }, [l.unitIndex]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires on the pass edge only
+  }, [prop, auto, l.passes]);
 
   // ---- gestures on the stage
   const g = useRef<{ x: number; y: number; held: boolean } | null>(null);
@@ -148,7 +148,7 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
     if (s.held) return l.setHoldSlow(false);
     const dx = e.clientX - s.x, dy = e.clientY - s.y;
     if (Math.abs(dy) > 50 && Math.abs(dy) > Math.abs(dx) * 1.3) {
-      l.stepEight(dy < 0 ? 1 : -1);
+      l.stepEight(dy < 0 ? 1 : -1, { play: l.playing });
       setHint(false);
       return;
     }
@@ -164,9 +164,7 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
     g.current = null;
   };
 
-  const eightIndex = l.eights.findIndex((u) => u.startCount <= l.unit.startCount && l.unit.startCount <= u.endCount);
-  const learnedN = l.eights.filter((u) => l.learned.has(u.id)).length;
-  const building = l.mode === "lesson" && l.current.step === "build" && !l.complete;
+  const loopLabel = l.loop ? (l.loopEight?.label ?? spanLabel(l.loop)) : copy.chips.all;
 
   return (
     <main
@@ -175,25 +173,12 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
     >
       <div className="ls-ph-stages" onPointerDown={onDown} onPointerUp={onUp} onPointerCancel={onCancel}>
         <MainStage l={l} className="ls-ph-stage" view={land && l.view === "3d" ? "overlay" : l.view}>
-          <div className="ls-bars" role="group" aria-label={copy.path.label}>
-            {l.eights.map((u, i) => (
-              <button
-                key={u.id}
-                type="button"
-                className={l.learned.has(u.id) ? "ls-done" : i === eightIndex ? "ls-here" : ""}
-                aria-label={u.label}
-                aria-current={i === eightIndex ? "step" : undefined}
-                onClick={() => l.goUnit(l.units.indexOf(u), { play: false })}
-              />
-            ))}
-          </div>
           <header className="ls-ph-head">
             <Link href="/" className="ls-icon-btn" aria-label={copy.transport.back}>
               <Icon name="left" />
             </Link>
             <h1 className="ls-title">{l.title}</h1>
-            <span className="ls-meter">{learnedLine(l)}</span>
-            <LessonMenu l={l} id="ls-menu-phone" />
+            <span className="ls-meter">{doneLine(l)}</span>
           </header>
           <CloseUps l={l} className="ls-ph-closeups" />
           <nav className="ls-rail" aria-label={copy.views.group}>
@@ -213,7 +198,7 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
             )}
           </nav>
           <div className="ls-ph-counts">
-            <span className="ls-ph-unit">{l.unit.label}</span>
+            <span className="ls-ph-unit">{loopLabel}</span>
             <CountBar l={l} big={prop} />
           </div>
           {inset && !land && (
@@ -222,6 +207,12 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
             </div>
           )}
           {hint && !prop && <p className="ls-ph-hint">{copy.phone.hint}</p>}
+          {l.next && !prop && (
+            <button type="button" className="ls-next ls-ph-next" onClick={() => l.setLoop({ startCount: l.next!.startCount, endCount: l.next!.endCount }, { play: l.playing })}>
+              {copy.chips.next(spanLabel(l.next))}
+              <Icon name="right" size={16} />
+            </button>
+          )}
           <div className={`ls-flash${flash ? " ls-show" : ""}`} aria-live="polite">
             {flash}
           </div>
@@ -233,7 +224,7 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
                   <Icon name="x" size={28} />
                 </button>
                 <span className="ls-prop-speed">
-                  {l.speed}×<small>{building ? copy.transport.building : l.unit.label}</small>
+                  {l.speed}×<small>{loopLabel}</small>
                 </span>
               </div>
               <div className="ls-prop-opts">
@@ -245,140 +236,69 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
                 </button>
               </div>
               <div className="ls-zones">
-                <button
-                  type="button"
-                  aria-label={copy.phone.zoneBack}
-                  onClick={() => l.stepEight(-1, { play: false, step: "build" })}
-                />
+                <button type="button" aria-label={copy.phone.zoneBack} onClick={() => propNext(-1)} />
                 <button
                   type="button"
                   aria-label={l.playing ? copy.transport.pause : copy.transport.play}
                   onClick={() => (l.playing || countIn !== null ? (cancelCountIn(), l.pause()) : countInThen(l.play))}
                 />
-                <button type="button" aria-label={copy.phone.zoneNext} onClick={() => l.stepEight(1, { play: false, step: "build" })} />
+                <button type="button" aria-label={copy.phone.zoneNext} onClick={() => propNext(1)} />
               </div>
             </>
           )}
         </MainStage>
-        {land && (
-          <AnglePane l={l} angle={l.view === "3d" ? l.angle : l.angle === "camera" ? "front" : l.angle} onAngle={l.setAngle} focus />
-        )}
+        {land && <AnglePane l={l} angle={l.view === "3d" ? l.angle : "front"} onAngle={l.setAngle} focus />}
       </div>
 
-      <section className="ls-sheet" aria-label={copy.path.stepGroup}>
-        <button type="button" className="ls-grab" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-          <span className="sr-only">{open ? copy.phone.less : copy.phone.more}</span>
-        </button>
-        <Steps l={l} compact />
-        <div className="ls-ph-transport">
-          <button type="button" className="ls-big-btn" onClick={() => l.stepEight(-1)} aria-label={copy.transport.prev}>
-            <Icon name="up" size={28} />
-          </button>
-          <PlayButton l={l} className="ls-ph-play" short />
-          <button type="button" className="ls-big-btn" onClick={() => l.stepEight(1)} aria-label={copy.transport.next}>
-            <Icon name="down" size={28} />
-          </button>
-        </div>
-        <div className="ls-ph-row">
-          <button type="button" className="ls-tile" onClick={l.cycleFreeSpeed}>
-            {l.speed}×<small>{building ? copy.transport.building : copy.transport.speed}</small>
-          </button>
-          <button type="button" className="ls-tile" onClick={l.tapOne} title={copy.countOne.tapHint}>
-            {copy.countOne.tap}
-            <small>{l.countsFrom !== "hand" ? copy.countOne.guess.toLowerCase() : copy.countOne.heading.toLowerCase()}</small>
-          </button>
-          <button type="button" className="ls-tile ls-accent" onClick={enterProp}>
-            {copy.phone.prop}
-            <small>{copy.phone.propSub}</small>
-          </button>
-        </div>
-
-        <div className="ls-more" hidden={!open && !land}>
-          <SheetGroup label={copy.countOne.heading}>
-            <button type="button" className="ls-chip" onClick={() => l.nudgeOne(-1)} aria-label={copy.countOne.earlierLabel}>
-              {copy.countOne.earlier}
+      <section className="ls-sheet" aria-label={copy.chips.group}>
+        <EightChips l={l} />
+        <Transport
+          l={l}
+          className="ls-ph-transport"
+          more={
+            <button type="button" className="ls-more-btn" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+              <Icon name={open ? "x" : "dots"} size={22} />
+              <span>{open ? copy.phone.less : copy.transport.more}</span>
             </button>
-            <button type="button" className="ls-chip" onClick={l.tapOne}>
-              {copy.countOne.tap}
-            </button>
-            <button type="button" className="ls-chip" onClick={() => l.nudgeOne(1)} aria-label={copy.countOne.laterLabel}>
-              {copy.countOne.later}
-            </button>
-          </SheetGroup>
-          <SheetGroup label={copy.modes.group}>
-            <button type="button" className="ls-chip" aria-pressed={l.mode === "lesson"} onClick={() => l.setMode("lesson")}>
-              {copy.modes.lesson}
-            </button>
-            <button type="button" className="ls-chip" aria-pressed={l.mode === "free"} onClick={l.toFree}>
-              {copy.modes.practise}
-            </button>
-          </SheetGroup>
-          {l.mode === "free" && (
-            <>
-              <SheetGroup label={copy.transport.speedLabel}>
-                {SPEEDS.map((s) => (
-                  <button key={s} type="button" className="ls-chip" aria-pressed={l.freeSpeed === s} onClick={() => l.setFreeSpeed(s)}>
-                    {s}×
+          }
+        />
+        {(open || land) && (
+          <MoreContent
+            l={l}
+            extra={
+              <div className="ls-group">
+                <div className="ls-group-row">
+                  <button type="button" className="ls-chip ls-strong ls-accent" onClick={enterProp}>
+                    {copy.phone.prop}
                   </button>
-                ))}
-              </SheetGroup>
-              <SheetGroup label={copy.transport.loopOn}>
-                <button type="button" className="ls-chip" aria-pressed={l.freeLoop === "unit"} onClick={() => l.setFreeLoop("unit")}>
-                  {copy.transport.loopThis}
-                </button>
-                <button type="button" className="ls-chip" aria-pressed={l.freeLoop === "all"} onClick={() => l.setFreeLoop("all")}>
-                  {copy.transport.wholeDance}
-                </button>
-              </SheetGroup>
-            </>
-          )}
-          <SheetGroup label={copy.views.angle}>
-            {ANGLES.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                className="ls-chip"
-                aria-pressed={l.view === "3d" && l.angle === a.id}
-                onClick={() => {
-                  l.setAngle(a.id);
-                  if (!land) l.setView("3d");
-                }}
-              >
-                {cap(a.label)}
-                {a.id !== "camera" && <small>est.</small>}
-              </button>
-            ))}
-          </SheetGroup>
-          {!land && (
-            <SheetGroup label={copy.views.inset}>
-              <button type="button" className="ls-chip" aria-pressed={!inset} onClick={() => setInset(null)}>
-                {copy.views.insetOff}
-              </button>
-              {(["side", "front", "back", "top"] as ViewId[]).map((a) => (
-                <button key={a} type="button" className="ls-chip" aria-pressed={inset === a} onClick={() => setInset(a)}>
-                  {cap(a)}
-                  <small>est.</small>
-                </button>
-              ))}
-            </SheetGroup>
-          )}
-          <SheetGroup label={copy.views.group}>
-            <button type="button" className="ls-chip" aria-pressed={l.follow} onClick={() => l.setFollow((v) => !v)}>
-              {l.follow ? copy.transport.followOn : copy.transport.followOff}
-            </button>
-            <Help l={l} id="ls-help-phone" />
-          </SheetGroup>
-        </div>
+                </div>
+                {!land && (
+                  <>
+                    <span className="ls-group-label">{copy.views.inset}</span>
+                    <div className="ls-group-row">
+                      <button type="button" className="ls-chip" aria-pressed={!inset} onClick={() => setInset(null)}>
+                        {copy.views.insetOff}
+                      </button>
+                      {(["front", "side", "back", "top"] as ViewId[]).map((a) => (
+                        <button key={a} type="button" className="ls-chip" aria-pressed={inset === a} onClick={() => setInset(a)}>
+                          {a[0].toUpperCase() + a.slice(1)}
+                          <small>{copy.views.est}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            }
+          />
+        )}
       </section>
 
-      <CheckIn l={l} className="ls-ph-check" />
-      <InstallHint learned={learnedN} />
+      <InstallHint done={l.done.size} />
       <DancerPicker l={l} shots={shots} />
     </main>
   );
 }
-
-const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 function RailButton({ icon, label, on, onClick }: { icon: IconName; label: string; on?: boolean; onClick: () => void }) {
   return (
@@ -388,15 +308,6 @@ function RailButton({ icon, label, on, onClick }: { icon: IconName; label: strin
       </span>
       <span>{label}</span>
     </button>
-  );
-}
-
-function SheetGroup({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="ls-group" role="group" aria-label={label}>
-      <span className="ls-group-label">{label}</span>
-      <div className="ls-group-row">{children}</div>
-    </div>
   );
 }
 
@@ -412,11 +323,11 @@ function useFlash() {
 }
 
 /**
- * Add to Home Screen, offered once the learner has learned one 8-count here — not on
- * the landing page, where nobody knows yet whether they want it. iOS has no install
- * prompt, so it gets the one-line how-to; Chromium gets its own prompt.
+ * Add to Home Screen, offered once the learner has looped one 8-count at full speed
+ * here — not on the landing page, where nobody knows yet whether they want it. iOS
+ * has no install prompt, so it gets the one-line how-to; Chromium gets its own prompt.
  */
-function InstallHint({ learned }: { learned: number }) {
+function InstallHint({ done }: { done: number }) {
   const KEY = "stepwise.install-dismissed.v1";
   const [prompt, setPrompt] = useState<any>(null);
   const [ios, setIos] = useState(false);
@@ -438,7 +349,7 @@ function InstallHint({ learned }: { learned: number }) {
     window.addEventListener("beforeinstallprompt", onPrompt);
     return () => window.removeEventListener("beforeinstallprompt", onPrompt);
   }, []);
-  if (dismissed || learned < 1 || (!ios && !prompt)) return null;
+  if (dismissed || done < 1 || (!ios && !prompt)) return null;
   const close = () => {
     setDismissed(true);
     try {

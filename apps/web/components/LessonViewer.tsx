@@ -5,22 +5,12 @@ import type { Focus } from "./Stage3D";
 import { defaultPersonIndex, SPEEDS, type MotionResult, type ViewId } from "../lib/motion";
 import { load, openingStructure, save } from "../lib/structure";
 import { parseHandoff } from "../lib/flow";
-import {
-  isComplete,
-  lessonUnits,
-  loadLearned,
-  nextRound,
-  roundAt,
-  saveLearned,
-  schedule,
-  stepStart,
-  type Step,
-  type Unit,
-} from "../lib/lessonEngine";
+import { buildUpSpeed, eightOf, eightsOf, loadDone, nextEight, saveDone, sameSpan, type Eight } from "../lib/lessonEngine";
 import {
   currentCount,
   loopTimesS,
   nudgeCountOne,
+  setCountOne,
   tapOnOne,
   timelineEndS,
 } from "../../../packages/navigation/src/core";
@@ -35,8 +25,10 @@ import "./lesson/lesson.css";
  * desktop are different layouts, not one stretched). Same URL for both; the phone one
  * is switched in on narrow or sideways screens, and both read and write only this.
  *
- * There is exactly one clock — the `<video>` — and one loop, applied inside it
- * (`useVideoClock`). The lesson path's rounds advance on that clock's wrap.
+ * One mode, nothing forced: pick an 8-count (or a range, or the whole dance), a speed,
+ * optionally Build up, and follow. There is exactly one clock — the `<video>` — and one
+ * loop, applied inside it (`useVideoClock`); build-up and the full-speed ticks count
+ * that clock's loop passes.
  */
 export interface LessonViewerProps {
   doc: MotionResult;
@@ -44,7 +36,7 @@ export interface LessonViewerProps {
   videoUrl: string;
   /** One GLB URL per entry in `doc.persons`. */
   glbUrls: string[];
-  /** Scope for the learner's counts, parts, learned 8-counts and dancer. */
+  /** Scope for the learner's counts, parts, full-speed ticks and dancer. */
   lessonId: string;
   /** "⋯" menu entries. Wired by the host once those flows exist; absent = shown disabled. */
   onRemoveFromMyLessons?: () => void;
@@ -52,19 +44,21 @@ export interface LessonViewerProps {
 }
 
 export type MainView = "video" | "overlay" | "3d";
-export type Mode = "lesson" | "free";
 
 const DANCER_KEY = (id: string) => `stepwise.lesson-dancer.v1.${id}`;
 
 export default function LessonViewer(props: LessonViewerProps) {
-  const l = useLesson(props);
   const phone = useMedia(PHONE_QUERY);
+  const l = useLesson(props, phone);
   return phone ? <PhoneLesson l={l} /> : <DesktopLesson l={l} />;
 }
 
 export type Lesson = ReturnType<typeof useLesson>;
 
-function useLesson({ doc, title, videoUrl, glbUrls, lessonId, onRemoveFromMyLessons, onReportOrRemove }: LessonViewerProps) {
+function useLesson(
+  { doc, title, videoUrl, glbUrls, lessonId, onRemoveFromMyLessons, onReportOrRemove }: LessonViewerProps,
+  phone: boolean,
+) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const endS = useMemo(() => timelineEndS(doc.sample_times_s), [doc]);
 
@@ -97,23 +91,16 @@ function useLesson({ doc, title, videoUrl, glbUrls, lessonId, onRemoveFromMyLess
         ? "weak"
         : "music";
 
-  // ---- the path
-  const units = useMemo(() => lessonUnits(structure), [structure]);
-  const eights = useMemo(() => units.filter((u) => u.kind === "eight"), [units]);
-  const [learned, setLearned] = useState<Set<string>>(new Set());
-  useEffect(() => setLearned(loadLearned(lessonId)), [lessonId]);
-  const [unitIndex, setUnitIndex] = useState(0);
-  const unit: Unit = units[Math.min(unitIndex, units.length - 1)];
-  const rounds = useMemo(() => schedule(unit.kind), [unit.kind]);
-  const [round, setRound] = useState(0);
-  const [mode, setMode] = useState<Mode>("lesson");
-  const [freeSpeed, setFreeSpeed] = useState(1);
-  const [freeLoop, setFreeLoop] = useState<"unit" | "all">("unit");
+  // ---- the loop: one eight, a range, or null for the whole dance
+  const eights = useMemo(() => eightsOf(structure), [structure]);
+  const [loop, setLoopState] = useState<LoopSpan | null>(null);
+  const [speedPick, setSpeed] = useState(1);
+  const [buildUp, setBuildUpState] = useState(false);
+  const [passes, setPasses] = useState(0);
   const [holdSlow, setHoldSlow] = useState(false);
-  const complete = mode === "lesson" && isComplete(rounds, round);
-  const current = roundAt(rounds, round);
-  const speed = holdSlow ? 0.5 : mode === "lesson" ? current.speed : freeSpeed;
-  const yourTurn = mode === "lesson" && !complete && !!current.yourTurn;
+  const speed = holdSlow ? 0.5 : buildUp && loop ? buildUpSpeed(passes) : speedPick;
+  const [done, setDone] = useState<Set<string>>(new Set());
+  useEffect(() => setDone(loadDone(lessonId)), [lessonId]);
 
   // ---- dancer
   const multi = doc.persons.length > 1;
@@ -143,10 +130,10 @@ function useLesson({ doc, title, videoUrl, glbUrls, lessonId, onRemoveFromMyLess
     [doc, lessonId],
   );
 
-  // ---- views
-  const [view, setView] = useState<MainView>("overlay"); // mesh on video is the default for Watch
+  // ---- views: the mesh on the video, plus one 3D angle beside it on a desktop
+  const [view, setView] = useState<MainView>("overlay");
   const [angle, setAngle] = useState<ViewId>("front");
-  const [extras, setExtras] = useState<ViewId[]>([]);
+  const [extras, setExtras] = useState<ViewId[]>(phone ? [] : ["front"]);
   const [mirrored, setMirrored] = useState(false);
   const [follow, setFollow] = useState(true);
   const [showCrops, setShowCrops] = useState(true);
@@ -158,15 +145,30 @@ function useLesson({ doc, title, videoUrl, glbUrls, lessonId, onRemoveFromMyLess
   }, []);
 
   // ---- the clock and its loop
-  const loopFor = (u: Unit, s: LessonStructure): [number, number] => {
-    const [a, b] = loopTimesS(s.grid, u);
+  const loopTimes = (s: LoopSpan | null): [number, number] | null => {
+    if (!s) return null;
+    const [a, b] = loopTimesS(structure.grid, s);
     return [Math.max(0, a), Math.min(b, endS)];
   };
   const loopRef = useRef<[number, number] | null>(null);
-  loopRef.current = mode === "free" && freeLoop === "all" ? null : loopFor(unit, structure);
+  loopRef.current = loopTimes(loop);
   const onWrapRef = useRef<(() => void) | null>(null);
   const { timeRef, displayTime } = useVideoClock(video, loopRef, onWrapRef);
   const [playing, setPlaying] = useState(false);
+
+  // One pass of the loop: build-up steps up, and an eight played through at full
+  // speed gets its tick.
+  const speedRef = useRef(speed);
+  speedRef.current = speed;
+  onWrapRef.current = () => {
+    setPasses((p) => p + 1);
+    const e = eightOf(eights, loop);
+    if (e && speedRef.current === 1 && !done.has(e.id)) {
+      const next = new Set(done).add(e.id);
+      setDone(next);
+      saveDone(lessonId, next);
+    }
+  };
 
   // A layout switch (rotating the phone) mounts a new <video>; carry the time over.
   const resumeAt = useRef<number | null>(null);
@@ -182,12 +184,12 @@ function useLesson({ doc, title, videoUrl, glbUrls, lessonId, onRemoveFromMyLess
     };
   }, [video, timeRef]);
 
-  // Paused and outside the window being learned (a new unit, count 1 moved): go to its start.
+  // Count 1 moved while paused: stay on the same eight, now one count over.
   useEffect(() => {
     const lp = loopRef.current;
     if (!video || !video.paused || !lp || video.readyState < 1) return;
     if (video.currentTime < lp[0] - 0.05 || video.currentTime >= lp[1]) video.currentTime = lp[0];
-  }, [video, unitIndex, structure]);
+  }, [video, structure]);
 
   useEffect(() => {
     if (video) video.playbackRate = speed;
@@ -195,11 +197,12 @@ function useLesson({ doc, title, videoUrl, glbUrls, lessonId, onRemoveFromMyLess
 
   const play = useCallback(() => {
     if (!video) return;
-    const loop = loopRef.current;
-    // Play starts inside the window being learned, not wherever the playhead drifted.
-    if (loop && (video.currentTime < loop[0] - 0.05 || video.currentTime >= loop[1])) video.currentTime = loop[0];
+    const lp = loopRef.current;
+    // Play starts inside the loop, not wherever the playhead drifted.
+    if (lp && (video.currentTime < lp[0] - 0.05 || video.currentTime >= lp[1])) video.currentTime = lp[0];
+    if (!lp && video.currentTime >= endS - 0.05) video.currentTime = 0;
     void video.play().catch(() => {});
-  }, [video]);
+  }, [video, endS]);
   const pause = useCallback(() => video?.pause(), [video]);
   const togglePlay = useCallback(() => (video?.paused ? play() : pause()), [video, play, pause]);
   const seek = useCallback(
@@ -209,137 +212,71 @@ function useLesson({ doc, title, videoUrl, glbUrls, lessonId, onRemoveFromMyLess
     [video, endS],
   );
 
-  /** Open a unit: its loop window, the first round of its ladder, paused unless asked. */
-  const goUnit = useCallback(
-    (i: number, opts: { play?: boolean; step?: Step } = {}) => {
-      const k = Math.max(0, Math.min(units.length - 1, i));
-      const u = units[k];
-      setUnitIndex(k);
-      setRound(opts.step ? stepStart(schedule(u.kind), opts.step) : 0);
-      // Sync the loop before seeking: the seek's own clock tick must not wrap back
-      // into the unit being left.
-      loopRef.current = mode === "free" && freeLoop === "all" ? null : loopFor(u, structure);
-      if (video) {
-        video.currentTime = loopFor(u, structure)[0];
-        if (opts.play ?? !video.paused) void video.play().catch(() => {});
-      }
+  /** Change the loop: build-up starts over, and the playhead jumps into the new loop. */
+  const setLoop = useCallback(
+    (next: LoopSpan | null, opts: { play?: boolean } = {}) => {
+      setLoopState(next);
+      setPasses(0);
+      // Sync before seeking: the seek's own clock tick must not wrap back into the old loop.
+      loopRef.current = loopTimes(next);
+      if (video && next) video.currentTime = loopRef.current![0];
+      if (video && opts.play) void video.play().catch(() => {});
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- loopFor is pure over its args
-    [units, video, mode, freeLoop, structure],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loopTimes is pure over structure/endS
+    [video, structure, endS],
   );
-  /** Step between 8-counts only; joins are reached from the path. */
+  const setBuildUp = useCallback((on: boolean) => {
+    setBuildUpState(on);
+    setPasses(0);
+  }, []);
+
+  /** The eight under the playhead (for the chip it sits in, and swipes from the whole dance). */
+  const hereCount = currentCount(structure.grid, displayTime);
+  const here: Eight | null = eights.find((e) => hereCount >= e.startCount && hereCount <= e.endCount) ?? null;
+  const loopEight = eightOf(eights, loop);
   const stepEight = useCallback(
-    (delta: number, opts: { play?: boolean; step?: Step } = {}) => {
-      const here = units[unitIndex];
-      const pos = eights.findIndex((e) => e.id === here.id);
-      const from = pos >= 0 ? pos : eights.findIndex((e) => e.endCount >= here.endCount);
-      const target = eights[Math.max(0, Math.min(eights.length - 1, from + delta))];
-      goUnit(units.indexOf(target), opts);
+    (delta: number, opts: { play?: boolean } = {}) => {
+      const from = eightOf(eights, loop) ?? here ?? eights[0];
+      const target = eights[Math.max(0, Math.min(eights.length - 1, from.n - 1 + delta))];
+      setLoop({ startCount: target.startCount, endCount: target.endCount }, opts);
     },
-    [units, eights, unitIndex, goUnit],
+    [eights, loop, here, setLoop],
   );
+  const next = passes >= 1 ? nextEight(eights, loop) : null;
 
-  const setStep = useCallback(
-    (step: Step) => {
-      setMode("lesson");
-      setRound(stepStart(rounds, step));
-      if (video && loopRef.current) video.currentTime = loopRef.current[0];
-      play();
-    },
-    [rounds, video, play],
-  );
-
-  const [checkIn, setCheckIn] = useState(false);
-  const roundRef = useRef(round);
-  roundRef.current = round;
-  onWrapRef.current = () => {
-    if (mode !== "lesson") return;
-    const r = roundRef.current;
-    const n = nextRound(rounds, r);
-    roundRef.current = n;
-    if (n !== r) setRound(n);
-    if (isComplete(rounds, n) && !isComplete(rounds, r)) {
-      // Done with the ladder: stop on count 1 and ask, rather than loop on forever.
-      video?.pause();
-      setCheckIn(true);
-    }
-  };
-  useEffect(() => setCheckIn(false), [unitIndex, mode]);
-
-  const gotIt = useCallback(() => {
-    const next = new Set(learned).add(unit.id);
-    setLearned(next);
-    saveLearned(lessonId, next);
-    setCheckIn(false);
-    const after = units.findIndex((u, i) => i > unitIndex && !next.has(u.id));
-    if (after >= 0) goUnit(after, { play: false });
-  }, [learned, unit, lessonId, units, unitIndex, goUnit]);
-  const again = useCallback(() => {
-    setCheckIn(false);
-    setRound(stepStart(rounds, "slow"));
-    play();
-  }, [rounds, play]);
-
-  // ---- free practice follows the playhead when it is not looping
-  useEffect(() => {
-    if (mode !== "free" || freeLoop !== "all") return;
-    const c = currentCount(structure.grid, displayTime);
-    const i = units.findIndex((u) => u.kind === "eight" && c >= u.startCount && c <= u.endCount);
-    if (i >= 0 && i !== unitIndex) setUnitIndex(i);
-  }, [mode, freeLoop, displayTime, structure, units, unitIndex]);
-
-  // ---- first open: the first unit not yet learned, or the hand-off's loop and speed
+  // ---- first open: loop the first eight not yet done at full speed, or the hand-off's
   const opened = useRef(false);
   useEffect(() => {
-    if (!restored || opened.current) return;
+    if (!restored || opened.current || !video) return;
     opened.current = true;
     // The processing screen's hand-off (lib/flow.ts handoffHref): the learner was
-    // already practising a speed and an 8-count, so open "Just practise" on them.
+    // already practising a speed and an 8-count, so the lesson opens on the same ones.
     const q = parseHandoff(window.location.search, SPEEDS, structure.grid.countTotal);
-    if (q.speed !== null || q.loop) {
-      setMode("free");
-      if (q.speed !== null) setFreeSpeed(q.speed);
-      if (q.loop) {
-        const i = units.findIndex((u) => u.kind === "eight" && u.startCount <= q.loop!.startCount && q.loop!.startCount <= u.endCount);
-        setUnitIndex(Math.max(0, i));
-      }
-      return;
-    }
-    const saved = loadLearned(lessonId);
-    const first = units.findIndex((u) => !saved.has(u.id));
-    setUnitIndex(first >= 0 ? first : 0);
-  }, [restored, structure, units, lessonId]);
+    if (q.speed !== null) setSpeed(q.speed);
+    const saved = loadDone(lessonId);
+    const first = eights.find((e) => !saved.has(e.id)) ?? eights[0];
+    setLoop(q.loop ?? { startCount: first.startCount, endCount: first.endCount });
+  }, [restored, video, structure, eights, lessonId, setLoop]);
 
-  // ---- count 1: the correction that has to be one tap
-  const tapOne = useCallback(() => {
-    editStructure(tapOnOne(structure, timeRef.current, endS));
-  }, [structure, timeRef, endS, editStructure]);
-  const nudgeOne = useCallback(
-    (d: number) => {
-      const next = nudgeCountOne(structure, d, endS);
-      editStructure(next);
-    },
-    [structure, endS, editStructure],
-  );
+  // ---- count 1: one tap, a nudge, or one of the tracker's other candidates
+  const tapOne = useCallback(() => editStructure(tapOnOne(structure, timeRef.current, endS)), [structure, timeRef, endS, editStructure]);
+  const nudgeOne = useCallback((d: number) => editStructure(nudgeCountOne(structure, d, endS)), [structure, endS, editStructure]);
+  const tryOne = useCallback((s: number) => editStructure(setCountOne(structure, s, endS)), [structure, endS, editStructure]);
+  const alternates = doc.proposed_counts?.count_one_alternates ?? [];
 
-  const cycleFreeSpeed = useCallback(() => {
-    setMode("free");
-    setFreeSpeed((s) => SPEEDS[(SPEEDS.indexOf(s as 1) + 1) % SPEEDS.length] ?? 1);
-  }, []);
-  const toFree = useCallback(() => {
-    setFreeSpeed(roundAt(rounds, round).speed);
-    setMode("free");
-  }, [rounds, round]);
+  const cycleSpeed = useCallback(() => {
+    setBuildUp(false);
+    setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s as 1) + 1) % SPEEDS.length] ?? 1);
+  }, [setBuildUp]);
 
   const crop = useVideoCrop(video, doc, focusRef, timeRef, selected, follow && view === "video", mirrored);
 
   return {
     doc, title, videoUrl, glbUrls, lessonId, endS,
     video, setVideo, timeRef, displayTime, playing, setPlaying, play, pause, togglePlay, seek,
-    structure, editStructure, authored, countsFrom, tapOne, nudgeOne,
-    units, eights, unit, unitIndex, goUnit, stepEight, learned,
-    mode, setMode, toFree, rounds, round, current, complete, yourTurn, setStep, checkIn, gotIt, again,
-    speed, freeSpeed, setFreeSpeed, cycleFreeSpeed, freeLoop, setFreeLoop, setHoldSlow,
+    structure, editStructure, authored, countsFrom, tapOne, nudgeOne, tryOne, alternates,
+    eights, loop, setLoop, loopEight, here, stepEight, next, done, sameSpan,
+    speed, speedPick, setSpeed, cycleSpeed, buildUp, setBuildUp, passes, setHoldSlow,
     multi, selected, chooseDancer, pickerOpen, setPickerOpen,
     view, setView, angle, setAngle, extras, setExtras, mirrored, setMirrored, follow, setFollow,
     showCrops, setShowCrops, absent, setAbsent, focusRef, crop,

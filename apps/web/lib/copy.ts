@@ -337,44 +337,34 @@ export const lesson = {
     showIn3d: (region: string) => `Show the ${region.toLowerCase()} in 3D`,
   },
 
-  /** The lesson path (docs/DESIGN.md §7g: true facts only, no points or streaks). */
-  path: {
-    label: "Lesson path",
-    learned: (n: number, total: number) => `${n} of ${total} learned`,
-    learnedTag: "learned",
-    steps: { watch: "Watch", slow: "Slow", build: "Build up", full: "Full speed" },
-    stepSub: { watch: "1×, once", slow: "0.5×, 3 loops", build: "0.5× to 1×", full: "1×" },
-    yourTurn: "Your turn",
-    yourTurnHint: "Keep counting and do it yourself.",
-    gotIt: "Got it",
-    again: "Again",
-    next: (label: string) => `Next: ${label}`,
-    learnedDone: (label: string) => `${label} learned`,
-    allDone: "All learned. Run the whole dance.",
-    check: (label: string) => `How was ${label}?`,
-    stepGroup: "Steps for this 8-count",
+  /**
+   * The 8-count chips: the one row that drives practice. The tick is a true fact
+   * (this eight was looped at full speed in this browser), DESIGN.md §7g — no
+   * points, no streaks.
+   */
+  chips: {
+    group: "8-counts",
+    scrub: "Position in the dance",
+    all: "All",
+    done: "looped at full speed",
+    doneCount: (n: number, total: number) => `${n} of ${total} at full speed`,
+    next: (span: string) => `Next: ${span}`,
   },
-
-  modes: { group: "How to practise", lesson: "Lesson", practise: "Just practise" },
 
   transport: {
     play: "Play",
     pause: "Pause",
-    playUnit: (label: string) => `Play ${label}`,
-    prev: "Previous",
-    next: "Next",
-    speed: "speed",
+    prev: "Previous 8-count",
+    next: "Next 8-count",
     speedLabel: "Speed",
-    building: "building up",
-    loopThis: "Loop this",
-    wholeDance: "Whole dance",
-    loopOn: "Loop on",
-    loopOff: "Loop off",
+    build: "Build up",
+    buildHint: "Starts the loop at 0.5× and adds 0.1× each time round, up to 1×",
+    more: "More",
     mirrorOn: "Mirror on",
     mirrorOff: "Mirror off",
     followOn: "Follow on",
     followOff: "Follow off",
-    back: "All lessons",
+    back: "Home",
   },
 
   views: {
@@ -383,28 +373,31 @@ export const lesson = {
     overlay: "On video",
     threeD: "3D",
     angle: "Angle",
+    est: "est.",
     addAngle: "Add an angle",
     removeAngle: "Remove this angle",
-    inset: "Second angle",
-    insetOff: "No second angle",
+    inset: "Small second angle",
+    insetOff: "None",
     closeups: "Close-ups",
     dancer: "Dancer",
   },
 
   /**
-   * Count 1 correction. The beat tracker finds beats, not downbeats, so count 1 is
-   * often off by whole counts; fixing it has to be one tap, not a settings page.
+   * Count 1 correction. The beat tracker finds beats, not where the dancer's eight
+   * starts, so count 1 is often off by whole counts; fixing it is one tap.
    */
   countOne: {
     tap: "Tap on 1",
-    tapHint: "Tap while it plays, on a 1 you hear",
+    tapHint: "While it plays, press Tap on 1 as you hear a 1.",
     earlier: "−1",
     later: "+1",
     earlierLabel: "Count 1 one count earlier",
     laterLabel: "Count 1 one count later",
-    guess: "Count 1 is a guess",
-    fixed: (n: number) => `Count 1 moved ${n > 0 ? "later" : "earlier"}`,
+    guess: "is a guess",
     heading: "Count 1",
+    tryAnother: "Try another 1:",
+    altLabel: (shift: number) => `Count 1 ${Math.abs(shift)} ${Math.abs(shift) === 1 ? "count" : "counts"} ${shift > 0 ? "later" : "earlier"}`,
+    now: (n: number) => (n ? `Count ${n}` : "Before count 1"),
   },
 
   dancers: {
@@ -412,23 +405,21 @@ export const lesson = {
     lead: "Each body takes its dancer's colour. The counts stay the same when you switch.",
     name: (n: number) => `Dancer ${n}`,
     side: { left: "on the left", middle: "in the middle", right: "on the right" },
-    start: "Start learning",
+    start: "Start",
     change: "Change dancer",
-    marker: (n: number) => `Dancer ${n}`,
   },
 
   help: {
     button: "About this view",
+    legend: "Solid is seen. Grey and hatched is unsure. A short stub means that part is out of frame.",
     noFloor: "No floor: feet not visible in this clip.",
     clipped: "The dancer is at the edge of the shot, so the crop stops there.",
     estimated: "Angles other than the camera's are estimated from the tracked body.",
-    keys: "Keys: space play, arrows a count, shift and arrows an 8-count, M mirror, S speed, T tap on 1.",
-    counts: "Counts and parts",
+    keys: "Keys: space play, arrows a count, shift and arrows an 8-count, L loop, S speed, B build up, M mirror, T tap on 1.",
   },
 
   phone: {
     prop: "Prop it up",
-    propSub: "hands-free",
     exitProp: "Leave prop it up",
     countInOn: "Count-in on",
     countInOff: "Count-in off",
@@ -437,22 +428,21 @@ export const lesson = {
     hint: "Tap to play. Swipe up for the next 8. Hold for half speed.",
     hold: "Half speed while you hold",
     paused: "Paused",
-    more: "More",
-    less: "Less",
+    less: "Close",
     zoneBack: "Back an 8-count",
     zoneNext: "Next 8-count",
   },
 
   menu: {
-    button: "More for this lesson",
+    heading: "This lesson",
     removeMine: "Remove from my lessons",
     report: "Report or remove this video",
   },
 
   install: {
-    lead: "Practising on this phone? Keep the lesson on your home screen.",
+    lead: "Practising on this phone? Add this lesson to your Home Screen.",
     ios: "Tap Share, then Add to Home Screen.",
-    android: "Add to home screen",
+    android: "Add to Home Screen",
     dismiss: "Not now",
   },
 };
