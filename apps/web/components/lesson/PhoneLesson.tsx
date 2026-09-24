@@ -2,50 +2,40 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import type { Lesson, MainView } from "../LessonViewer";
+import type { Lesson } from "../LessonViewer";
 import { lesson as copy } from "../../lib/copy";
-import type { ViewId } from "../../lib/motion";
 import { spanLabel } from "../../lib/lessonEngine";
 import {
   accentOf,
-  AnglePane,
-  CloseUps,
+  BottomBar,
   CountBar,
   DancerPicker,
-  doneLine,
-  EightChips,
   Icon,
-  MainStage,
   MoreContent,
-  Transport,
+  Panels,
   useDancerShots,
+  ViewBar,
   WhoChip,
-  type IconName,
 } from "./pieces";
 import { useMedia, useWakeLock } from "./hooks";
 
-const NEXT_VIEW: Record<MainView, MainView> = { overlay: "video", video: "3d", "3d": "overlay" };
-const VIEW_ICON: Record<MainView, IconName> = { video: "video", "3d": "cube", overlay: "stack" };
-const VIEW_NAME: Record<MainView, string> = { video: copy.views.video, "3d": copy.views.threeD, overlay: copy.views.overlay };
 /** Build up reaches 1× on its sixth pass; one more pass at 1× and prop mode moves on. */
 const PASSES_TO_FULL_AND_ONCE_MORE = 6;
 
 /**
- * The phone lesson (docs/DESIGN.md §6, mockups/phone): the page never scrolls. The clip
- * is full-bleed and the stage takes TikTok's gestures — tap to play, swipe up or down
- * for the next or previous counts (by the loop length), hold for half speed. The
- * bottom sheet holds the chips, the loop length and the transport; More opens it the rest of the way. On its side it
- * is video and 3D side by side. "Prop it up" drops all chrome for a phone leaning on
- * the wall across the room.
+ * The phone lesson: the page never scrolls. The same three rows as the desktop — the
+ * view bar (scrolls sideways), the panels (a main one and at most one inset; side by
+ * side when the phone is on its side), the transport and the timeline — and the
+ * panels take TikTok's gestures: tap to play, swipe up or down for the next or
+ * previous counts, hold for half speed. A drag on the timeline is the timeline's.
+ * "Prop it up" drops all chrome for a phone leaning on the wall across the room.
  */
 export default function PhoneLesson({ l }: { l: Lesson }) {
   const land = useMedia("(orientation: landscape)");
   const shots = useDancerShots(l);
-  const [open, setOpen] = useState(false);
   const [prop, setProp] = useState(false);
   const [voice, setVoice] = useState(true);
   const [auto, setAuto] = useState(true);
-  const [inset, setInset] = useState<ViewId | null>(null);
   const [countIn, setCountIn] = useState<number | null>(null);
   const [hint, setHint] = useState(true);
   const { flash, show } = useFlash();
@@ -97,7 +87,7 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
   // ---- prop it up: build up runs on its own and moves on to the next counts.
   const enterProp = () => {
     setProp(true);
-    setOpen(false);
+    document.getElementById("ls-more-ph")?.hidePopover?.();
     document.documentElement.requestFullscreen?.().catch(() => {}); // Android; iOS only from the Home Screen
     if (!l.loop) l.stepLoop(0);
     l.setBuildUp(true);
@@ -164,150 +154,86 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
     g.current = null;
   };
 
-  const loopLabel = l.loop ? (l.loopEight?.label ?? spanLabel(l.loop)) : copy.chips.all;
+  // No loop: nothing to label; the counts alone say where the dance is.
+  const loopLabel = l.loop ? (l.loopEight?.label ?? spanLabel(l.loop)) : "";
 
   return (
-    <main
-      className={`ls ls-phone${land ? " ls-land" : ""}${prop ? " ls-prop" : ""}${open ? " ls-open" : ""}`}
-      style={{ ["--accent" as string]: accentOf(l) }}
-    >
-      <div className="ls-ph-stages" onPointerDown={onDown} onPointerUp={onUp} onPointerCancel={onCancel}>
-        <MainStage l={l} className="ls-ph-stage" view={land && l.view === "3d" ? "overlay" : l.view}>
-          <header className="ls-ph-head">
-            <Link href="/" className="ls-icon-btn" aria-label={copy.transport.back}>
-              <Icon name="left" />
-            </Link>
-            <h1 className="ls-title">{l.title}</h1>
-            <span className="ls-meter">{doneLine(l)}</span>
-          </header>
-          <CloseUps l={l} className="ls-ph-closeups" />
-          <nav className="ls-rail" aria-label={copy.views.group}>
-            <RailButton icon={VIEW_ICON[l.view]} label={VIEW_NAME[l.view]} onClick={() => l.setView(NEXT_VIEW[l.view])} />
-            <RailButton
-              icon="mirror"
-              label={l.mirrored ? copy.transport.mirrorOn : copy.transport.mirrorOff}
-              on={l.mirrored}
-              onClick={() => l.setMirrored((v) => !v)}
-            />
-            <RailButton icon="hand" label={copy.views.closeups} on={l.showCrops} onClick={() => l.setShowCrops((v) => !v)} />
-            {l.multi && (
-              <div className="ls-rail-item">
-                <WhoChip l={l} shots={shots} withName={false} />
-                <span>{copy.dancers.name(l.selected + 1)}</span>
-              </div>
-            )}
-          </nav>
-          <div className="ls-ph-counts">
-            <span className="ls-ph-unit">{loopLabel}</span>
-            <CountBar l={l} big={prop} />
-          </div>
-          {inset && !land && (
-            <div className="ls-inset">
-              <AnglePane l={l} angle={inset} compact onRemove={() => setInset(null)} />
+    <main className={`ls ls-phone${land ? " ls-land" : ""}${prop ? " ls-prop" : ""}`} style={{ ["--accent" as string]: accentOf(l) }}>
+      <h1 className="sr-only">{l.title}</h1>
+      <ViewBar
+        l={l}
+        start={
+          <Link href="/" className="ls-icon-btn" aria-label={copy.transport.back}>
+            <Icon name="left" />
+          </Link>
+        }
+        end={l.multi ? <WhoChip l={l} shots={shots} withName={false} /> : undefined}
+      />
+      <Panels l={l} onPointerDown={onDown} onPointerUp={onUp} onPointerCancel={onCancel}>
+        <div className="ls-ph-counts">
+          {loopLabel && <span className="ls-ph-unit">{loopLabel}</span>}
+          <CountBar l={l} big={prop} />
+        </div>
+        {hint && !prop && <p className="ls-ph-hint">{copy.phone.hint}</p>}
+        <div className={`ls-flash${flash ? " ls-show" : ""}`} aria-live="polite">
+          {flash}
+        </div>
+        {countIn !== null && <div className="ls-countin">{countIn}</div>}
+        {prop && (
+          <>
+            <div className="ls-prop-top">
+              <button type="button" className="ls-icon-btn ls-prop-exit" onClick={exitProp} aria-label={copy.phone.exitProp}>
+                <Icon name="x" size={28} />
+              </button>
+              <span className="ls-prop-speed">
+                {l.speed}×<small>{loopLabel}</small>
+              </span>
             </div>
-          )}
-          {hint && !prop && <p className="ls-ph-hint">{copy.phone.hint}</p>}
-          {l.next && !prop && (
-            <button type="button" className="ls-next ls-ph-next" onClick={() => l.setLoop(l.next, { play: l.playing })}>
-              {copy.chips.next(spanLabel(l.next))}
-              <Icon name="right" size={16} />
-            </button>
-          )}
-          <div className={`ls-flash${flash ? " ls-show" : ""}`} aria-live="polite">
-            {flash}
-          </div>
-          {countIn !== null && <div className="ls-countin">{countIn}</div>}
-          {prop && (
-            <>
-              <div className="ls-prop-top">
-                <button type="button" className="ls-icon-btn ls-prop-exit" onClick={exitProp} aria-label={copy.phone.exitProp}>
-                  <Icon name="x" size={28} />
-                </button>
-                <span className="ls-prop-speed">
-                  {l.speed}×<small>{loopLabel}</small>
-                </span>
-              </div>
-              <div className="ls-prop-opts">
-                <button type="button" aria-pressed={voice} onClick={() => setVoice((v) => !v)}>
-                  {voice ? copy.phone.countInOn : copy.phone.countInOff}
-                </button>
-                <button type="button" aria-pressed={auto} onClick={() => setAuto((v) => !v)}>
-                  {auto ? copy.phone.autoOn : copy.phone.autoOff}
-                </button>
-              </div>
-              <div className="ls-zones">
-                <button type="button" aria-label={copy.phone.zoneBack} onClick={() => propNext(-1)} />
-                <button
-                  type="button"
-                  aria-label={l.playing ? copy.transport.pause : copy.transport.play}
-                  onClick={() => (l.playing || countIn !== null ? (cancelCountIn(), l.pause()) : countInThen(l.play))}
-                />
-                <button type="button" aria-label={copy.phone.zoneNext} onClick={() => propNext(1)} />
-              </div>
-            </>
-          )}
-        </MainStage>
-        {land && <AnglePane l={l} angle={l.view === "3d" ? l.angle : "front"} onAngle={l.setAngle} focus />}
-      </div>
-
-      <section className="ls-sheet" aria-label={copy.chips.group}>
-        <EightChips l={l} />
-        <Transport
-          l={l}
-          className="ls-ph-transport"
-          more={
-            <button type="button" className="ls-more-btn" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-              <Icon name={open ? "x" : "dots"} size={22} />
-              <span>{open ? copy.phone.less : copy.transport.more}</span>
-            </button>
-          }
-        />
-        {(open || land) && (
-          <MoreContent
-            l={l}
-            extra={
-              <div className="ls-group">
-                <div className="ls-group-row">
-                  <button type="button" className="ls-chip ls-strong ls-accent" onClick={enterProp}>
-                    {copy.phone.prop}
-                  </button>
-                </div>
-                {!land && (
-                  <>
-                    <span className="ls-group-label">{copy.views.inset}</span>
-                    <div className="ls-group-row">
-                      <button type="button" className="ls-chip" aria-pressed={!inset} onClick={() => setInset(null)}>
-                        {copy.views.insetOff}
-                      </button>
-                      {(["front", "side", "back", "top"] as ViewId[]).map((a) => (
-                        <button key={a} type="button" className="ls-chip" aria-pressed={inset === a} onClick={() => setInset(a)}>
-                          {a[0].toUpperCase() + a.slice(1)}
-                          <small>{copy.views.est}</small>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            }
-          />
+            <div className="ls-prop-opts">
+              <button type="button" aria-pressed={voice} onClick={() => setVoice((v) => !v)}>
+                {voice ? copy.phone.countInOn : copy.phone.countInOff}
+              </button>
+              <button type="button" aria-pressed={auto} onClick={() => setAuto((v) => !v)}>
+                {auto ? copy.phone.autoOn : copy.phone.autoOff}
+              </button>
+            </div>
+            <div className="ls-zones">
+              <button type="button" aria-label={copy.phone.zoneBack} onClick={() => propNext(-1)} />
+              <button
+                type="button"
+                aria-label={l.playing ? copy.transport.pause : copy.transport.play}
+                onClick={() => (l.playing || countIn !== null ? (cancelCountIn(), l.pause()) : countInThen(l.play))}
+              />
+              <button type="button" aria-label={copy.phone.zoneNext} onClick={() => propNext(1)} />
+            </div>
+          </>
         )}
-      </section>
-
+      </Panels>
+      <BottomBar
+        l={l}
+        more={
+          <>
+            <button type="button" className="ls-pill ls-more-btn" popoverTarget="ls-more-ph" aria-label={copy.transport.more}>
+              <Icon name="dots" size={18} />
+            </button>
+            <div id="ls-more-ph" popover="auto" className="ls-panel">
+              <MoreContent
+                l={l}
+                extra={
+                  <div className="ls-group-row">
+                    <button type="button" className="ls-chip ls-strong ls-accent" onClick={enterProp}>
+                      {copy.phone.prop}
+                    </button>
+                  </div>
+                }
+              />
+            </div>
+          </>
+        }
+      />
       <InstallHint done={l.done.size} />
       <DancerPicker l={l} shots={shots} />
     </main>
-  );
-}
-
-function RailButton({ icon, label, on, onClick }: { icon: IconName; label: string; on?: boolean; onClick: () => void }) {
-  return (
-    <button type="button" className={`ls-rail-item${on ? " ls-on" : ""}`} onClick={onClick} aria-pressed={on}>
-      <span className="ls-rail-dot">
-        <Icon name={icon} size={24} />
-      </span>
-      <span>{label}</span>
-    </button>
   );
 }
 

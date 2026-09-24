@@ -5,6 +5,7 @@
  * state (LessonViewer.tsx); none keeps a clock of its own — anything that moves
  * per frame reads `timeRef` on its own rAF and writes the DOM directly.
  */
+import Link from "next/link";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Stage3D from "../Stage3D";
 import {
@@ -15,7 +16,6 @@ import {
   viewLabel,
   STEADY_CROP_SIGMA_REDUCED_S,
   STEADY_CROP_SIGMA_S,
-  VIEW_PRESETS,
   type CropRegion,
   type MotionResult,
   type ViewId,
@@ -32,7 +32,6 @@ import {
 import { footContact, type FootContact } from "../../lib/footContact";
 import { dancerBox, firstWellObserved, markerPoint, sideWord, stillCrop } from "../../lib/dancers";
 import {
-  chipLoop,
   countLoop,
   countName,
   edgeLoop,
@@ -42,21 +41,18 @@ import {
   loopName,
   nudgeEdge,
   presetCounts,
+  sameSpan,
   spanDone,
   spanLabel,
-  type Eight,
 } from "../../lib/lessonEngine";
 import { lesson as copy } from "../../lib/copy";
 import { prefersReducedMotion } from "../../lib/reveal";
 import { useCount, useFrameGrabs } from "./hooks";
-import type { Lesson, MainView } from "../LessonViewer";
+import type { Lesson, PanelId } from "../LessonViewer";
 import { StructureEditor } from "../../../../packages/navigation/src/LessonNavigator";
 import "../../../../packages/navigation/src/navigation.css";
 
 export const accentOf = (l: Lesson) => accentForPerson(l.doc, l.selected);
-
-/** 3D angles a pane can take. "overlay" is not an angle — it is the main stage's "On video". */
-export const ANGLES = VIEW_PRESETS.filter((p) => p.id !== "overlay");
 
 // ------------------------------------------------------------------ icons
 
@@ -91,25 +87,13 @@ export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
 /** Stage3D with props that only change when they mean something, so a 10 Hz re-render of the page is not a re-render of the canvas. */
 const Stage = memo(Stage3D);
 
-/** A 3D angle in a pane of its own (desktop extra angles, the phone inset). */
-export function AnglePane({
-  l,
-  angle,
-  onAngle,
-  onRemove,
-  compact,
-  focus,
-}: {
-  l: Lesson;
-  angle: ViewId;
-  onAngle?: (v: ViewId) => void;
-  onRemove?: () => void;
-  compact?: boolean;
-  /** This pane frames the video crop too (see useVideoCrop). */
-  focus?: boolean;
-}) {
+/**
+ * A 3D angle in a panel of its own, with its honesty tag in the corner: every angle but
+ * the camera's is an estimate (DESIGN.md §7h), so it says "SIDE · est.".
+ */
+export function AnglePane({ l, angle, focus }: { l: Lesson; angle: ViewId; focus?: boolean }) {
   return (
-    <div className={`ls-pane${compact ? " ls-compact" : ""}`}>
+    <div className="ls-pane">
       <Stage
         doc={l.doc}
         selectedIndex={l.selected}
@@ -120,59 +104,36 @@ export function AnglePane({
         focusRef={focus ? l.focusRef : undefined}
         glbUrls={l.glbUrls}
       />
-      <div className="ls-pane-bar">
-        {onAngle ? (
-          <label className="ls-select">
-            <span className="sr-only">{copy.views.angle}</span>
-            <select value={angle} onChange={(e) => onAngle(e.target.value as ViewId)}>
-              {ANGLES.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {viewLabel(a.id, l.mirrored)}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <span className="ls-tag">{viewLabel(angle, l.mirrored)}</span>
-        )}
-        {onRemove && (
-          <button type="button" className="ls-icon-btn" onClick={onRemove} aria-label={copy.views.removeAngle}>
-            <Icon name="x" size={16} />
-          </button>
-        )}
-      </div>
+      <span className="ls-tag ls-corner" title={viewLabel(angle, l.mirrored)}>
+        {angle}
+        {l.mirrored && ` · ${copy.views.mirrored}`} · {copy.views.est}
+      </span>
     </div>
   );
 }
 
 /**
- * The main stage: the one `<video>` (the clock), with the mesh laid over it from the
- * clip's own camera ("On video"), or a 3D angle over it ("3D"). In 3D the video stays
- * mounted and playing underneath — it is still the clock and the sound.
+ * The camera panel: the one `<video>` (the clock and the sound), with the mesh laid
+ * over it from the clip's own camera ("On video") or bare ("Video"). With neither
+ * picked it stays mounted off-screen, still playing: it is still the clock.
  */
 export function MainStage({
   l,
   children,
   className = "",
-  view = l.view,
+  view,
+  hidden = false,
 }: {
   l: Lesson;
   children?: React.ReactNode;
   className?: string;
-  /** The phone on its side shows the 3D in a pane of its own, so its main stage never is one. */
-  view?: Lesson["view"];
+  view: "overlay" | "video";
+  hidden?: boolean;
 }) {
   const { mirrored } = l;
-  const tag =
-    view === "3d"
-      ? viewLabel(l.angle, mirrored)
-      : view === "overlay"
-        ? viewLabel("overlay", mirrored)
-        : l.crop.cropped
-          ? "camera view, cropped"
-          : "camera view";
+  const tag = view === "overlay" ? copy.views.overlay : l.crop.cropped ? copy.views.videoCropped : copy.views.video;
   return (
-    <div className={`ls-stage ${className}`} data-view={view}>
+    <div className={`ls-stage ${hidden ? "ls-offstage" : ""} ${className}`} data-view={view} aria-hidden={hidden || undefined}>
       <video
         ref={l.setVideo}
         className="ls-video"
@@ -189,25 +150,9 @@ export function MainStage({
         </div>
       )}
       {view === "overlay" && l.multi && <DancerMarkers l={l} />}
-      {view === "3d" && (
-        <div className="ls-3d">
-          <Stage
-            doc={l.doc}
-            selectedIndex={l.selected}
-            view={l.angle}
-            mirrored={mirrored}
-            timeRef={l.timeRef}
-            follow={l.follow}
-            focusRef={l.focusRef}
-            glbUrls={l.glbUrls}
-            onAbsent={l.setAbsent}
-            onResetView={() => l.setAngle("camera")}
-          />
-        </div>
-      )}
-      <span className="ls-tag ls-stage-tag">
+      <span className="ls-tag ls-corner">
         {tag}
-        {view === "3d" && l.doc.grounding.status === "none" ? `, ${copy.help.noFloor.toLowerCase()}` : ""}
+        {mirrored && ` · ${copy.views.mirrored}`}
       </span>
       {/* Not in frame / unsure, for screen readers; sighted learners get it under "?". */}
       <p className="sr-only" aria-live="polite">
@@ -387,14 +332,14 @@ export function useFootContacts(l: Lesson, on: boolean) {
   );
 }
 
-export function CloseUps({ l, className = "", onRegion }: { l: Lesson; className?: string; onRegion?: (r: CropRegion) => void }) {
-  const contacts = useFootContacts(l, l.showCrops);
-  if (!l.showCrops) return null;
-  const regions = cropRegions(l.doc, l.selected, l.mirrored);
+/** The Hands or Feet panel: that region's close-ups (one per side when the lesson has them). */
+export function CropPanel({ l, kind }: { l: Lesson; kind: "hands" | "feet" }) {
+  const contacts = useFootContacts(l, kind === "feet");
+  const regions = cropRegions(l.doc, l.selected, l.mirrored).filter((r) => (kind === "hands" ? r.includes("hand") : !r.includes("hand")));
   return (
-    <div className={`ls-closeups ${regions.length > 2 ? "ls-sides" : ""} ${className}`}>
+    <div className="ls-pane ls-crops" data-n={regions.length}>
       {regions.map((r) => (
-        <CropPeek key={r} l={l} region={r} contacts={contacts} onClick={onRegion ? () => onRegion(r) : undefined} />
+        <CropPeek key={r} l={l} region={r} contacts={contacts} />
       ))}
     </div>
   );
@@ -515,9 +460,7 @@ export function Timeline({ l }: { l: Lesson }) {
   const ticks = useMemo(
     () =>
       Array.from({ length: total }, (_, i) => i + 1).map((c) => (
-        <span key={c} className={countLabel(c) === 1 ? "ls-tl-tick ls-one" : "ls-tl-tick"} style={{ left: pct(timeOfCount(grid, c)) }}>
-          {countLabel(c) === 1 && <b>1</b>}
-        </span>
+        <span key={c} className={countLabel(c) === 1 ? "ls-tl-tick ls-one" : "ls-tl-tick"} style={{ left: pct(timeOfCount(grid, c)) }} />
       )),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pct is over endS
     [grid, total, endS],
@@ -534,7 +477,11 @@ export function Timeline({ l }: { l: Lesson }) {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     e.stopPropagation();
     e.preventDefault();
-    bar.current!.setPointerCapture(e.pointerId);
+    try {
+      bar.current!.setPointerCapture(e.pointerId);
+    } catch {
+      /* a pointer that is already gone: the moves still reach the bar while over it */
+    }
     g.current = { kind, x0: e.clientX, from: countAtX(e.clientX), moved: kind !== "new" };
   };
   const onMove = (e: React.PointerEvent) => {
@@ -609,6 +556,25 @@ export function Timeline({ l }: { l: Lesson }) {
         onPointerCancel={() => ((g.current = null), setPreview(null))}
       >
         <div className="ls-tl-track">{ticks}</div>
+        {/* Where each part starts (an eight until the learner edits them): a "1", and a tap loops that section. */}
+        {l.eights.map((e) => {
+          const on = sameSpan(l.loop, e);
+          return (
+            <button
+              key={e.id}
+              type="button"
+              className={`ls-tl-sec${on ? " ls-on" : ""}${spanDone(l.done, e) ? " ls-done" : ""}`}
+              style={{ left: pct(timeOfCount(grid, e.startCount)) }}
+              aria-pressed={on}
+              aria-label={copy.timeline.section(e.label)}
+              title={copy.timeline.section(e.label)}
+              onPointerDown={(ev) => ev.stopPropagation()}
+              onClick={() => l.setLoop(on ? null : { startCount: e.startCount, endCount: e.endCount }, { play: l.playing })}
+            >
+              {countLabel(e.startCount)}
+            </button>
+          );
+        })}
         {shown && <div className={`ls-tl-loop${preview ? " ls-preview" : ""}`} style={{ left: pct(a), width: `calc(${pct(b)} - ${pct(a)})` }} />}
         <div className="ls-tl-head" style={{ left: pct(l.displayTime) }} />
         {shown && handle("start", a)}
@@ -637,132 +603,143 @@ export function Timeline({ l }: { l: Lesson }) {
   );
 }
 
+/** The top bar's toggles, in order: the camera (with or without the mesh), the 3D angles, then the close-ups. */
+const VIEW_BAR: { id: PanelId; label: string }[] = [
+  { id: "overlay", label: copy.views.overlay },
+  { id: "video", label: copy.views.video },
+  { id: "front", label: copy.views.front },
+  { id: "side", label: copy.views.side },
+  { id: "back", label: copy.views.back },
+  { id: "top", label: copy.views.top },
+];
+const CLOSE_BAR: { id: PanelId; label: string }[] = [
+  { id: "hands", label: copy.views.hands },
+  { id: "feet", label: copy.views.feet },
+];
+
 /**
- * Shortcuts, secondary to the timeline: a chip per part (an eight until the learner
- * edits them). Tap = loop the chosen length from its first count; tap again (or
- * "All") = the whole dance; shift-tap or drag across chips = loop those whole chips.
- * A quiet tick marks a chip whose counts have all been looped at full speed. Above
- * it, the timeline.
+ * The one top bar: every view a toggle, and every view that is on is a panel. Mirror
+ * is a modifier on all of them. Scrolls sideways on a phone.
  */
-export function EightChips({ l }: { l: Lesson }) {
-  const drag = useRef<{ anchor: number; moved: boolean } | null>(null);
-  const chipAt = (x: number, y: number) => {
-    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-eight]");
-    return el ? Number(el.dataset.eight) : -1;
-  };
-  // Lit when the loop touches it, so four counts inside an eight still show where they are.
-  const inLoop = (e: Eight) => !!l.loop && e.startCount <= l.loop.endCount && e.endCount >= l.loop.startCount;
-  const total = l.structure.grid.countTotal;
-  const len = presetCounts(l.loopLen, total);
+export function ViewBar({ l, start, end }: { l: Lesson; start?: React.ReactNode; end?: React.ReactNode }) {
+  const toggle = (v: { id: PanelId; label: string }) => (
+    <button key={v.id} type="button" className="ls-vbtn" aria-pressed={l.panels.includes(v.id)} onClick={() => l.toggleView(v.id)}>
+      {v.label}
+    </button>
+  );
   return (
-    <div className="ls-chips-wrap">
-      <Timeline l={l} />
-      <div
-        className="ls-chips"
-        role="group"
-        aria-label={copy.chips.group}
-        onPointerMove={(e) => {
-          const d = drag.current;
-          if (!d) return;
-          const k = chipAt(e.clientX, e.clientY);
-          if (k < 0 || (k === d.anchor && !d.moved)) return;
-          d.moved = true;
-          l.setLoop(chipLoop(l.loop, l.eights[k], len, total, l.eights[d.anchor]));
-        }}
-        onPointerUp={() => (drag.current = null)}
-        onPointerCancel={() => (drag.current = null)}
-      >
-        {l.eights.map((e, k) => {
-          const looped = inLoop(e);
-          const playing = l.here?.id === e.id;
-          const done = spanDone(l.done, e);
-          const span = spanLabel(e);
-          return (
-            <button
-              key={e.id}
-              type="button"
-              data-eight={k}
-              className={`ls-chip8${looped ? " ls-on" : ""}${playing ? " ls-here" : ""}`}
-              aria-pressed={looped}
-              aria-label={`${e.label === span ? span : `${e.label}, ${span}`}${done ? `, ${copy.chips.done}` : ""}`}
-              onPointerDown={(ev) => {
-                if (ev.pointerType === "mouse" && ev.button !== 0) return;
-                drag.current = { anchor: k, moved: false };
-              }}
-              onClick={(ev) => {
-                const d = drag.current;
-                drag.current = null;
-                if (d?.moved) return;
-                const from = l.loop?.startCount ?? 0;
-                const anchor = ev.shiftKey ? (l.eights.find((x) => x.startCount <= from && x.endCount >= from) ?? null) : null;
-                l.setLoop(chipLoop(l.loop, e, len, total, anchor), { play: l.playing });
-              }}
-            >
-              <span>{e.n}</span>
-              {done && <Icon name="check" size={12} />}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          className={`ls-chip8 ls-all${!l.loop ? " ls-on" : ""}`}
-          aria-pressed={!l.loop}
-          onClick={() => l.setLoop(null)}
-        >
-          {copy.chips.all}
+    <header className="ls-bar">
+      {start}
+      <nav className="ls-vbar" aria-label={copy.views.group}>
+        {VIEW_BAR.map(toggle)}
+        <button type="button" className="ls-vbtn" aria-pressed={l.mirrored} onClick={() => l.setMirrored((v) => !v)}>
+          {copy.views.mirror}
         </button>
-      </div>
+        <span className="ls-vsep" aria-hidden="true" />
+        {CLOSE_BAR.map(toggle)}
+      </nav>
+      {end}
+    </header>
+  );
+}
+
+/**
+ * Every view that is on, tiled side by side (a phone in portrait: the second as an
+ * inset over the first). `children` sit over the tiles — the counts, the phone's
+ * overlays. With no camera panel on, the `<video>` stays mounted off-screen: it is
+ * the clock and the sound.
+ */
+export function Panels({ l, children, ...rest }: { l: Lesson; children?: React.ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
+  const cam = l.panels.find((p): p is "overlay" | "video" => p === "overlay" || p === "video");
+  const others = l.panels.filter((p) => p !== cam);
+  // The first 3D angle frames the video crop (useVideoCrop).
+  const firstAngle = others.find((p) => p !== "hands" && p !== "feet");
+  const stage = <MainStage l={l} view={cam ?? "overlay"} hidden={!cam} />;
+  const tiles: string[] = [...(cam ? ["cam"] : []), ...others];
+  return (
+    <div className="ls-panels" data-n={tiles.length} {...rest}>
+      {!cam && stage}
+      {tiles.map((t, i) => (
+        <div key={t} className={`ls-tile${i === 1 ? " ls-second" : ""}`}>
+          {t === "cam" ? (
+            stage
+          ) : t === "hands" || t === "feet" ? (
+            <CropPanel l={l} kind={t} />
+          ) : (
+            <AnglePane l={l} angle={t as ViewId} focus={t === firstAngle} />
+          )}
+        </div>
+      ))}
+      {children}
     </div>
   );
 }
 
-/** Play · speed · Build up · More. Everything else lives under More. */
-export function Transport({ l, more, className = "" }: { l: Lesson; more: React.ReactNode; className?: string }) {
+/** "0:03.4" — the transport's clock, to a tenth. */
+const clock = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
+
+/**
+ * The one thin bar under the panels: play, the time, the speed pill (tap for the
+ * next speed), Build up, the click (its settings in a small popover), More — and
+ * under it the full-width timeline.
+ */
+export function BottomBar({ l, more }: { l: Lesson; more: React.ReactNode }) {
   return (
-    <div className={`ls-transport ${className}`}>
-      <button type="button" className="ls-play" onClick={l.togglePlay} aria-label={l.playing ? copy.transport.pause : copy.transport.play}>
-        <Icon name={l.playing ? "pause" : "play"} size={26} />
-      </button>
-      <div className="ls-seg ls-speeds" role="group" aria-label={copy.transport.speedLabel}>
-        {TRANSPORT_SPEEDS.map((s) => (
-          <button key={s} type="button" aria-pressed={!l.buildUp && l.speedPick === s} onClick={() => (l.setBuildUp(false), l.setSpeed(s))}>
-            {s}×
-          </button>
-        ))}
-      </div>
-      <button
-        type="button"
-        className={`ls-build${l.buildUp ? " ls-on" : ""}`}
-        aria-pressed={l.buildUp}
-        onClick={() => l.setBuildUp(!l.buildUp)}
-        title={copy.transport.buildHint}
-      >
-        <Icon name="trend" size={18} />
-        <span>
-          {copy.transport.build}
-          {l.buildUp && <b> {l.speed}×</b>}
-        </span>
-      </button>
-      <button
-        type="button"
-        className={`ls-build${l.clickOn ? " ls-on" : ""}`}
-        aria-pressed={l.clickOn}
-        onClick={() => l.setClickOn(!l.clickOn)}
-        title={copy.click.toggleHint}
-      >
-        <span>{copy.click.toggle}</span>
-      </button>
-      {l.next && (
-        <button type="button" className="ls-next" onClick={() => l.setLoop(l.next, { play: l.playing })}>
-          {copy.chips.next(spanLabel(l.next))}
-          <Icon name="right" size={16} />
+    <div className="ls-bottom">
+      <div className="ls-transport">
+        <button type="button" className="ls-play" onClick={l.togglePlay} aria-label={l.playing ? copy.transport.pause : copy.transport.play}>
+          <Icon name={l.playing ? "pause" : "play"} size={22} />
         </button>
-      )}
-      {more}
+        <span className="ls-time">
+          {clock(Math.min(l.displayTime, l.endS))}
+          <span className="ls-time-total"> / {clock(l.endS)}</span>
+        </span>
+        <button
+          type="button"
+          className="ls-pill"
+          onClick={l.cycleSpeed}
+          aria-label={copy.transport.speedNext(l.speed)}
+          title={copy.transport.speedNext(l.speed)}
+        >
+          {l.speed}×
+        </button>
+        <button
+          type="button"
+          className={`ls-pill${l.buildUp ? " ls-on" : ""}`}
+          aria-pressed={l.buildUp}
+          onClick={() => l.setBuildUp(!l.buildUp)}
+          title={copy.transport.buildHint}
+        >
+          {copy.transport.build}
+        </button>
+        <span className="ls-pill-pair">
+          <button
+            type="button"
+            className={`ls-pill${l.clickOn ? " ls-on" : ""}`}
+            aria-pressed={l.clickOn}
+            onClick={() => l.setClickOn(!l.clickOn)}
+            title={copy.click.toggleHint}
+          >
+            {copy.click.toggle}
+          </button>
+          <button type="button" className="ls-pill ls-pill-more" popoverTarget="ls-click" aria-label={copy.click.settings}>
+            <Icon name="dots" size={16} />
+          </button>
+        </span>
+        <div id="ls-click" popover="auto" className="ls-panel ls-panel-sm">
+          <ClickTools l={l} />
+        </div>
+        {l.next && (
+          <button type="button" className="ls-pill ls-next" onClick={() => l.setLoop(l.next, { play: l.playing })}>
+            {copy.chips.next(spanLabel(l.next))}
+          </button>
+        )}
+        {more}
+      </div>
+      <Timeline l={l} />
     </div>
   );
 }
-const TRANSPORT_SPEEDS = [0.5, 0.75, 1] as const;
 
 /**
  * Count 1: one tap while it plays ("Tap on 1", snaps to the nearest beat), a whole
@@ -970,18 +947,11 @@ export function WhoChip({ l, shots, withName = true }: { l: Lesson; shots: Dance
 
 // ------------------------------------------------------------------ more
 
-const VIEWS: { id: MainView; label: string }[] = [
-  { id: "overlay", label: copy.views.overlay },
-  { id: "video", label: copy.views.video },
-  { id: "3d", label: copy.views.threeD },
-];
-const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
-
 /**
- * Everything that is not play, speed or the loop, in one place: "More" is a panel
- * on a desktop and the expanded bottom sheet on a phone. The legend, what is out of
- * frame and where the counts came from — the paragraphs the old page printed under
- * the stage — sit at the bottom of it, so the default view is the dance.
+ * Everything that is not the views, play, speed, the click or the timeline, in one
+ * place: "More" is a popover panel (a bottom sheet on a phone). The legend, what is
+ * out of frame and where the counts came from sit at the bottom of it, so the default
+ * view is the dance.
  */
 export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }) {
   const perMinute = Math.round(60 / l.structure.grid.secondsPerCount);
@@ -995,46 +965,16 @@ export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }
           : null;
   return (
     <div className="ls-more">
-      <div className="ls-group" role="group" aria-label={copy.views.group}>
-        <span className="ls-group-label">{copy.views.group}</span>
-        <div className="ls-group-row">
-          {VIEWS.map((v) => (
-            <button key={v.id} type="button" className="ls-chip" aria-pressed={l.view === v.id} onClick={() => l.setView(v.id)}>
-              {v.label}
-            </button>
-          ))}
-        </div>
-        {l.view === "3d" && (
-          <div className="ls-group-row">
-            {ANGLES.map((a) => (
-              <button key={a.id} type="button" className="ls-chip" aria-pressed={l.angle === a.id} onClick={() => l.setAngle(a.id)}>
-                {cap(a.label)}
-                {a.id !== "camera" && <small>{copy.views.est}</small>}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="ls-group-row">
-          <button type="button" className="ls-chip" aria-pressed={l.mirrored} onClick={() => l.setMirrored((v) => !v)}>
-            {l.mirrored ? copy.transport.mirrorOn : copy.transport.mirrorOff}
-          </button>
-          <button type="button" className="ls-chip" aria-pressed={l.showCrops} onClick={() => l.setShowCrops((v) => !v)}>
-            {l.showCrops ? copy.crop.toggleOn : copy.crop.toggleOff}
-          </button>
-          <button type="button" className="ls-chip" aria-pressed={l.follow} onClick={() => l.setFollow((v) => !v)}>
-            {l.follow ? copy.transport.followOn : copy.transport.followOff}
-          </button>
-          <button type="button" className="ls-chip" aria-pressed={l.speedPick === 0.25 && !l.buildUp} onClick={() => (l.setBuildUp(false), l.setSpeed(0.25))}>
-            0.25×
-          </button>
-        </div>
-      </div>
       {extra}
       <div className="ls-group">
         <span className="ls-group-label">{copy.loopLen.label}</span>
         <LoopLength l={l} />
       </div>
-      <ClickTools l={l} />
+      <div className="ls-group-row">
+        <button type="button" className="ls-chip" aria-pressed={l.follow} onClick={() => l.setFollow((v) => !v)}>
+          {l.follow ? copy.transport.followOn : copy.transport.followOff}
+        </button>
+      </div>
       <CountOneTools l={l} />
       {l.multi && (
         <div className="ls-group">
@@ -1055,6 +995,10 @@ export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }
           <button type="button" className="ls-chip" disabled={!l.onReportOrRemove} onClick={() => l.onReportOrRemove?.()}>
             {copy.menu.report}
           </button>
+          {/* The phone layout never scrolls to the site footer, so the policy is reachable here. */}
+          <Link href="/privacy" className="ls-chip">
+            {copy.menu.privacy}
+          </Link>
         </div>
       </div>
       <details className="ls-about">

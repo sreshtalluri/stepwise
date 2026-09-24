@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Focus } from "./Stage3D";
-import { defaultPersonIndex, SPEEDS, type MotionResult, type ViewId } from "../lib/motion";
+import { defaultPersonIndex, SPEEDS, type MotionResult } from "../lib/motion";
 import { load, openingStructure, save } from "../lib/structure";
 import { parseHandoff } from "../lib/flow";
 import {
@@ -64,7 +64,24 @@ export interface LessonViewerProps {
   onReportOrRemove?: () => void;
 }
 
-export type MainView = "video" | "overlay" | "3d";
+/**
+ * The views the top bar toggles, in tiling order. "overlay" (the mesh on the video)
+ * and "video" are the one camera panel, with or without the mesh, so they exclude
+ * each other; the rest are 3D angles and the close-ups.
+ */
+export const PANELS = ["overlay", "video", "front", "side", "back", "top", "hands", "feet"] as const;
+export type PanelId = (typeof PANELS)[number];
+const isCamera = (p: PanelId) => p === "overlay" || p === "video";
+/** A phone shows a main panel and one inset; a desktop tiles up to four. */
+const MAX_PANELS = { phone: 2, desk: 4 };
+
+/** Toggle a panel: camera views swap, the oldest pick drops when full, never zero panels. */
+export function togglePanel(panels: readonly PanelId[], id: PanelId, max: number): PanelId[] {
+  if (panels.includes(id)) return panels.length > 1 ? panels.filter((p) => p !== id) : [...panels];
+  const next = [...panels.filter((p) => !(isCamera(id) && isCamera(p))), id];
+  while (next.length > max) next.splice(next.findIndex((p) => p !== id), 1);
+  return PANELS.filter((p) => next.includes(p));
+}
 
 const DANCER_KEY = (id: string) => `stepwise.lesson-dancer.v1.${id}`;
 
@@ -156,13 +173,14 @@ function useLesson(
     [doc, lessonId],
   );
 
-  // ---- views: the mesh on the video, plus one 3D angle beside it on a desktop
-  const [view, setView] = useState<MainView>("overlay");
-  const [angle, setAngle] = useState<ViewId>("front");
-  const [extras, setExtras] = useState<ViewId[]>(phone ? [] : ["front"]);
+  // ---- views: the top bar's toggles, tiled. The mesh on the video, plus the front on a desktop.
+  const maxPanels = phone ? MAX_PANELS.phone : MAX_PANELS.desk;
+  const [panelPicks, setPanels] = useState<PanelId[]>(phone ? ["overlay"] : ["overlay", "front"]);
+  // Rotating a desktop-sized pick onto a phone keeps the picks, just draws the first two.
+  const panels = panelPicks.slice(0, maxPanels);
+  const toggleView = useCallback((id: PanelId) => setPanels((p) => togglePanel(p.slice(0, maxPanels), id, maxPanels)), [maxPanels]);
   const [mirrored, setMirrored] = useState(false);
   const [follow, setFollow] = useState(true);
-  const [showCrops, setShowCrops] = useState(true);
   const [absent, setAbsent] = useState<string[]>([]);
   const focusRef = useRef<Focus | null>(null);
   useEffect(() => {
@@ -352,7 +370,7 @@ function useLesson(
     setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s as 1) + 1) % SPEEDS.length] ?? 1);
   }, [setBuildUp]);
 
-  const crop = useVideoCrop(video, doc, focusRef, timeRef, selected, follow && view === "video", mirrored);
+  const crop = useVideoCrop(video, doc, focusRef, timeRef, selected, follow && panels.includes("video"), mirrored);
 
   return {
     doc, title, videoUrl, glbUrls, lessonId, endS,
@@ -362,8 +380,8 @@ function useLesson(
     speed, speedPick, setSpeed, cycleSpeed, buildUp, setBuildUp, passes, setHoldSlow,
     clickOn, setClickOn, clickMode, setClickMode, clickVol, setClickVol, musicVol, setMusicVol,
     multi, selected, chooseDancer, pickerOpen, setPickerOpen,
-    view, setView, angle, setAngle, extras, setExtras, mirrored, setMirrored, follow, setFollow,
-    showCrops, setShowCrops, absent, setAbsent, focusRef, crop,
+    panels, toggleView, mirrored, setMirrored, follow, setFollow,
+    absent, setAbsent, focusRef, crop,
     onRemoveFromMyLessons, onReportOrRemove,
   };
 }

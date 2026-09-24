@@ -8,7 +8,6 @@ import {
   loopName,
   nudgeEdge,
   presetCounts,
-  chipLoop,
   countLoop,
   eightOf,
   eightsOf,
@@ -51,17 +50,8 @@ test("a loop of any length starts where asked and stops at the end of the dance"
   assert.deepEqual(windowAt(12, 8, total), span(9, 16));
 });
 
-test("chip tap loops the chosen length from the chip, again = whole dance, extend = whole chips", () => {
-  const one = chipLoop(null, eights[1], 8, total);
-  assert.deepEqual(one, span(9, 16));
-  assert.equal(chipLoop(one, eights[1], 8, total), null, "the looped chip again = whole dance");
-  assert.deepEqual(chipLoop(one, eights[2], 8, total), span(17, 24), "another chip moves the loop");
-  assert.deepEqual(chipLoop(null, eights[1], 4, total), span(9, 12), "four counts from the chip");
-  assert.deepEqual(chipLoop(span(9, 12), eights[1], 2, total), span(9, 10), "a new length re-cuts it");
-  assert.equal(chipLoop(span(9, 12), eights[1], 4, total), null);
-  assert.deepEqual(chipLoop(one, eights[3], 4, total, eights[1]), span(9, 32));
-  assert.deepEqual(chipLoop(one, eights[0], 2, total, eights[2]), span(1, 24), "a range dragged backwards");
-  assert.equal(eightOf(eights, one)?.n, 2);
+test("a loop that is exactly a part names that part", () => {
+  assert.equal(eightOf(eights, span(9, 16))?.n, 2);
   assert.equal(eightOf(eights, span(9, 12)), null);
 });
 
@@ -187,8 +177,8 @@ test("A–B loops: a half-count edge ticks only the whole counts it plays", () =
   assert.equal(spanDone(new Set([4, 5, 6]), span(3.5, 6)), true);
 });
 
-test("presets: 2, 4, 8, 16 or All from a chip", () => {
-  assert.deepEqual(chipLoop(null, eights[1], presetCounts(16, total), total), span(9, 24));
-  assert.deepEqual(chipLoop(null, eights[1], presetCounts(0, total), total), span(9, total), "All = to the end");
-  assert.deepEqual(chipLoop(null, eights[0], presetCounts(0, total), total), span(1, total));
+test("presets: 2, 4, 8, 16 or All, from here or re-cutting the loop", () => {
+  assert.deepEqual(stepLoop(null, 12, presetCounts(16, total), 0, total), span(1, 16), "the 16 the playhead is in");
+  assert.deepEqual(stepLoop(null, 12, presetCounts(0, total), 0, total), span(1, total), "All = the whole dance, looped");
+  assert.deepEqual(stepLoop(span(9, 12), 1, presetCounts(16, total), 0, total), span(9, 24));
 });
