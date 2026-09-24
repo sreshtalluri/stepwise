@@ -614,6 +614,8 @@ export const privacy = {
         "Processing records: how the job went and how long each step took.",
         // fingerprints/index.json: sha256 + frame hashes, source_key — fingerprint.py, api._store_and_dispatch
         "A fingerprint of the video (a checksum and small frame hashes) and, for a pasted link, which post it came from. This is how the same video added twice becomes one lesson.",
+        // ingest.source_credit: shown as "Original by …" and the choreo/music line
+        "For a pasted link, the post's public credits: the poster's @handle, and any choreographer @handles and song named in its caption or sound. We keep those names, not the caption.",
         // {clip_id}.last-access.json — api._touch
         "When the lesson was last opened.",
       ],
