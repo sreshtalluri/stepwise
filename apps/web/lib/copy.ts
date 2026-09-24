@@ -322,12 +322,48 @@ export const lesson = {
     next: (span: string) => `Next: ${span.toLowerCase()}`,
   },
 
-  /** How many counts a tap loops. Nothing is forced to be an eight. */
+  /**
+   * The timeline: the whole dance, one tick a count, a taller one on each 1. Tap to
+   * go there, drag across it to loop exactly those counts, drag a handle to adjust.
+   */
+  timeline: {
+    label: "Position in the dance. Drag across it to loop those counts.",
+    hint: "Drag across the timeline to loop any counts",
+    hintFree: "Hold Alt to drag without snapping to the counts",
+    clear: "Stop looping",
+    section: "Section start · Loop this section",
+    start: "Loop start",
+    end: "Loop end",
+    earlier: (edge: string) => `${edge}: half a count earlier`,
+    later: (edge: string) => `${edge}: half a count later`,
+  },
+
+  /**
+   * The click. Honest about what it is: our count grid, which is a guess from the music
+   * until the learner sets count 1 (DESIGN.md §7h).
+   */
+  click: {
+    toggle: "Click",
+    toggleHint: "A click on each count, locked to the video",
+    settings: "Click settings and volume",
+    heading: "Click",
+    on: "Click on",
+    off: "Click off",
+    counts: "Counts",
+    ands: "Counts + and",
+    volume: "Click volume",
+    music: "Music volume",
+    guess: "It clicks on our counts, a guess from the music until you set count 1.",
+    yours: "It clicks on the counts you set.",
+  },
+
+  /** How many counts a chip or a preset loops. Nothing is forced to be an eight. */
   loopLen: {
     label: "Counts per loop",
     lead: "Loop",
     unit: "counts",
-    option: (n: number) => `Loop ${n} counts`,
+    all: "All",
+    option: (n: number) => (n === 0 ? "Loop the whole dance" : `Loop ${n} counts`),
     fromCount: (c: number, n: number) => `Loop ${n} counts from count ${c}`,
     countHint: "Click to loop from this count. Shift-click or drag to loop just these counts.",
   },
@@ -336,6 +372,7 @@ export const lesson = {
     play: "Play",
     pause: "Pause",
     speedLabel: "Speed",
+    speedNext: (s: number) => `Speed ${s}×. Tap for the next speed`,
     build: "Build up",
     buildHint: "Starts the loop at 0.5× and adds 0.1× each time round, up to 1×",
     more: "More",
@@ -346,18 +383,21 @@ export const lesson = {
     back: "Home",
   },
 
+  /** The top bar: each view a toggle, every one on is a panel. */
   views: {
-    group: "View",
+    group: "Views",
     video: "Video",
+    videoCropped: "Video, cropped",
     overlay: "On video",
-    threeD: "3D",
-    angle: "Angle",
+    front: "Front",
+    side: "Side",
+    back: "Back",
+    top: "Top",
+    hands: "Hands",
+    feet: "Feet",
+    mirror: "Mirror",
+    mirrored: "mirrored",
     est: "est.",
-    addAngle: "Add an angle",
-    removeAngle: "Remove this angle",
-    inset: "Small second angle",
-    insetOff: "None",
-    closeups: "Close-ups",
     dancer: "Dancer",
   },
 
@@ -416,6 +456,7 @@ export const lesson = {
     heading: "This lesson",
     removeMine: "Remove from my lessons",
     report: "Report or remove this video",
+    privacy: "Privacy",
   },
 
   install: {

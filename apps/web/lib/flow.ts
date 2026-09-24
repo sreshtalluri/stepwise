@@ -81,7 +81,8 @@ export function parseHandoff(
   const q = new URLSearchParams(search);
   const sp = Number(q.get("speed"));
   const speed = speeds.includes(sp) ? sp : null;
-  const m = /^(\d+)-(\d+)$/.exec(q.get("loop") ?? "");
+  // Whole counts or "and"s: 9-16, 3.5-6.
+  const m = /^(\d+(?:\.5)?)-(\d+(?:\.5)?)$/.exec(q.get("loop") ?? "");
   let loop: LoopSpan | null = null;
   if (m) {
     const a = Number(m[1]);

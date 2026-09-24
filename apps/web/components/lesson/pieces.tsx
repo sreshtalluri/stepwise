@@ -5,6 +5,7 @@
  * state (LessonViewer.tsx); none keeps a clock of its own — anything that moves
  * per frame reads `timeRef` on its own rAF and writes the DOM directly.
  */
+import Link from "next/link";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Stage3D from "../Stage3D";
 import {
@@ -15,26 +16,43 @@ import {
   viewLabel,
   STEADY_CROP_SIGMA_REDUCED_S,
   STEADY_CROP_SIGMA_S,
-  VIEW_PRESETS,
   type CropRegion,
   type MotionResult,
   type ViewId,
 } from "../../lib/motion";
-import { accentForPerson, countLabel, eightStartCount, timeOfCount } from "../../../../packages/navigation/src/core";
+import {
+  accentForPerson,
+  countAtTime,
+  countLabel,
+  eightStartCount,
+  loopTimesS,
+  timeOfCount,
+  type LoopSpan,
+} from "../../../../packages/navigation/src/core";
 import { footContact, type FootContact } from "../../lib/footContact";
 import { dancerBox, firstWellObserved, markerPoint, sideWord, stillCrop } from "../../lib/dancers";
-import { chipLoop, countLoop, extendAnchor, LOOP_LENGTHS, spanDone, spanLabel, type Eight } from "../../lib/lessonEngine";
+import {
+  countLoop,
+  countName,
+  edgeLoop,
+  extendAnchor,
+  LOOP_ALL,
+  LOOP_LENGTHS,
+  loopName,
+  nudgeEdge,
+  presetCounts,
+  sameSpan,
+  spanDone,
+  spanLabel,
+} from "../../lib/lessonEngine";
 import { lesson as copy } from "../../lib/copy";
 import { prefersReducedMotion } from "../../lib/reveal";
 import { useCount, useFrameGrabs } from "./hooks";
-import type { Lesson, MainView } from "../LessonViewer";
+import type { Lesson, PanelId } from "../LessonViewer";
 import { StructureEditor } from "../../../../packages/navigation/src/LessonNavigator";
 import "../../../../packages/navigation/src/navigation.css";
 
 export const accentOf = (l: Lesson) => accentForPerson(l.doc, l.selected);
-
-/** 3D angles a pane can take. "overlay" is not an angle — it is the main stage's "On video". */
-export const ANGLES = VIEW_PRESETS.filter((p) => p.id !== "overlay");
 
 // ------------------------------------------------------------------ icons
 
@@ -69,25 +87,13 @@ export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
 /** Stage3D with props that only change when they mean something, so a 10 Hz re-render of the page is not a re-render of the canvas. */
 const Stage = memo(Stage3D);
 
-/** A 3D angle in a pane of its own (desktop extra angles, the phone inset). */
-export function AnglePane({
-  l,
-  angle,
-  onAngle,
-  onRemove,
-  compact,
-  focus,
-}: {
-  l: Lesson;
-  angle: ViewId;
-  onAngle?: (v: ViewId) => void;
-  onRemove?: () => void;
-  compact?: boolean;
-  /** This pane frames the video crop too (see useVideoCrop). */
-  focus?: boolean;
-}) {
+/**
+ * A 3D angle in a panel of its own, with its honesty tag in the corner: every angle but
+ * the camera's is an estimate (DESIGN.md §7h), so it says "SIDE · est.".
+ */
+export function AnglePane({ l, angle, focus }: { l: Lesson; angle: ViewId; focus?: boolean }) {
   return (
-    <div className={`ls-pane${compact ? " ls-compact" : ""}`}>
+    <div className="ls-pane">
       <Stage
         doc={l.doc}
         selectedIndex={l.selected}
@@ -98,59 +104,36 @@ export function AnglePane({
         focusRef={focus ? l.focusRef : undefined}
         glbUrls={l.glbUrls}
       />
-      <div className="ls-pane-bar">
-        {onAngle ? (
-          <label className="ls-select">
-            <span className="sr-only">{copy.views.angle}</span>
-            <select value={angle} onChange={(e) => onAngle(e.target.value as ViewId)}>
-              {ANGLES.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {viewLabel(a.id, l.mirrored)}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <span className="ls-tag">{viewLabel(angle, l.mirrored)}</span>
-        )}
-        {onRemove && (
-          <button type="button" className="ls-icon-btn" onClick={onRemove} aria-label={copy.views.removeAngle}>
-            <Icon name="x" size={16} />
-          </button>
-        )}
-      </div>
+      <span className="ls-tag ls-corner" title={viewLabel(angle, l.mirrored)}>
+        {angle}
+        {l.mirrored && ` · ${copy.views.mirrored}`} · {copy.views.est}
+      </span>
     </div>
   );
 }
 
 /**
- * The main stage: the one `<video>` (the clock), with the mesh laid over it from the
- * clip's own camera ("On video"), or a 3D angle over it ("3D"). In 3D the video stays
- * mounted and playing underneath — it is still the clock and the sound.
+ * The camera panel: the one `<video>` (the clock and the sound), with the mesh laid
+ * over it from the clip's own camera ("On video") or bare ("Video"). With neither
+ * picked it stays mounted off-screen, still playing: it is still the clock.
  */
 export function MainStage({
   l,
   children,
   className = "",
-  view = l.view,
+  view,
+  hidden = false,
 }: {
   l: Lesson;
   children?: React.ReactNode;
   className?: string;
-  /** The phone on its side shows the 3D in a pane of its own, so its main stage never is one. */
-  view?: Lesson["view"];
+  view: "overlay" | "video";
+  hidden?: boolean;
 }) {
   const { mirrored } = l;
-  const tag =
-    view === "3d"
-      ? viewLabel(l.angle, mirrored)
-      : view === "overlay"
-        ? viewLabel("overlay", mirrored)
-        : l.crop.cropped
-          ? "camera view, cropped"
-          : "camera view";
+  const tag = view === "overlay" ? copy.views.overlay : l.crop.cropped ? copy.views.videoCropped : copy.views.video;
   return (
-    <div className={`ls-stage ${className}`} data-view={view}>
+    <div className={`ls-stage ${hidden ? "ls-offstage" : ""} ${className}`} data-view={view} aria-hidden={hidden || undefined}>
       <video
         ref={l.setVideo}
         className="ls-video"
@@ -167,25 +150,9 @@ export function MainStage({
         </div>
       )}
       {view === "overlay" && l.multi && <DancerMarkers l={l} />}
-      {view === "3d" && (
-        <div className="ls-3d">
-          <Stage
-            doc={l.doc}
-            selectedIndex={l.selected}
-            view={l.angle}
-            mirrored={mirrored}
-            timeRef={l.timeRef}
-            follow={l.follow}
-            focusRef={l.focusRef}
-            glbUrls={l.glbUrls}
-            onAbsent={l.setAbsent}
-            onResetView={() => l.setAngle("camera")}
-          />
-        </div>
-      )}
-      <span className="ls-tag ls-stage-tag">
+      <span className="ls-tag ls-corner">
         {tag}
-        {view === "3d" && l.doc.grounding.status === "none" ? `, ${copy.help.noFloor.toLowerCase()}` : ""}
+        {mirrored && ` · ${copy.views.mirrored}`}
       </span>
       {/* Not in frame / unsure, for screen readers; sighted learners get it under "?". */}
       <p className="sr-only" aria-live="polite">
@@ -365,14 +332,14 @@ export function useFootContacts(l: Lesson, on: boolean) {
   );
 }
 
-export function CloseUps({ l, className = "", onRegion }: { l: Lesson; className?: string; onRegion?: (r: CropRegion) => void }) {
-  const contacts = useFootContacts(l, l.showCrops);
-  if (!l.showCrops) return null;
-  const regions = cropRegions(l.doc, l.selected, l.mirrored);
+/** The Hands or Feet panel: that region's close-ups (one per side when the lesson has them). */
+export function CropPanel({ l, kind }: { l: Lesson; kind: "hands" | "feet" }) {
+  const contacts = useFootContacts(l, kind === "feet");
+  const regions = cropRegions(l.doc, l.selected, l.mirrored).filter((r) => (kind === "hands" ? r.includes("hand") : !r.includes("hand")));
   return (
-    <div className={`ls-closeups ${regions.length > 2 ? "ls-sides" : ""} ${className}`}>
+    <div className="ls-pane ls-crops" data-n={regions.length}>
       {regions.map((r) => (
-        <CropPeek key={r} l={l} region={r} contacts={contacts} onClick={onRegion ? () => onRegion(r) : undefined} />
+        <CropPeek key={r} l={l} region={r} contacts={contacts} />
       ))}
     </div>
   );
@@ -391,7 +358,9 @@ export function CloseUps({ l, className = "", onRegion }: { l: Lesson; className
 export function CountBar({ l, big = false, select = false }: { l: Lesson; big?: boolean; select?: boolean }) {
   const grid = l.structure.grid;
   const total = grid.countTotal;
-  const count = useCount(l.timeRef, grid);
+  const half = useCount(l.timeRef, grid, 0.5);
+  const count = Math.floor(half);
+  const len = presetCounts(l.loopLen, total);
   const inDance = count >= 1 && count <= total;
   const first = eightStartCount(inDance ? count : (l.loop?.startCount ?? 1));
   const drag = useRef<{ anchor: number; moved: boolean } | null>(null);
@@ -407,7 +376,7 @@ export function CountBar({ l, big = false, select = false }: { l: Lesson; big?: 
         const c = d && countAt(e.clientX, e.clientY);
         if (!d || !c || (c === d.anchor && !d.moved)) return;
         d.moved = true;
-        l.setLoop(countLoop(c, l.loopLen, total, d.anchor));
+        l.setLoop(countLoop(c, len, total, d.anchor));
       }}
       onPointerUp={() => (drag.current = null)}
       onPointerCancel={() => (drag.current = null)}
@@ -419,7 +388,7 @@ export function CountBar({ l, big = false, select = false }: { l: Lesson; big?: 
           tabIndex={-1}
           data-count={c}
           className={`ls-count${c === count ? " ls-on" : ""}${out(c) ? " ls-out" : ""}${l.done.has(c) ? " ls-done" : ""}`}
-          aria-label={select ? copy.loopLen.fromCount(c, l.loopLen) : undefined}
+          aria-label={select ? copy.loopLen.fromCount(c, len) : undefined}
           title={select ? copy.loopLen.countHint : undefined}
           onPointerDown={(ev) => {
             if (!select || (ev.pointerType === "mouse" && ev.button !== 0)) return;
@@ -433,18 +402,24 @@ export function CountBar({ l, big = false, select = false }: { l: Lesson; big?: 
             drag.current = null;
             if (d?.moved) return;
             const anchor = ev.shiftKey && l.loop ? extendAnchor(l.loop, c) : null;
-            l.setLoop(countLoop(c, l.loopLen, total, anchor), { play: l.playing });
+            l.setLoop(countLoop(c, len, total, anchor), { play: l.playing });
           }}
           disabled={c > total}
         >
           {c <= total ? countLabel(c) : ""}
+          {/* The "and" after the count: there to SEE, it lights on the off-beat. */}
+          {c <= total && (
+            <span className={`ls-and${half === c + 0.5 ? " ls-on" : ""}`} aria-hidden="true">
+              &amp;
+            </span>
+          )}
         </button>
       ))}
     </div>
   );
 }
 
-/** "Loop 2 · 4 · 8 counts": how many counts a tap on a chip or a count loops. */
+/** "Loop 2 · 4 · 8 · 16 · All counts": how many counts a chip, a count or a preset loops. Under More. */
 export function LoopLength({ l }: { l: Lesson }) {
   return (
     <div className="ls-looplen" role="group" aria-label={copy.loopLen.label}>
@@ -452,7 +427,7 @@ export function LoopLength({ l }: { l: Lesson }) {
       <div className="ls-seg">
         {LOOP_LENGTHS.map((n) => (
           <button key={n} type="button" aria-pressed={l.loopLen === n} aria-label={copy.loopLen.option(n)} onClick={() => l.setLoopLen(n)}>
-            {n}
+            {n === LOOP_ALL ? copy.loopLen.all : n}
           </button>
         ))}
       </div>
@@ -462,134 +437,328 @@ export function LoopLength({ l }: { l: Lesson }) {
 }
 
 /**
- * The one row that drives the lesson: a chip per part (an eight until the learner
- * edits them). Tap = loop the chosen length from its first count; tap again (or
- * "All") = the whole dance; shift-tap or drag across chips = loop those whole chips.
- * A quiet tick marks a chip whose counts have all been looped at full speed. Above
- * it, a plain scrubber for the whole clip, and the loop length.
+ * The timeline: the whole dance, a tick per count and a taller one with a small "1"
+ * on each eight's downbeat. Tap = go there; press and drag across it = loop exactly
+ * those counts, snapped to counts and "and"s (Alt: unsnapped); the loop's two handles
+ * drag to adjust it (44 px targets, arrow keys ½ a count). One pointer model for
+ * mouse and touch, captured on the bar, and `touch-action: none` so a drag here is
+ * never the page's swipe. Under it, the loop in words, ½-count nudges and ×.
  */
-export function EightChips({ l }: { l: Lesson }) {
-  const drag = useRef<{ anchor: number; moved: boolean } | null>(null);
-  const chipAt = (x: number, y: number) => {
-    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-eight]");
-    return el ? Number(el.dataset.eight) : -1;
-  };
-  // Lit when the loop touches it, so four counts inside an eight still show where they are.
-  const inLoop = (e: Eight) => !!l.loop && e.startCount <= l.loop.endCount && e.endCount >= l.loop.startCount;
+export function Timeline({ l }: { l: Lesson }) {
+  const bar = useRef<HTMLDivElement>(null);
+  const grid = l.structure.grid;
+  const total = grid.countTotal;
   const endS = l.endS;
-  const total = l.structure.grid.countTotal;
+  const pct = (t: number) => `${(Math.min(Math.max(t / endS, 0), 1) * 100).toFixed(3)}%`;
+  const g = useRef<{ kind: "new" | "start" | "end"; x0: number; from: number; moved: boolean } | null>(null);
+  const [preview, setPreview] = useState<LoopSpan | null>(null);
+  const timeAtX = (x: number) => {
+    const r = bar.current!.getBoundingClientRect();
+    return Math.min(Math.max((x - r.left) / r.width, 0), 1) * endS;
+  };
+  const countAtX = (x: number) => countAtTime(grid, timeAtX(x));
+  // "And"s are implied, not marked — unless the click is counting them too.
+  const ands = l.clickOn && l.clickMode === "ands";
+  const ticks = useMemo(
+    () =>
+      Array.from({ length: total }, (_, i) => i + 1).flatMap((c) => [
+        <span key={c} className="ls-tl-tick" style={{ left: pct(timeOfCount(grid, c)) }} />,
+        ...(ands && c < total ? [<span key={`${c}&`} className="ls-tl-tick ls-and-tick" style={{ left: pct(timeOfCount(grid, c + 0.5)) }} />] : []),
+      ]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pct is over endS
+    [grid, total, endS, ands],
+  );
+  /** The section marker whose tooltip is open on a touch screen (first tap shows it, the tooltip loops). */
+  const [secOpen, setSecOpen] = useState<string | null>(null);
+  const touchTap = useRef(false);
+
+  const spanFor = (d: NonNullable<typeof g.current>, x: number, free: boolean): LoopSpan | null => {
+    const c = countAtX(x);
+    if (d.kind === "new") return edgeLoop(d.from, c, total, free);
+    const lp = l.loop!;
+    // The other edge stays put; a handle dragged past it swaps roles.
+    return d.kind === "start" ? edgeLoop(c, lp.endCount + 1, total, free) : edgeLoop(lp.startCount, c, total, free);
+  };
+  const onDown = (e: React.PointerEvent, kind: "new" | "start" | "end") => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    setSecOpen(null);
+    try {
+      bar.current!.setPointerCapture(e.pointerId);
+    } catch {
+      /* a pointer that is already gone: the moves still reach the bar while over it */
+    }
+    g.current = { kind, x0: e.clientX, from: countAtX(e.clientX), moved: kind !== "new" };
+  };
+  const onMove = (e: React.PointerEvent) => {
+    const d = g.current;
+    if (!d) return;
+    if (!d.moved && Math.abs(e.clientX - d.x0) < 6) return;
+    d.moved = true;
+    setPreview(spanFor(d, e.clientX, e.altKey));
+  };
+  const onUp = (e: React.PointerEvent) => {
+    const d = g.current;
+    g.current = null;
+    setPreview(null);
+    if (!d) return;
+    if (!d.moved) return l.seek(timeAtX(e.clientX));
+    const s = spanFor(d, e.clientX, e.altKey);
+    if (s) l.setLoop(s, { play: l.playing, keep: d.kind !== "new" });
+  };
+  const nudge = (edge: "start" | "end", d: number) => l.loop && l.setLoop(nudgeEdge(l.loop, edge, d, total), { play: l.playing, keep: true });
+
+  const shown = preview ?? l.loop;
+  const [a, b] = shown ? loopTimesS(grid, shown) : [0, 0];
+  const handle = (edge: "start" | "end", t: number) => (
+    <span
+      role="slider"
+      tabIndex={0}
+      className={`ls-tl-handle ls-${edge}`}
+      style={{ left: pct(t) }}
+      aria-label={edge === "start" ? copy.timeline.start : copy.timeline.end}
+      aria-valuemin={1}
+      aria-valuemax={total}
+      aria-valuenow={edge === "start" ? shown!.startCount : shown!.endCount}
+      aria-valuetext={countName(edge === "start" ? shown!.startCount : shown!.endCount)}
+      onPointerDown={(e) => onDown(e, edge)}
+      onKeyDown={(e) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        e.preventDefault();
+        e.stopPropagation(); // not the page's seek-by-a-count
+        nudge(edge, e.key === "ArrowLeft" ? -0.5 : 0.5);
+      }}
+    />
+  );
+  const nudges = (edge: "start" | "end") => {
+    const name = edge === "start" ? copy.timeline.start : copy.timeline.end;
+    return (
+      <span className="ls-tl-nudge">
+        <button type="button" onClick={() => nudge(edge, -0.5)} aria-label={copy.timeline.earlier(name)}>
+          <Icon name="left" size={14} />
+        </button>
+        <b>{countName(edge === "start" ? l.loop!.startCount : l.loop!.endCount)}</b>
+        <button type="button" onClick={() => nudge(edge, 0.5)} aria-label={copy.timeline.later(name)}>
+          <Icon name="right" size={14} />
+        </button>
+      </span>
+    );
+  };
+
   return (
-    <div className="ls-chips-wrap">
-      <div className="ls-chips-top">
-        <input
-          className="ls-scrub"
-          type="range"
-          min={0}
-          max={endS}
-          step={0.01}
-          value={Math.min(l.displayTime, endS)}
-          onChange={(e) => l.seek(Number(e.target.value))}
-          aria-label={copy.chips.scrub}
-        />
-        <LoopLength l={l} />
-      </div>
+    <div className="ls-tl-wrap">
       <div
-        className="ls-chips"
-        role="group"
-        aria-label={copy.chips.group}
-        onPointerMove={(e) => {
-          const d = drag.current;
-          if (!d) return;
-          const k = chipAt(e.clientX, e.clientY);
-          if (k < 0 || (k === d.anchor && !d.moved)) return;
-          d.moved = true;
-          l.setLoop(chipLoop(l.loop, l.eights[k], l.loopLen, total, l.eights[d.anchor]));
-        }}
-        onPointerUp={() => (drag.current = null)}
-        onPointerCancel={() => (drag.current = null)}
+        ref={bar}
+        className="ls-tl"
+        role="slider"
+        tabIndex={-1}
+        aria-label={copy.timeline.label}
+        aria-valuemin={0}
+        aria-valuemax={Math.round(endS)}
+        aria-valuenow={Math.round(l.displayTime)}
+        onPointerDown={(e) => onDown(e, "new")}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={() => ((g.current = null), setPreview(null))}
       >
-        {l.eights.map((e, k) => {
-          const looped = inLoop(e);
-          const playing = l.here?.id === e.id;
-          const done = spanDone(l.done, e);
-          const span = spanLabel(e);
+        <div className="ls-tl-track">{ticks}</div>
+        {/*
+          Where each part starts (an eight until the learner edits them): a taller accent
+          tick with a dot cap, no text. Hover shows "Section start · Loop this section"
+          and a click loops it; on touch the first tap shows that tooltip and the
+          tooltip is what loops.
+        */}
+        {l.eights.map((e) => {
+          const on = sameSpan(l.loop, e);
+          const loopIt = () => {
+            setSecOpen(null);
+            l.setLoop(on ? null : { startCount: e.startCount, endCount: e.endCount }, { play: l.playing });
+          };
           return (
-            <button
-              key={e.id}
-              type="button"
-              data-eight={k}
-              className={`ls-chip8${looped ? " ls-on" : ""}${playing ? " ls-here" : ""}`}
-              aria-pressed={looped}
-              aria-label={`${e.label === span ? span : `${e.label}, ${span}`}${done ? `, ${copy.chips.done}` : ""}`}
-              onPointerDown={(ev) => {
-                if (ev.pointerType === "mouse" && ev.button !== 0) return;
-                drag.current = { anchor: k, moved: false };
-              }}
-              onClick={(ev) => {
-                const d = drag.current;
-                drag.current = null;
-                if (d?.moved) return;
-                const from = l.loop?.startCount ?? 0;
-                const anchor = ev.shiftKey ? (l.eights.find((x) => x.startCount <= from && x.endCount >= from) ?? null) : null;
-                l.setLoop(chipLoop(l.loop, e, l.loopLen, total, anchor), { play: l.playing });
-              }}
-            >
-              <span>{e.n}</span>
-              {done && <Icon name="check" size={12} />}
-            </button>
+            <span key={e.id} className={`ls-tl-sec${on ? " ls-on" : ""}${secOpen === e.id ? " ls-open" : ""}`} style={{ left: pct(timeOfCount(grid, e.startCount)) }}>
+              <button
+                type="button"
+                className={`ls-tl-mark${spanDone(l.done, e) ? " ls-done" : ""}`}
+                aria-pressed={on}
+                aria-label={copy.timeline.section}
+                onPointerDown={(ev) => {
+                  ev.stopPropagation();
+                  touchTap.current = ev.pointerType === "touch";
+                }}
+                onClick={() => (touchTap.current && secOpen !== e.id ? setSecOpen(e.id) : loopIt())}
+              />
+              <button type="button" className="ls-tl-tip" tabIndex={-1} onPointerDown={(ev) => ev.stopPropagation()} onClick={loopIt}>
+                {copy.timeline.section}
+              </button>
+            </span>
           );
         })}
-        <button
-          type="button"
-          className={`ls-chip8 ls-all${!l.loop ? " ls-on" : ""}`}
-          aria-pressed={!l.loop}
-          onClick={() => l.setLoop(null)}
-        >
-          {copy.chips.all}
-        </button>
+        {shown && <div className={`ls-tl-loop${preview ? " ls-preview" : ""}`} style={{ left: pct(a), width: `calc(${pct(b)} - ${pct(a)})` }} />}
+        <div className="ls-tl-head" style={{ left: pct(l.displayTime) }} />
+        {shown && handle("start", a)}
+        {shown && handle("end", b)}
+      </div>
+      <div className="ls-tl-read" aria-live="polite">
+        {l.loop && !preview ? (
+          <>
+            <span className="ls-tl-name">{copy.loopLen.lead}</span>
+            {nudges("start")}
+            <span aria-hidden="true">–</span>
+            {nudges("end")}
+            <button type="button" className="ls-tl-clear" onClick={() => l.setLoop(null)} aria-label={copy.timeline.clear} title={copy.timeline.clear}>
+              <Icon name="x" size={16} />
+            </button>
+          </>
+        ) : preview ? (
+          <span className="ls-tl-name">{loopName(preview)}</span>
+        ) : (
+          <span className="ls-hint" title={copy.timeline.hintFree}>
+            {copy.timeline.hint}
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
-/** Play · speed · Build up · More. Everything else lives under More. */
-export function Transport({ l, more, className = "" }: { l: Lesson; more: React.ReactNode; className?: string }) {
+/** The top bar's toggles, in order: the camera (with or without the mesh), the 3D angles, then the close-ups. */
+const VIEW_BAR: { id: PanelId; label: string }[] = [
+  { id: "overlay", label: copy.views.overlay },
+  { id: "video", label: copy.views.video },
+  { id: "front", label: copy.views.front },
+  { id: "side", label: copy.views.side },
+  { id: "back", label: copy.views.back },
+  { id: "top", label: copy.views.top },
+];
+const CLOSE_BAR: { id: PanelId; label: string }[] = [
+  { id: "hands", label: copy.views.hands },
+  { id: "feet", label: copy.views.feet },
+];
+
+/**
+ * The one top bar: every view a toggle, and every view that is on is a panel. Mirror
+ * is a modifier on all of them. Scrolls sideways on a phone.
+ */
+export function ViewBar({ l, start, end }: { l: Lesson; start?: React.ReactNode; end?: React.ReactNode }) {
+  const toggle = (v: { id: PanelId; label: string }) => (
+    <button key={v.id} type="button" className="ls-vbtn" aria-pressed={l.panels.includes(v.id)} onClick={() => l.toggleView(v.id)}>
+      {v.label}
+    </button>
+  );
   return (
-    <div className={`ls-transport ${className}`}>
-      <button type="button" className="ls-play" onClick={l.togglePlay} aria-label={l.playing ? copy.transport.pause : copy.transport.play}>
-        <Icon name={l.playing ? "pause" : "play"} size={26} />
-      </button>
-      <div className="ls-seg ls-speeds" role="group" aria-label={copy.transport.speedLabel}>
-        {TRANSPORT_SPEEDS.map((s) => (
-          <button key={s} type="button" aria-pressed={!l.buildUp && l.speedPick === s} onClick={() => (l.setBuildUp(false), l.setSpeed(s))}>
-            {s}×
-          </button>
-        ))}
-      </div>
-      <button
-        type="button"
-        className={`ls-build${l.buildUp ? " ls-on" : ""}`}
-        aria-pressed={l.buildUp}
-        onClick={() => l.setBuildUp(!l.buildUp)}
-        title={copy.transport.buildHint}
-      >
-        <Icon name="trend" size={18} />
-        <span>
-          {copy.transport.build}
-          {l.buildUp && <b> {l.speed}×</b>}
-        </span>
-      </button>
-      {l.next && (
-        <button type="button" className="ls-next" onClick={() => l.setLoop(l.next, { play: l.playing })}>
-          {copy.chips.next(spanLabel(l.next))}
-          <Icon name="right" size={16} />
+    <header className="ls-bar">
+      {start}
+      <nav className="ls-vbar" aria-label={copy.views.group}>
+        {VIEW_BAR.map(toggle)}
+        <button type="button" className="ls-vbtn" aria-pressed={l.mirrored} onClick={() => l.setMirrored((v) => !v)}>
+          {copy.views.mirror}
         </button>
-      )}
-      {more}
+        <span className="ls-vsep" aria-hidden="true" />
+        {CLOSE_BAR.map(toggle)}
+      </nav>
+      {end}
+    </header>
+  );
+}
+
+/**
+ * Every view that is on, tiled side by side (a phone in portrait: the second as an
+ * inset over the first). `children` sit over the tiles — the counts, the phone's
+ * overlays. With no camera panel on, the `<video>` stays mounted off-screen: it is
+ * the clock and the sound.
+ */
+export function Panels({ l, children, ...rest }: { l: Lesson; children?: React.ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
+  const cam = l.panels.find((p): p is "overlay" | "video" => p === "overlay" || p === "video");
+  const others = l.panels.filter((p) => p !== cam);
+  // The first 3D angle frames the video crop (useVideoCrop).
+  const firstAngle = others.find((p) => p !== "hands" && p !== "feet");
+  const stage = <MainStage l={l} view={cam ?? "overlay"} hidden={!cam} />;
+  const tiles: string[] = [...(cam ? ["cam"] : []), ...others];
+  return (
+    <div className="ls-panels" data-n={tiles.length} {...rest}>
+      {!cam && stage}
+      {tiles.map((t, i) => (
+        <div key={t} className={`ls-tile${i === 1 ? " ls-second" : ""}`}>
+          {t === "cam" ? (
+            stage
+          ) : t === "hands" || t === "feet" ? (
+            <CropPanel l={l} kind={t} />
+          ) : (
+            <AnglePane l={l} angle={t as ViewId} focus={t === firstAngle} />
+          )}
+        </div>
+      ))}
+      {children}
     </div>
   );
 }
-const TRANSPORT_SPEEDS = [0.5, 0.75, 1] as const;
+
+/** "0:03.4" — the transport's clock, to a tenth. */
+const clock = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
+
+/**
+ * The one thin bar under the panels: play, the time, the speed pill (tap for the
+ * next speed), Build up, the click (its settings in a small popover), More — and
+ * under it the full-width timeline.
+ */
+export function BottomBar({ l, more }: { l: Lesson; more: React.ReactNode }) {
+  return (
+    <div className="ls-bottom">
+      <div className="ls-transport">
+        <button type="button" className="ls-play" onClick={l.togglePlay} aria-label={l.playing ? copy.transport.pause : copy.transport.play}>
+          <Icon name={l.playing ? "pause" : "play"} size={22} />
+        </button>
+        <span className="ls-time">
+          {clock(Math.min(l.displayTime, l.endS))}
+          <span className="ls-time-total"> / {clock(l.endS)}</span>
+        </span>
+        <button
+          type="button"
+          className="ls-pill"
+          onClick={l.cycleSpeed}
+          aria-label={copy.transport.speedNext(l.speed)}
+          title={copy.transport.speedNext(l.speed)}
+        >
+          {l.speed}×
+        </button>
+        <button
+          type="button"
+          className={`ls-pill${l.buildUp ? " ls-on" : ""}`}
+          aria-pressed={l.buildUp}
+          onClick={() => l.setBuildUp(!l.buildUp)}
+          title={copy.transport.buildHint}
+        >
+          {copy.transport.build}
+        </button>
+        <span className="ls-pill-pair">
+          <button
+            type="button"
+            className={`ls-pill${l.clickOn ? " ls-on" : ""}`}
+            aria-pressed={l.clickOn}
+            onClick={() => l.setClickOn(!l.clickOn)}
+            title={copy.click.toggleHint}
+          >
+            {copy.click.toggle}
+          </button>
+          <button type="button" className="ls-pill ls-pill-more" popoverTarget="ls-click" aria-label={copy.click.settings}>
+            <Icon name="dots" size={16} />
+          </button>
+        </span>
+        <div id="ls-click" popover="auto" className="ls-panel ls-panel-sm">
+          <ClickTools l={l} />
+        </div>
+        {l.next && (
+          <button type="button" className="ls-pill ls-next" onClick={() => l.setLoop(l.next, { play: l.playing })}>
+            {copy.chips.next(spanLabel(l.next))}
+          </button>
+        )}
+        {more}
+      </div>
+      <Timeline l={l} />
+    </div>
+  );
+}
 
 /**
  * Count 1: one tap while it plays ("Tap on 1", snaps to the nearest beat), a whole
@@ -626,6 +795,44 @@ export function CountOneTools({ l }: { l: Lesson }) {
         </div>
       )}
       <span className="ls-hint">{copy.countOne.tapHint}</span>
+    </div>
+  );
+}
+
+/**
+ * The click's options: counts or counts + and, its own volume and the music's, so the
+ * two can be balanced. iOS ignores a page setting a video's volume, so no music slider
+ * there (it would move and do nothing).
+ */
+export function ClickTools({ l }: { l: Lesson }) {
+  const [ios, setIos] = useState(false);
+  useEffect(() => setIos(/iPhone|iPad|iPod/.test(navigator.userAgent)), []);
+  return (
+    <div className="ls-group" role="group" aria-labelledby="ls-click-h">
+      <span className="ls-group-label" id="ls-click-h">
+        {copy.click.heading}
+      </span>
+      <div className="ls-group-row">
+        <button type="button" className="ls-chip" aria-pressed={l.clickOn} onClick={() => l.setClickOn(!l.clickOn)}>
+          {l.clickOn ? copy.click.on : copy.click.off}
+        </button>
+        {(["counts", "ands"] as const).map((m) => (
+          <button key={m} type="button" className="ls-chip" aria-pressed={l.clickMode === m} onClick={() => (l.setClickMode(m), l.setClickOn(true))}>
+            {copy.click[m]}
+          </button>
+        ))}
+      </div>
+      <label className="ls-vol">
+        <span>{copy.click.volume}</span>
+        <input type="range" min={0} max={1} step={0.05} value={l.clickVol} onChange={(e) => l.setClickVol(Number(e.target.value))} />
+      </label>
+      {!ios && (
+        <label className="ls-vol">
+          <span>{copy.click.music}</span>
+          <input type="range" min={0} max={1} step={0.05} value={l.musicVol} onChange={(e) => l.setMusicVol(Number(e.target.value))} />
+        </label>
+      )}
+      <span className="ls-hint">{l.countsFrom === "hand" ? copy.click.yours : copy.click.guess}</span>
     </div>
   );
 }
@@ -759,18 +966,11 @@ export function WhoChip({ l, shots, withName = true }: { l: Lesson; shots: Dance
 
 // ------------------------------------------------------------------ more
 
-const VIEWS: { id: MainView; label: string }[] = [
-  { id: "overlay", label: copy.views.overlay },
-  { id: "video", label: copy.views.video },
-  { id: "3d", label: copy.views.threeD },
-];
-const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
-
 /**
- * Everything that is not play, speed or the loop, in one place: "More" is a panel
- * on a desktop and the expanded bottom sheet on a phone. The legend, what is out of
- * frame and where the counts came from — the paragraphs the old page printed under
- * the stage — sit at the bottom of it, so the default view is the dance.
+ * Everything that is not the views, play, speed, the click or the timeline, in one
+ * place: "More" is a popover panel (a bottom sheet on a phone). The legend, what is
+ * out of frame and where the counts came from sit at the bottom of it, so the default
+ * view is the dance.
  */
 export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }) {
   const perMinute = Math.round(60 / l.structure.grid.secondsPerCount);
@@ -784,41 +984,16 @@ export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }
           : null;
   return (
     <div className="ls-more">
-      <div className="ls-group" role="group" aria-label={copy.views.group}>
-        <span className="ls-group-label">{copy.views.group}</span>
-        <div className="ls-group-row">
-          {VIEWS.map((v) => (
-            <button key={v.id} type="button" className="ls-chip" aria-pressed={l.view === v.id} onClick={() => l.setView(v.id)}>
-              {v.label}
-            </button>
-          ))}
-        </div>
-        {l.view === "3d" && (
-          <div className="ls-group-row">
-            {ANGLES.map((a) => (
-              <button key={a.id} type="button" className="ls-chip" aria-pressed={l.angle === a.id} onClick={() => l.setAngle(a.id)}>
-                {cap(a.label)}
-                {a.id !== "camera" && <small>{copy.views.est}</small>}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="ls-group-row">
-          <button type="button" className="ls-chip" aria-pressed={l.mirrored} onClick={() => l.setMirrored((v) => !v)}>
-            {l.mirrored ? copy.transport.mirrorOn : copy.transport.mirrorOff}
-          </button>
-          <button type="button" className="ls-chip" aria-pressed={l.showCrops} onClick={() => l.setShowCrops((v) => !v)}>
-            {l.showCrops ? copy.crop.toggleOn : copy.crop.toggleOff}
-          </button>
-          <button type="button" className="ls-chip" aria-pressed={l.follow} onClick={() => l.setFollow((v) => !v)}>
-            {l.follow ? copy.transport.followOn : copy.transport.followOff}
-          </button>
-          <button type="button" className="ls-chip" aria-pressed={l.speedPick === 0.25 && !l.buildUp} onClick={() => (l.setBuildUp(false), l.setSpeed(0.25))}>
-            0.25×
-          </button>
-        </div>
-      </div>
       {extra}
+      <div className="ls-group">
+        <span className="ls-group-label">{copy.loopLen.label}</span>
+        <LoopLength l={l} />
+      </div>
+      <div className="ls-group-row">
+        <button type="button" className="ls-chip" aria-pressed={l.follow} onClick={() => l.setFollow((v) => !v)}>
+          {l.follow ? copy.transport.followOn : copy.transport.followOff}
+        </button>
+      </div>
       <CountOneTools l={l} />
       {l.multi && (
         <div className="ls-group">
@@ -839,6 +1014,10 @@ export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }
           <button type="button" className="ls-chip" disabled={!l.onReportOrRemove} onClick={() => l.onReportOrRemove?.()}>
             {copy.menu.report}
           </button>
+          {/* The phone layout never scrolls to the site footer, so the policy is reachable here. */}
+          <Link href="/privacy" className="ls-chip">
+            {copy.menu.privacy}
+          </Link>
         </div>
       </div>
       <details className="ls-about">

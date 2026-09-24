@@ -2,7 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildUpSpeed,
-  chipLoop,
+  countName,
+  edgeLoop,
+  loopLength,
+  loopName,
+  nudgeEdge,
+  presetCounts,
   countLoop,
   eightOf,
   eightsOf,
@@ -45,17 +50,8 @@ test("a loop of any length starts where asked and stops at the end of the dance"
   assert.deepEqual(windowAt(12, 8, total), span(9, 16));
 });
 
-test("chip tap loops the chosen length from the chip, again = whole dance, extend = whole chips", () => {
-  const one = chipLoop(null, eights[1], 8, total);
-  assert.deepEqual(one, span(9, 16));
-  assert.equal(chipLoop(one, eights[1], 8, total), null, "the looped chip again = whole dance");
-  assert.deepEqual(chipLoop(one, eights[2], 8, total), span(17, 24), "another chip moves the loop");
-  assert.deepEqual(chipLoop(null, eights[1], 4, total), span(9, 12), "four counts from the chip");
-  assert.deepEqual(chipLoop(span(9, 12), eights[1], 2, total), span(9, 10), "a new length re-cuts it");
-  assert.equal(chipLoop(span(9, 12), eights[1], 4, total), null);
-  assert.deepEqual(chipLoop(one, eights[3], 4, total, eights[1]), span(9, 32));
-  assert.deepEqual(chipLoop(one, eights[0], 2, total, eights[2]), span(1, 24), "a range dragged backwards");
-  assert.equal(eightOf(eights, one)?.n, 2);
+test("a loop that is exactly a part names that part", () => {
+  assert.equal(eightOf(eights, span(9, 16))?.n, 2);
   assert.equal(eightOf(eights, span(9, 12)), null);
 });
 
@@ -139,4 +135,50 @@ test("done and loop length round-trip, v1 chip ticks carry over, and a broken st
   saveDone("abc", new Set([1]));
   saveLoopLength("abc", 2);
   delete (globalThis as any).window;
+});
+
+test("A–B loops: dragged edges snap to counts and ands, and read like a dancer counts", () => {
+  assert.deepEqual(edgeLoop(3.4, 7.1, total), span(3.5, 6), "3& – 6: from the and of 3 through 6");
+  assert.deepEqual(edgeLoop(7.1, 3.4, total), span(3.5, 6), "dragged backwards");
+  assert.deepEqual(edgeLoop(2, 6, total), span(2, 5));
+  assert.equal(edgeLoop(3, 3.6, total), null, "under one count is not a loop");
+  assert.deepEqual(edgeLoop(-4, total + 9, total), span(1, total), "clamped to the dance");
+  assert.deepEqual(edgeLoop(3.27, 7.1, total, true), span(3.27, 6.1), "free, with Alt");
+  assert.equal(loopName(span(3.5, 6)), "Loop 3& – 6");
+  assert.equal(loopName(span(2, 5.5)), "Loop 2 – 5&");
+  assert.equal(spanLabel(span(3.5, 6)), "Counts 3&–6");
+  assert.equal(countName(3.27), "3.3");
+  const [a, b] = loopTimesS(base.grid, span(3.5, 6));
+  assert.ok(Math.abs(a - 2.5 * 0.51) < 1e-9 && Math.abs(b - 6 * 0.51) < 1e-9, "plays [3.5, 7) in counts");
+  assert.equal(loopLength(span(3.5, 6)), 3.5);
+});
+
+test("A–B loops: each edge nudges by half a count, never below one count or out of the dance", () => {
+  assert.deepEqual(nudgeEdge(span(3, 6), "start", 0.5, total), span(3.5, 6));
+  assert.deepEqual(nudgeEdge(span(3.5, 6), "end", -0.5, total), span(3.5, 5.5));
+  assert.deepEqual(nudgeEdge(span(1, 6), "start", -0.5, total), span(1, 6));
+  assert.deepEqual(nudgeEdge(span(5, 5), "start", 0.5, total), span(5, 5));
+  assert.deepEqual(nudgeEdge(span(5, 5), "end", -0.5, total), span(5, 5));
+  assert.deepEqual(nudgeEdge(span(5, total), "end", 0.5, total), span(5, total));
+});
+
+test("A–B loops: next and previous step by the custom loop's own length", () => {
+  const custom = span(3.5, 6); // 3.5 counts long
+  assert.deepEqual(stepLoop(custom, 1, loopLength(custom), 1, total), span(7, 9.5));
+  assert.deepEqual(stepLoop(span(7, 9.5), 1, 3.5, -1, total), span(3.5, 6), "and back");
+  assert.deepEqual(stepLoop(custom, 1, 3.5, -1, total), span(1, 3.5), "never before count 1");
+  assert.deepEqual(nextLoop(custom, 3.5, total), span(7, 9.5));
+});
+
+test("A–B loops: a half-count edge ticks only the whole counts it plays", () => {
+  assert.deepEqual([...markDone(new Set(), span(3.5, 6))], [4, 5, 6]);
+  assert.deepEqual([...markDone(new Set(), span(3, 5.5))], [3, 4, 5]);
+  assert.deepEqual([...markDone(new Set(), span(3.5, 3.5))], []);
+  assert.equal(spanDone(new Set([4, 5, 6]), span(3.5, 6)), true);
+});
+
+test("presets: 2, 4, 8, 16 or All, from here or re-cutting the loop", () => {
+  assert.deepEqual(stepLoop(null, 12, presetCounts(16, total), 0, total), span(1, 16), "the 16 the playhead is in");
+  assert.deepEqual(stepLoop(null, 12, presetCounts(0, total), 0, total), span(1, total), "All = the whole dance, looped");
+  assert.deepEqual(stepLoop(span(9, 12), 1, presetCounts(16, total), 0, total), span(9, 24));
 });
