@@ -1,6 +1,7 @@
 # Deployment
 
-**Written 2026-09-21, branch `deployment`.** What is live, what is one command
+**Written 2026-09-21, branch `deployment`; status refreshed 2026-09-23 on
+`main`.** What is live, what is one command
 away, and what to do when it breaks. Assume you are reading this at 2am with
 something on fire; the runbook is §7 and it is deliberately near the end so the
 table of contents gets you there in one scroll.
@@ -26,8 +27,11 @@ execution.
 | Database | **LIVE** — Neon, `001_init` applied | §5.1 |
 | Frontend hosting | **LIVE** — Cloudflare Worker (OpenNext), no custom domain yet | `https://stepwise.sreshta-talluri.workers.dev`; `/api/*` is `app/api/[...path]/route.ts` → Modal |
 | Origin lock | **LIVE** — the Modal API answers only the Worker (404 otherwise; `/health` open) | Modal Secret `stepwise-origin` = Worker secret `STEPWISE_ORIGIN_KEY`, value in `~/.stepwise-secrets/origin.env`. Calling the API direct (e2e_check.py): export that file first |
-| Analytics | **built, not deployed** — first-party events, `report_*` views, `/admin`, 13-month roll-up | §3.1 |
-| Error tracking | **backend LIVE** (`stepwise-sentry` Secret exists, deployed); browser goes live with the frontend deploy | §5.3 |
+| Analytics | **LIVE** — first-party events, migration `002_analytics` applied, `report_*` views, 13-month roll-up | §3.1 |
+| Admin | **LIVE** — `/admin` on the Worker, `stepwise-admin` Secret | §3.1 |
+| Dashboard reader | **LIVE** — `stepwise_reader` role can log in and `SELECT` only the `report_*` views | §3.1 |
+| Error tracking | **LIVE** — backend (`stepwise-sentry`) and browser (DSN inlined at `cf:build`) | §5.3 |
+| Invite codes | **LIVE** — `POST /clips/link` open only to codes in `STEPWISE_INVITE_CODES` (Modal Secret `stepwise-invite`, comma-separated). No Secret = link door shut, file upload unaffected | §3 |
 
 One app, one `modal deploy`, one set of credentials. `api.py` was already a
 Modal client — it constructs `modal.Volume.from_name(...)` at import and
@@ -83,12 +87,31 @@ and S3 GETs honour `Range`.
 
 ## 2. Deploying
 
-```sh
-cd services/motion-api
-modal deploy modal_app.py          # API + GPU functions + sweeper, all one app
-```
+**Deploy only from `main`, and only what has merged.** `main` is the trunk
+(INTEGRATION.md §30); a deploy from a feature branch ships code no one
+reviewed and stamps Sentry's `release` with a sha that is not on `main`.
 
-That is the whole deploy. It takes ~20 s when no image layer changed.
+1. Merge the PR into `main` (green CI is required; see CONTRIBUTING.md).
+2. Backend, from an up-to-date `main`:
+
+   ```sh
+   git switch main && git pull --ff-only
+   cd services/motion-api
+   modal deploy modal_app.py          # API + GPU functions + sweeper, all one app
+   ```
+
+   ~20 s when no image layer changed. Then **§7.1**: stop any warm `web`
+   container, or the old code keeps answering.
+3. Frontend, from the same `main` checkout:
+
+   ```sh
+   cd apps/web
+   set -a && . ~/.stepwise-secrets/sentry.env && set +a   # browser DSN is inlined at build
+   npm run cf:deploy                  # assets + next build + OpenNext + deploy to the Worker
+   ```
+
+Backend first: the Worker only proxies `/api/*`, so a new frontend against an
+old API is the direction that breaks.
 
 **Before you believe a deploy took effect, read §7.1.** A warm container
 survives `modal deploy` when only a mounted local directory changed, and W4
@@ -106,7 +129,7 @@ curl -s https://sreshta-talluri--stepwise-motion-web.modal.run/health | jq
   "assets": "r2",
   "assets_missing_env": [],
   "assets_url_mode": "presigned",
-  "jobs": { "backend": "volume", "database_url_set": false },
+  "jobs": { "backend": "postgres", "database_url_set": true, "postgres": "ok" },
   "dedupe": "perceptual"
 }
 ```
@@ -117,7 +140,7 @@ Read it as a configuration report, not a liveness ping:
 |---|---|---|
 | `assets` | `r2` | `volume-proxy` — **video seeking does not work.** The R2 Secret is missing or wrong; `assets_missing_env` names which variable. |
 | `assets_url_mode` | `presigned` today | `custom-domain` once §5.2 is done. Presigned means no edge caching, and URLs expire in 6 h. |
-| `jobs.backend` | `volume` today | `postgres` after §5.1 cutover. |
+| `jobs.backend` | `postgres` | `volume` — `stepwise-db` is missing or lost `STEPWISE_JOB_BACKEND` (§5.1 rollback state). |
 | `dedupe` | `perceptual` | `sha256-only` — ffmpeg is missing from the image, and every re-encode of an already-reconstructed clip now costs a fresh $0.08 GPU run. Never a *wrong* match, just fewer matches. |
 
 `/health` reports rather than asserts, on purpose. infrastructure.md §7 names
@@ -140,7 +163,18 @@ developer-machine copy only; the Modal Secrets are the deployed source of truth.
 | `huggingface` | `HF_TOKEN` | `download_weights` | **yes** |
 | `stepwise-r2` | `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, *(later)* `R2_PUBLIC_BASE_URL` | `web`, `export_clip_gltf`, `sweep_expired`, `verify_r2_access` | **yes** — created 2026-03, **verified working 2026-09-21** |
 | `stepwise-db` | `DATABASE_URL` (pooled), `STEPWISE_JOB_BACKEND=postgres` | `web`, `sweep_expired` (analytics roll-up) | yes (§1) |
-| `stepwise-admin` | `STEPWISE_ADMIN_KEY` | `web` (`GET /metrics`, the `/admin` page) | **no** — §3.1 |
+| `stepwise-admin` | `STEPWISE_ADMIN_KEY` | `web` (`GET /metrics`, the `/admin` page) | **yes** — §3.1 |
+| `stepwise-origin` | `STEPWISE_ORIGIN_KEY` (same value as the Worker secret) | `web` (origin lock) | **yes** |
+| `stepwise-sentry` | `SENTRY_DSN_BACKEND` (+ `SENTRY_DSN_WEB`, ignored by Modal) | every function | **yes** — §5.3 |
+| `stepwise-invite` | `STEPWISE_INVITE_CODES`, comma-separated | `web` (`POST /clips/link`) | **yes** |
+
+To add or revoke an invite code: rewrite the whole list (`--force` replaces,
+it does not merge), then redeploy and stop the warm container (§7.1) — the
+codes are read from the environment, so a warm container keeps the old list.
+
+```sh
+modal secret create stepwise-invite --force STEPWISE_INVITE_CODES='code-a,code-b'
+```
 
 ### Verifying `stepwise-r2` rather than trusting it
 
@@ -404,10 +438,10 @@ No code changes. `storage.url_for()` already branches on
    bunny.net, reachable with `rclone sync` precisely because nothing here uses a
    Cloudflare-specific SDK.
 
-For `apps/web` itself (migration step 8) nothing has been built. The app builds
-and typechecks clean and CI proves it on every push; the OpenNext deploy, the
-`/api/*` rewrite to the Modal URL, and `generateMetadata` on the lesson route
-are all still to do and all need the Cloudflare account first.
+`apps/web` itself is **live** on the Worker's `workers.dev` URL (OpenNext,
+`npm run cf:deploy`, §2), with `/api/*` proxied to Modal behind the origin lock.
+What still waits on the domain is only the custom hostname and the asset domain
+above.
 
 ### 5.3 Sentry
 
@@ -500,6 +534,8 @@ costs a real reconstruction), and `test_fingerprint.py`'s measurement mode
 ## 7. Runbook
 
 ### 7.1 "I deployed the fix and it is still broken"
+
+**Check this first after every `modal deploy`.**
 
 **A warm Modal container survives `modal deploy` when only a mounted local
 directory changed.** This is the single most expensive trap in this repo — W4

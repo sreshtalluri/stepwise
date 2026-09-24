@@ -1906,3 +1906,20 @@ change since integration-3 landed on one line of history.
   **R2 credentials are currently rejected** (DEPLOYMENT.md §1).
 
 §27's other three items are unchanged.
+
+---
+
+## 30. `main` is the trunk (since 2026-09-23)
+
+The integration branches (`integration` … `integration-4`, `rebuild-v4`) are
+finished. Since 2026-09-23 `main` holds the rebuild and is the only branch
+anything merges into; the integration passes above are history, not process.
+
+**v1 is preserved, not deleted.** The pre-rebuild `main` (`0d50cc3`,
+2026-03-27) is kept twice: the tag `v1-final` and the branch
+`archive/v1-main`. Neither moves. To look at v1: `git switch --detach v1-final`.
+
+**Workflow.** Branch from `origin/main` (`feat/…`, `fix/…`, `docs/…`), open a
+PR, and merge only when all nine CI checks are green — branch protection
+enforces this, and force-pushes to `main` are refused. Deploys run from `main`
+after the merge (DEPLOYMENT.md §2). Details in `CONTRIBUTING.md`.
