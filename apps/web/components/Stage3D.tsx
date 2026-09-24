@@ -13,6 +13,8 @@ import {
   absentNotes,
   dancerColor,
   followStep,
+  clampScreenLag,
+  MAX_SCREEN_OFFSET,
   deadzoneFor,
   damp,
   rootPlacementObserved,
@@ -571,8 +573,12 @@ function Lights({ doc, grounded }: { doc: MotionResult; grounded: boolean }) {
 function frameRadius(bounds: THREE.Box3, cam: THREE.PerspectiveCamera, margin: number): number {
   const size = bounds.getSize(new THREE.Vector3());
   const halfV = THREE.MathUtils.degToRad(cam.fov) / 2;
-  const halfH = Math.atan(Math.tan(halfV) * cam.aspect);
-  return Math.max(size.y / 2 / Math.tan(halfV), Math.max(size.x, size.z) / 2 / Math.tan(halfH)) * 1.18 * margin;
+  return Math.max(size.y / 2 / Math.tan(halfV), Math.max(size.x, size.z) / 2 / Math.tan(halfH(cam))) * 1.18 * margin;
+}
+
+/** The camera's horizontal half-angle, radians. */
+function halfH(cam: THREE.PerspectiveCamera): number {
+  return Math.atan(Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) * cam.aspect);
 }
 
 /**
@@ -659,6 +665,7 @@ function ViewRig({
   const offset = useRef(new THREE.Vector3());
   const extent = useRef(new THREE.Vector3());
   const anchor = useRef(new THREE.Vector3());
+  const right = useRef(new THREE.Vector3());
   // No floor: follow in the DANCER's frame, not the room's — the root is held rigidly
   // and only body-relative motion goes through the deadzone. With no floor there is
   // nothing to see travel against, and on a moving camera (job_a10682e7, a follow-cam:
@@ -737,6 +744,14 @@ function ViewRig({
       [subject.current.x, subject.current.y, subject.current.z],
       deadzoneFor(bounds.getSize(extent.current).y),
       dt,
+    );
+    // Keep the body inside the pane's width, not just inside a distance in metres.
+    const halfW = lastDist.current * Math.tan(halfH(cam));
+    aim.current = clampScreenLag(
+      aim.current,
+      [subject.current.x, subject.current.y, subject.current.z],
+      right.current.setFromMatrixColumn(cam.matrixWorld, 0).toArray() as Vec3,
+      MAX_SCREEN_OFFSET * halfW,
     );
     autoDist.current = damp(autoDist.current, radius, FOLLOW.tauDistance, Math.min(dt, 0.1));
 

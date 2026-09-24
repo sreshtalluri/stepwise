@@ -476,6 +476,29 @@ export function followStep(
   return [subject[0] + trail[0] * c, subject[1] + trail[1] * c, subject[2] + trail[2] * c];
 }
 
+/**
+ * How far off-centre, as a fraction of the pane's horizontal half-frame, the follow
+ * lets the body's centre sit. `maxLagFactor` is in metres of deadzone, blind to the
+ * pane: on a narrow one (Side in a tile, the phone inset) its 0.56 m put the body's
+ * edge at the pane edge — job_5716's walk back toward the camera at ~4.8 s in Side,
+ * where depth is screen-horizontal. 0.4 is at least the deadzone on any pane wider
+ * than ~0.9 m, so ordinary following looks exactly as before; only a sprint's
+ * trail on a narrow pane is cut, and a ~0.4 m half-width dancer stays inside.
+ */
+export const MAX_SCREEN_OFFSET = 0.4;
+
+/**
+ * Clamp the aim's trail along the screen's horizontal (`right`, unit length) to
+ * `maxOffset` metres. Only that one component moves, so the other axes of the
+ * follow — and anything already inside the limit — are untouched.
+ */
+export function clampScreenLag(aim: Vec3, subject: Vec3, right: Vec3, maxOffset: number): Vec3 {
+  const h = (aim[0] - subject[0]) * right[0] + (aim[1] - subject[1]) * right[1] + (aim[2] - subject[2]) * right[2];
+  if (Math.abs(h) <= maxOffset) return aim;
+  const cut = h - Math.sign(h) * maxOffset;
+  return [aim[0] - right[0] * cut, aim[1] - right[1] * cut, aim[2] - right[2] * cut];
+}
+
 /* ------------------------------------------------------- world placement */
 
 /**
