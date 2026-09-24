@@ -1,102 +1,89 @@
 import Link from "next/link";
-import CountingStage from "../components/CountingStage";
-import PasteHero from "../components/PasteHero";
-import StageFigure from "../components/StageFigure";
-import { marketing, PRODUCT_NAME } from "../lib/copy";
+import CountOff from "../components/front/CountOff";
+import Demo from "../components/front/Demo";
+import LinkDoor from "../components/front/LinkDoor";
+import { marketing as copy, PRODUCT_NAME, upload } from "../lib/copy";
 
 /**
- * The marketing site: docs/DESIGN.md §7d, §7e, and the flow redesign.
+ * The landing, A2 "Count off" (docs/DESIGN.md §7d, §7e). Paper room, loud at
+ * the front door.
  *
- * The hero is direction A's: the paste box IS the primary action, so a link
- * becomes a running job in one step. Beside it, direction B's count strip
- * ticks over a body, teaching the 8-count the lesson is built on before
- * anyone uploads. Loud at the front door, calm in the room (§7e).
- *
- * No cleared demo clip exists yet. `evaluation/clips.yaml`'s `demo-public`
- * slot is `needs-permission` and empty; the private testing clips are
- * `rights: untested` and must never appear on a public page. So the hero's
- * stage is an abstract figure that claims nothing about any real person
- * (components/CountingStage.tsx), and says so.
- *
- * Below the fold, in order: proof band, three steps as an asymmetric list
- * (never three equal cards), closing call to action.
+ * - Hero: headline and the two doors (paste a link, add a file) beside the
+ *   count-off toy. Two grid cells, never layered.
+ * - Demo: the on-video demo, a labelled placeholder until a cleared clip is
+ *   dropped into components/front/Demo.tsx's DEMO constant.
+ * - The wait as steps (no times: nothing here has a job to measure), then
+ *   what the lesson can do, then what works best and the rights lines.
  */
 export default function MarketingPage() {
   return (
-    <main>
-      <nav className="wrap site-nav">
-        <span className="logo">{PRODUCT_NAME}</span>
-        <div className="site-nav-right">
-          <Link href="#proof" className="site-nav-link">{marketing.nav.examples}</Link>
-          <Link href="#steps" className="site-nav-link">{marketing.nav.howItWorks}</Link>
-          <Link href="/upload" className="btn btn-sm">
-            {marketing.nav.openApp}
-          </Link>
+    <main className="fd">
+      <nav className="fd-nav">
+        <Link href="/" className="fd-logo">{PRODUCT_NAME}</Link>
+        <div className="fd-nav-r">
+          <Link href="/lessons">{copy.nav.myLessons}</Link>
+          <Link href="/upload" className="fd-btn fd-btn-sm">{copy.nav.add}</Link>
         </div>
       </nav>
 
-      <section className="wrap hero" id="top">
+      <section className="fd-hero">
         <div>
-          <h1 className="display">
-            {marketing.hero.headlineLead}
-            <br />
-            <em>{marketing.hero.headlineAccent}</em>
+          <h1 className="fd-h1">
+            {copy.hero.headlineLead} <span className="fd-hl">{copy.hero.headlineAccent}</span>
           </h1>
-          <p className="lede">{marketing.hero.lede}</p>
-          <PasteHero />
-        </div>
-
-        <CountingStage />
-      </section>
-
-      <section className="wrap" id="proof">
-        <div className="band">
-          <h2 className="band-heading">{marketing.proof.heading}</h2>
-          <p className="band-body">{marketing.proof.body}</p>
-          <div className="band-pair">
-            <div className="band-panel">
-              <span className="stage-label">{marketing.proof.leftLabel}</span>
-              <StageFigure azimuth={0} height={120} />
-            </div>
-            <div className="band-panel">
-              <span className="stage-label">{marketing.proof.rightLabel}</span>
-              <StageFigure azimuth={90} height={120} />
+          <p className="fd-lede">{copy.hero.lede}</p>
+          <div className="fd-doors">
+            <LinkDoor id="hero" />
+            <div>
+              <Link href="/upload" className="fd-btn fd-btn-ghost">{upload.choose}</Link>
             </div>
           </div>
-          <p className="band-caveat">{marketing.proof.caveat}</p>
+          <ul className="fd-facts" aria-label={upload.worksBestHeading}>
+            {copy.hero.facts.map((f) => (
+              <li key={f}>{f}</li>
+            ))}
+          </ul>
         </div>
+        <CountOff />
       </section>
 
-      {/* Asymmetric list. Three equal cards is a banned pattern (§12.10). */}
-      <section className="wrap steps" id="steps">
-        <h2 className="section-heading">{marketing.steps.heading}</h2>
-        <ol>
-          {marketing.steps.items.map((step, i) => (
-            <li key={step.title} className="step-row">
-              <span className="step-num">{i + 1}</span>
-              <div>
-                <h3 className="step-title">{step.title}</h3>
-                <p className="step-body">{step.body}</p>
-              </div>
+      <Demo />
+
+      <section className="fd-band">
+        <h2 className="fd-h2">{copy.wait.heading}</h2>
+        <p className="fd-lede">{copy.wait.body}</p>
+        <ol className="fd-timeline">
+          {copy.wait.steps.map((s) => (
+            <li key={s.label}>
+              <b>{s.label}</b>
+              <span>{s.body}</span>
             </li>
           ))}
         </ol>
+        <ul className="fd-bits" aria-label={copy.wait.featuresLabel}>
+          {copy.wait.features.map(([text, aside]) => (
+            <li key={text}>
+              {text}
+              {aside && <em> ({aside})</em>}
+            </li>
+          ))}
+        </ul>
       </section>
 
-      <section className="wrap">
-        <div className="close-band">
-          <h2 className="close-heading">{marketing.close.heading}</h2>
-          <p className="muted" style={{ margin: "10px 0 20px" }}>
-            {marketing.close.body}
-          </p>
-          <Link href="#top" className="btn btn-lg">
-            {marketing.close.primary}
-          </Link>
-          <p className="meta" style={{ marginTop: 12 }}>
-            {marketing.hero.noAccount}
-          </p>
+      <footer className="fd-foot">
+        <div>
+          <h3>{copy.foot.worksHeading}</h3>
+          <ul>
+            {upload.worksBest.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
         </div>
-      </section>
+        <div className="fd-note">
+          <p>{upload.rights}</p>
+          <p>{upload.link.rights}</p>
+        </div>
+      </footer>
     </main>
   );
 }

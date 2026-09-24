@@ -104,9 +104,9 @@ test("no overclaim about unseen motion — DESIGN.md §7h", () => {
 test("the case-1 claim is not undersold — DESIGN.md §7h", () => {
   // The dancer turning away IS tracked, and orbiting to see them is the
   // product's best claim. Underclaiming it is a recorded failure mode too, so
-  // the proof band must actually make the claim.
-  assert.match(copy.marketing.proof.body, /turns? away/i);
-  assert.match(copy.marketing.proof.body, /tracked/i);
+  // the landing's demo section must actually make the claim.
+  assert.match(copy.marketing.demo.body, /turns? away/i);
+  assert.match(copy.marketing.demo.body, /tracked/i);
 });
 
 test("marketing states no processing-time number — PRD §3, §7", () => {
@@ -122,13 +122,13 @@ test("marketing states no processing-time number — PRD §3, §7", () => {
     assert.ok(!duration.test(line), `${path} states an unmeasured processing time: ${line}`);
   }
   // The clip-length cap is a real, enforced constraint and must be stated.
-  assert.match(copy.marketing.steps.items[0].body, /60 seconds/);
+  assert.match(copy.marketing.hero.facts.join(" "), /60 seconds/);
 });
 
 test("upload constraints match the multi-dancer revision — PRD §5", () => {
   // "One dancer" was removed as a hard constraint on 2026-09-18. Stale copy in
   // DESIGN.md §7d/§11 still says it; this test stops it coming back.
-  const all = copy.upload.worksBest.join(" ") + " " + copy.marketing.steps.items[0].body;
+  const all = copy.upload.worksBest.join(" ") + " " + copy.marketing.hero.facts.join(" ");
   assert.ok(
     !/\bone dancer\b(?!\s+or)/i.test(all),
     `upload copy caps the clip at one dancer: ${all}`,
@@ -236,4 +236,18 @@ test("privacy and removal copy match what the code does — §7h", () => {
   assert.ok(!/\b(terms|within \d+|hours?|we will respond|contact us)\b/i.test(all), all);
   // There is no app, only a website (1e680e3).
   for (const [path, line] of lines) assert.ok(!/\bthe app\b/i.test(line), `${path}: ${line}`);
+});
+
+test("the entry flow never makes 8 counts a rule — owner, 2026-09-23", () => {
+  // "Step by step" is the name; a loop is as long as the learner sets it. The
+  // processing page shows no counts at all (the early ones were off the beat).
+  const entry: [string, string][] = [];
+  collect({ marketing: copy.marketing, upload: copy.upload, processing: copy.processing }, "copy", entry);
+  for (const [path, line] of entry) {
+    assert.ok(!/8-counts?|eight-counts?|8 counts at a time|counts 1 to 8/i.test(line), `${path}: ${line}`);
+  }
+  assert.match(copy.marketing.hero.headlineAccent, /step by step/i);
+  // The invite gate is stated wherever a link can be pasted, and the file door stays open.
+  assert.match(copy.upload.link.gated, /invited/i);
+  assert.match(copy.upload.link.gated, /file works for everyone/i);
 });
