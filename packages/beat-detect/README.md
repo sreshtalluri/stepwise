@@ -47,20 +47,34 @@ result.warnings     # e.g. tempo outside the plausible dance-practice band
 `count_total` to report) — same reasoning as `endS` in `core.ts`: the caller
 owns the clip's true end, this module never invents one.
 
-## Known gap: downbeat, not just beat (relevant to A5)
+## How the grid is chosen (2026-09-23)
 
-librosa's `beat_track` returns evenly-spaced *beats*, not *downbeats* (which
-beat starts the musical phrase / dance count). `count_one_s` here is simply
-**the first detected beat**, not a modeled downbeat. madmom's
-`DBNDownBeatTrackingProcessor` does model this; we didn't use it (licence,
-above). Practically: the proposed `secondsPerCount` (tempo) is usually right,
-but `countOneS` (where count 1 actually falls) can legitimately be off by up
-to one beat even when confidence is high. This is exactly the kind of error
-A5's "tap on the beat" correction UI needs to make cheap to fix — this module
-does not attempt to resolve that UI question, only to flag that its downbeat
-guess is weaker than its tempo guess.
+1. **Tempo.** librosa's `beat_track` reading is only a starting point: its
+   tempo is quantized to whole 512-sample lags (near 115-120 BPM the only
+   values are 112.3 / 117.5 / 123.0 / 129.2), and a 2% error drifts the grid
+   half a beat off within ~25 counts. `_refine_grid` searches +-6% around it
+   for the constant spacing and phase that land on the most onset energy
+   (6 ms envelope, 0.5 ms / 4 ms steps).
+2. **Count 1.** `_count_one` takes the beat-of-the-bar (mod 4) with the
+   strongest low-band (<150 Hz, kick) onsets, first one after the music
+   starts. It warns when no phase is >=10% ahead of the runner-up.
 
-## Real-audio test results (2026-09-18)
+Checked against Beat This! (CPJKU, run offline as a reference, not shipped):
+
+| clip | ref BPM | old BPM / count 1 | new BPM / count 1 | ref first downbeat | new max beat error |
+|---|---|---|---|---|---|
+| solo-02 | 115.07 | 117.45 / 1.300 (prod) | 115.01 / 1.905 | 1.88 | 40 ms (old 257 ms) |
+| solo-01 | 142.11 | 143.55 / 0.070 | 141.05 / 1.292 | 1.28 | 43 ms (old 210 ms) |
+| group-synced-01 | 120.01 | 117.45 / 0.627 | 119.95 / 1.120 | 1.10 | 52 ms (old 245 ms) |
+| solo-07 | 125 -> 129 (speeds up) | 129.20 / 0.070 | 129.02 / 1.358 (warns) | 1.94 | 237 ms (old 462 ms) |
+
+Known gaps: a track that changes tempo (solo-07) cannot fit one constant
+grid; and which of two bars starts the 8-count phrase is not modelled --
+count 1 is the first strong downbeat. The dancer's joint speed (15 fps
+MotionResult) was tried as a phase cue and did not separate the beats of the
+bar on any clip, so it is not used. "Set count 1" stays the override.
+
+## Real-audio test results (2026-09-18, before the refinement above)
 
 `evaluation/clips.yaml`'s actual video files live in the Modal Volume
 `stepwise-eval`, not in git. This session had `modal` already authenticated
