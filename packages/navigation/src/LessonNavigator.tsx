@@ -393,7 +393,7 @@ export function StructureEditor(p: LessonNavigatorProps & { endS: number }) {
 
       <div className="sw-editor-body">
         <p className="sw-editor-note">
-          {copy.counts.summary(grid.countTotal, perMinute, `${grid.countOneS.toFixed(2)}s`)}{" "}
+          {copy.counts.summary(grid.countTotal, perMinute, `${(grid.countOneS < -0.02 ? timeOfCount(grid, 9) : grid.countOneS).toFixed(2)}s`)}{" "}
           {p.countsFrom === "music" ? copy.counts.byMusic : copy.counts.byHand}
         </p>
 

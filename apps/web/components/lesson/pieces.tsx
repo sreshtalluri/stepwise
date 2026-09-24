@@ -470,7 +470,7 @@ export function Timeline({ l }: { l: Lesson }) {
   const ands = l.clickOn && l.clickMode === "ands";
   const ticks = useMemo(
     () =>
-      Array.from({ length: total }, (_, i) => i + 1).flatMap((c) => [
+      Array.from({ length: total }, (_, i) => i + 1).filter((c) => timeOfCount(grid, c) >= 0).flatMap((c) => [
         <span key={c} className="ls-tl-tick" style={{ left: pct(timeOfCount(grid, c)) }} />,
         ...(ands && c < total ? [<span key={`${c}&`} className="ls-tl-tick ls-and-tick" style={{ left: pct(timeOfCount(grid, c + 0.5)) }} />] : []),
       ]),

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   advance,
   countAtTime,
+  countLabel,
   currentCount,
   deletePart,
   eightStartCount,
@@ -168,12 +169,66 @@ test("a custom part name survives renumbering, a default one does not", () => {
   assert.deepEqual(named.parts.map((p) => p.name), ["Chorus", "Part 2", "Part 3", "Part 4"]);
 });
 
+/** The 1–8 label of the beat at `t` (a hair after it, as the count strip reads it). */
+const labelAt = (s: LessonStructure, t: number) => countLabel(Math.floor(countAtTime(s.grid, t + 1e-6)));
+/** Seconds of the 1 nearest `t`, whatever the dance numbers it. */
+const oneNear = (s: LessonStructure, t: number) => {
+  const eight = 8 * s.grid.secondsPerCount;
+  return s.grid.countOneS + eight * Math.round((t - s.grid.countOneS) / eight);
+};
+const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+
 test("'set 1 here' re-anchors without disturbing the spacing", () => {
   const moved = setCountOne(base, 1.2, endS);
   assert.equal(moved.grid.secondsPerCount, base.grid.secondsPerCount);
-  assert.equal(moved.grid.countOneS, 1.2);
-  assert.equal(timeOfCount(moved.grid, 1), 1.2);
-  assert.ok(moved.grid.countTotal < base.grid.countTotal, "a later count 1 leaves room for fewer counts");
+  assert.equal(labelAt(moved, 1.2), 1);
+  assert.ok(near(oneNear(moved, 1.2), 1.2));
+  assert.ok(moved.grid.countTotal > base.grid.countTotal, "the beats before it are counts too");
+});
+
+test("set 1 mid-song fills the counts back to the first beat, in phase", () => {
+  const spc = base.grid.secondsPerCount;
+  const set = setCountOne(base, 20 * spc, endS); // the 21st beat of the clip
+  for (let k = 0; k <= 20; k++) {
+    const t = k * spc;
+    assert.ok(countAtTime(set.grid, t + 1e-6) >= 1, `beat ${k} is in the dance`);
+    assert.equal(labelAt(set, t), ((((k - 20) % 8) + 8) % 8) + 1, `beat ${k}`);
+  }
+  assert.deepEqual([0, 1, 2, 3, 4].map((k) => labelAt(set, k * spc)), [5, 6, 7, 8, 1]);
+});
+
+test("+1 twice is two counts, and a nudge starts from a 1 set by hand", () => {
+  const spc = base.grid.secondsPerCount;
+  const set = setCountOne(base, 5 * spc, endS);
+  const twice = nudgeCountOne(nudgeCountOne(set, 1, endS), 1, endS);
+  assert.equal(labelAt(twice, 7 * spc), 1, "5 + 2");
+  assert.equal(labelAt(twice, 5 * spc), 7);
+  const back = nudgeCountOne(nudgeCountOne(twice, -1, endS), -1, endS);
+  assert.ok(near(oneNear(back, 5 * spc), 5 * spc), "−1 twice undoes it: the hand-set 1 is kept");
+  // Across the start of the clip too: 8 presses one way come all the way round.
+  let s = base;
+  for (let i = 0; i < 8; i++) s = nudgeCountOne(s, -1, endS);
+  assert.equal(labelAt(s, 0), 1);
+  for (let i = 1; i <= 3; i++) assert.equal(labelAt(nudgeCountOne(base, -i, endS), 0), i + 1, `−${i}`);
+});
+
+test("try another 1: the alternate lands a 1 and the parts move only that far", () => {
+  // job_5716ecd3…'s proposal and its +2 alternate.
+  const spc = 0.6318224489795875;
+  const proposal = normalizeStructure(
+    { grid: { countOneS: 2.2634673469387625, secondsPerCount: spc, countTotal: 1 }, parts: startingStructure(47.6, spc).parts },
+    47.6,
+  );
+  const alt = setCountOne(proposal, 3.5271122448979373, 47.6);
+  assert.equal(labelAt(alt, 3.5271122448979373), 1);
+  assert.equal(labelAt(alt, 2.2634673469387625), 7);
+  const partTimes = (s: LessonStructure) => s.parts.slice(1, 4).map((p) => timeOfCount(s.grid, p.startCount));
+  partTimes(alt).forEach((t, i) => assert.ok(near(t - partTimes(proposal)[i], 2 * spc), `part ${i + 2} moved 2 counts`));
+});
+
+test("filling in before count 1 is stable: normalizing twice changes nothing", () => {
+  const once = setCountOne(base, 9 * base.grid.secondsPerCount, endS);
+  assert.deepEqual(normalizeStructure(once, endS), once);
 });
 
 test("half and double keep every part boundary at the same moment in time", () => {
@@ -195,7 +250,7 @@ test("tap-in needs two taps and averages the gaps", () => {
   assert.equal(gridFromTaps(base, [1.0], endS), null);
   assert.equal(gridFromTaps(base, [1.0, 1.0], endS), null, "zero spacing is not a tempo");
   const tapped = gridFromTaps(base, [1.0, 1.55, 2.0, 2.5], endS)!;
-  assert.equal(tapped.grid.countOneS, 1.0);
+  assert.ok(near(oneNear(tapped, 1.0), 1.0), "a 1 on the first tap");
   assert.ok(Math.abs(tapped.grid.secondsPerCount - 0.5) < 1e-9, "(2.5 - 1.0) / 3");
 });
 
@@ -203,18 +258,19 @@ test("−1 / +1 count moves count 1 by one spacing and keeps the parts on their 
   const one = setCountOne(base, 2.0, endS);
   const spc = one.grid.secondsPerCount;
   const later = nudgeCountOne(one, 1, endS);
-  assert.ok(Math.abs(later.grid.countOneS - (2.0 + spc)) < 1e-9);
+  assert.ok(near(oneNear(later, 2.0), 2.0 + spc));
   assert.equal(later.grid.secondsPerCount, spc);
   assert.deepEqual(later.parts.map((p) => p.startCount), one.parts.map((p) => p.startCount).filter((c) => c <= later.grid.countTotal));
   const earlier = nudgeCountOne(one, -1, endS);
-  assert.ok(Math.abs(earlier.grid.countOneS - (2.0 - spc)) < 1e-9);
+  assert.ok(near(oneNear(earlier, 2.0), 2.0 - spc));
 });
 
-test("count 1 never goes before the clip — one count earlier wraps to seven later", () => {
+test("one count earlier at the start of the clip keeps counting: the beat before the first 1 is an 8", () => {
   const atStart = setCountOne(base, 0.1, endS);
   const spc = atStart.grid.secondsPerCount;
   const nudged = nudgeCountOne(atStart, -1, endS);
-  assert.ok(Math.abs(nudged.grid.countOneS - (0.1 + 7 * spc)) < 1e-9);
+  assert.ok(near(nudged.grid.countOneS, 0.1 - spc), "count 1 is before the clip, not wrapped an eight later");
+  assert.equal(labelAt(nudged, 0.1), 2);
 });
 
 test("tap on 1 snaps to the nearest beat and moves count 1 at most four counts", () => {
@@ -222,13 +278,17 @@ test("tap on 1 snaps to the nearest beat and moves count 1 at most four counts",
   const spc = one.grid.secondsPerCount;
   // A late tap near the beat two counts after the old count 1 of the third eight.
   const tapped = tapOnOne(one, 1.0 + (16 + 2) * spc + 0.12, endS);
-  assert.ok(Math.abs(tapped.grid.countOneS - (1.0 + 2 * spc)) < 1e-9, `got ${tapped.grid.countOneS}`);
+  assert.ok(near(oneNear(tapped, 1.0), 1.0 + 2 * spc), `got ${tapped.grid.countOneS}`);
+  assert.equal(labelAt(tapped, 1.0 + 18 * spc), 1);
+  const partTimes = (s: LessonStructure) => s.parts.slice(1).map((p) => timeOfCount(s.grid, p.startCount));
+  assert.ok(near(partTimes(tapped)[1] - partTimes(one)[1], 2 * spc), "parts moved two counts, not renumbered");
   // Three counts before a 1 is the same as "the 1 is three counts earlier".
   const early = tapOnOne(one, 1.0 + (24 - 3) * spc, endS);
-  assert.ok(Math.abs(early.grid.countOneS - (1.0 + 5 * spc)) < 1e-9, "wrapped forward, not before the clip");
+  assert.equal(labelAt(early, 1.0 + 21 * spc), 1);
+  assert.equal(labelAt(early, 0.1), 2, "and the counts before it are filled in (its 1 is at −0.4 s)");
   // Tapping on a beat that is already a 1 changes nothing.
   const same = tapOnOne(one, 1.0 + 8 * spc - 0.05, endS);
-  assert.ok(Math.abs(same.grid.countOneS - 1.0) < 1e-9);
+  assert.deepEqual(same, one);
 });
 
 // ------------------------------------------------------------------- playback
