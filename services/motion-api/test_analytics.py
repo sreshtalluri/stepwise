@@ -284,10 +284,14 @@ def test_rollup_folds_old_days_and_keeps_recent_rows(pg):
 
 
 @needs_pg
-def test_job_events_are_forwarded_with_a_key(pg, monkeypatch):
+def test_job_events_are_forwarded_with_a_key_and_under_the_daily_cap(pg, monkeypatch):
     sent = []
     monkeypatch.setattr(analytics, "_forward_soon", lambda visitor, rows: sent.append((visitor, rows)))
-    monkeypatch.delenv("POSTHOG_KEY", raising=False)
+    monkeypatch.setenv("POSTHOG_KEY", "phc_test")
+    monkeypatch.setenv("POSTHOG_DAILY_CAP", "0")
+    analytics.record("job_created", {"source": "file"}, UA, "1.1.1.1", job_id="job_x", clip_id="x")
+    assert sent == []  # over today's cap: Neon only
+    monkeypatch.delenv("POSTHOG_DAILY_CAP")
     analytics.record("job_created", {"source": "file"}, UA, "1.1.1.1", job_id="job_f", clip_id="f")
     analytics.record_finished({"job_id": "job_f", "state": "failed", "retry_count": 0,
                                "error": {"code": "export_error"}}, "f", lambda: 1)

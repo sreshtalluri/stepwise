@@ -180,7 +180,8 @@ def record(name: str, props: dict, headers, client_host, *, job_id=None, clip_id
             conn.execute("INSERT INTO events (name, job_id, clip_id, day_hash, props) "
                          "VALUES (%s, %s, %s, %s, %s::jsonb)",
                          (name, job_id, clip_id, visitor, json.dumps(props)))
-        _forward_soon(visitor, [(name, props, job_id)])
+            if _posthog_ok(conn):
+                _forward_soon(visitor, [(name, props, job_id)])
     _guarded(name, run)
 
 
@@ -220,7 +221,8 @@ def record_finished(doc: dict, clip_id: str, persons_of) -> None:
                              (key[0], clip_id, json.dumps(props)))
                 # No visitor here (the worker finished it, not a browser): the
                 # job id is the PostHog distinct_id.
-                _forward_soon(key[0], [("job_finished", props, key[0])])
+                if _posthog_ok(conn):
+                    _forward_soon(key[0], [("job_finished", props, key[0])])
         _FINISHED.add(key)
     _guarded("job_finished", run)
 
@@ -260,9 +262,25 @@ def forward(visitor: bytes | str, rows: list, when: str) -> None:
         print(f"[analytics] posthog forward dropped: {type(e).__name__}: {e}")
 
 
+def posthog_daily_cap() -> int:
+    """Events a day we send PostHog. 30k/day keeps a month under the free
+    tier's 1M; Neon still gets everything past it."""
+    return int(os.environ.get("POSTHOG_DAILY_CAP") or 30000)
+
+
+def _posthog_ok(conn) -> bool:
+    """POSTHOG_KEY is set and today's events (all of them, in Neon) are under
+    the cap. ponytail: counts Neon rows, not what PostHog actually took; a
+    counter of forwarded events is the upgrade if the two drift."""
+    if not os.environ.get("POSTHOG_KEY"):
+        return False
+    (n,) = conn.execute("SELECT count(*) FROM events WHERE occurred_at >= %s", (_today(),)).fetchone()
+    return n <= posthog_daily_cap()
+
+
 def _forward_soon(visitor, rows: list) -> None:
     """forward() off the request thread, for the server-side events, which have
-    no BackgroundTasks to hand. No key -> nothing, not even a thread."""
+    no BackgroundTasks to hand."""
     if os.environ.get("POSTHOG_KEY"):
         threading.Thread(target=forward, daemon=True, args=(
             visitor, rows, dt.datetime.now(dt.timezone.utc).isoformat())).start()
@@ -296,7 +314,7 @@ def ingest(body: bytes, headers, client_host, defer=None) -> int:
                 with conn.cursor() as cur:
                     cur.executemany("INSERT INTO events (name, job_id, day_hash, props) "
                                     "VALUES (%s, %s, %s, %s::jsonb)", rows)
-                if defer and os.environ.get("POSTHOG_KEY"):
+                if defer and _posthog_ok(conn):
                     defer(forward, visitor, kept[:room], dt.datetime.now(dt.timezone.utc).isoformat())
             return len(rows)
     return _guarded("batch", run, 0)
