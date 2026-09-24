@@ -49,6 +49,8 @@ export interface LessonNavigatorProps {
   structure: LessonStructure;
   onStructureChange: (next: LessonStructure) => void;
   timeS: number;
+  /** The player's clock read at this instant, for tap-in; `timeS` may be a throttled copy. */
+  mediaTimeS?: () => number;
   onSeek: (timeS: number) => void;
   playing: boolean;
   onPlayingChange: (playing: boolean) => void;
@@ -380,8 +382,11 @@ export function StructureEditor(p: LessonNavigatorProps & { endS: number }) {
   const perMinute = Math.round(60 / grid.secondsPerCount);
 
   const tap = () => {
-    const now = performance.now() / 1000;
-    const next = taps.length && now - taps[taps.length - 1] > 2.5 ? [now] : [...taps, now];
+    // Media time, not wall time: the grid lives on the video's clock.
+    const now = p.mediaTimeS?.() ?? p.timeS;
+    const gap = now - taps[taps.length - 1];
+    // A pause, a seek back or a long gap starts a new run of taps.
+    const next = taps.length && !(gap > 0 && gap <= 2.5) ? [now] : [...taps, now];
     setTaps(next);
     const applied = gridFromTaps(p.structure, next, p.endS);
     if (applied) p.onStructureChange(applied);

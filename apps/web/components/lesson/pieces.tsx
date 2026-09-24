@@ -1072,6 +1072,7 @@ export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }
           onStructureChange={l.editStructure}
           countsFrom={l.countsFrom === "hand" ? "hand" : "music"}
           timeS={l.displayTime}
+          mediaTimeS={() => l.timeRef.current}
           onSeek={l.seek}
           playing={l.playing}
           onPlayingChange={(p) => (p ? l.play() : l.pause())}

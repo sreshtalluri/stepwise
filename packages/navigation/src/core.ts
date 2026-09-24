@@ -323,9 +323,12 @@ export function retempo(structure: LessonStructure, factor: "half" | "double", e
 }
 
 /**
- * Tap-in: the learner taps along with the music. Count 1 is the first tap and the
- * spacing is the average gap, which is more forgiving of one bad tap than using
- * consecutive gaps. Needs two taps; returns null below that.
+ * Tap-in: the learner taps along with the music, first tap on a 1. `tapsS` are
+ * MEDIA times (the video's clock, so playback speed does not matter). The spacing
+ * is the average gap, more forgiving of one bad tap than consecutive gaps; count 1
+ * sits where the whole run of taps puts it, not on the first tap alone, and the
+ * counts fill in before it like any other 1 (`normalizeStructure`). Needs two
+ * taps; returns null below that.
  */
 export function gridFromTaps(
   structure: LessonStructure,
@@ -335,8 +338,9 @@ export function gridFromTaps(
   if (tapsS.length < 2) return null;
   const spc = (tapsS[tapsS.length - 1] - tapsS[0]) / (tapsS.length - 1);
   if (!(spc > 0)) return null;
+  const one = tapsS.reduce((sum, t, i) => sum + t - i * spc, 0) / tapsS.length;
   return normalizeStructure(
-    { ...structure, grid: { countOneS: tapsS[0], secondsPerCount: spc, countTotal: 1 } },
+    { ...structure, grid: { countOneS: one, secondsPerCount: spc, countTotal: 1 } },
     endS,
   );
 }

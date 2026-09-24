@@ -250,8 +250,21 @@ test("tap-in needs two taps and averages the gaps", () => {
   assert.equal(gridFromTaps(base, [1.0], endS), null);
   assert.equal(gridFromTaps(base, [1.0, 1.0], endS), null, "zero spacing is not a tempo");
   const tapped = gridFromTaps(base, [1.0, 1.55, 2.0, 2.5], endS)!;
-  assert.ok(near(oneNear(tapped, 1.0), 1.0), "a 1 on the first tap");
   assert.ok(Math.abs(tapped.grid.secondsPerCount - 0.5) < 1e-9, "(2.5 - 1.0) / 3");
+  assert.ok(near(oneNear(tapped, 1.0), 1.0125), "the 1 is fitted to all four taps: (1 + 1.05 + 1 + 1) / 4");
+});
+
+test("tap-in on media times: taps at half speed fit the music's grid, counts filled back", () => {
+  // The music's beats: 0.6 s apart, a 1 at 7.3 s. The learner taps 1, 2, 3, 4, 5
+  // from 7.3 s at 0.5× — wall time doubles, media time does not — each tap a bit late.
+  const late = [0.08, 0.05, 0.1, 0.06, 0.07];
+  const taps = late.map((d, i) => 7.3 + i * 0.6 + d);
+  const tapped = gridFromTaps(base, taps, endS)!;
+  assert.ok(Math.abs(tapped.grid.secondsPerCount - 0.6) < 0.01, `spacing ${tapped.grid.secondsPerCount}`);
+  assert.ok(Math.abs(oneNear(tapped, 7.3) - 7.37) < 0.02, "the 1 lands a reaction time after 7.3 s, not on one stray tap");
+  assert.equal(labelAt(tapped, 7.3 + 4 * 0.6 + 0.1), 5);
+  assert.ok(countAtTime(tapped.grid, 0.1) >= 1, "the counts run back to the start of the clip");
+  assert.equal(labelAt(tapped, 7.37 - 0.6 + 0.05), 8);
 });
 
 test("−1 / +1 count moves count 1 by one spacing and keeps the parts on their counts", () => {
