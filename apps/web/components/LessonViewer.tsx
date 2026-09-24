@@ -154,7 +154,14 @@ function useLesson(
   loopRef.current = loopTimes(loop);
   const onWrapRef = useRef<(() => void) | null>(null);
   const { timeRef, displayTime } = useVideoClock(video, loopRef, onWrapRef);
-  const [playing, setPlaying] = useState(false);
+  const [playing, setPlayingState] = useState(false);
+  const playingRef = useRef(false);
+  const setPlaying = useCallback((p: boolean) => {
+    // A pause fired by the old <video> being unmounted must not count as the learner's.
+    if (!p && video && !video.isConnected) return;
+    playingRef.current = p;
+    setPlayingState(p);
+  }, [video]);
 
   // One pass of the loop: build-up steps up, and an eight played through at full
   // speed gets its tick.
@@ -171,16 +178,21 @@ function useLesson(
   };
 
   // A layout switch (rotating the phone) mounts a new <video>; carry the time over.
+  // Playing carries over too: a rotation mid-loop keeps dancing.
   const resumeAt = useRef<number | null>(null);
+  const resumePlaying = useRef(false);
   useEffect(() => {
     if (!video) return;
     const seekIn = () => {
       video.currentTime = resumeAt.current ?? loopRef.current?.[0] ?? 0;
+      if (resumePlaying.current) void video.play().catch(() => {});
     };
     if (video.readyState >= 1) seekIn();
     else video.addEventListener("loadedmetadata", seekIn, { once: true });
     return () => {
       resumeAt.current = timeRef.current;
+      // Not `video.paused`: a <video> leaving the document pauses itself first.
+      resumePlaying.current = playingRef.current;
     };
   }, [video, timeRef]);
 

@@ -245,7 +245,12 @@
 .ls-pane-bar > * {
   pointer-events: auto;
 }
+.ls-pane-bar .ls-select {
+  min-width: 0;
+}
 .ls-pane-bar .ls-select select {
+  max-width: 100%;
+  text-overflow: ellipsis;
   background-color: var(--glass);
   color: var(--on-stage);
 }
@@ -1184,6 +1189,23 @@
 }
 .ls-views > .ls-stage {
   flex-grow: 1.4;
+}
+/* The stage area decides how many views fit, live, as the window changes: three
+   panes need ~900px, two ~540px. The learner's picks are kept, just not drawn. */
+.ls-body {
+  container: ls-body / inline-size;
+}
+@container ls-body (max-width: 900px) {
+  .ls-views > .ls-pane:nth-child(3),
+  .ls-views > .ls-pane:nth-child(2) ~ .ls-add-angle {
+    display: none;
+  }
+}
+@container ls-body (max-width: 560px) {
+  .ls-views > .ls-pane,
+  .ls-add-angle {
+    display: none;
+  }
 }
 .ls-add-angle {
   flex: 0 0 44px;

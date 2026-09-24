@@ -348,7 +348,7 @@ export const lesson = {
     all: "All",
     done: "looped at full speed",
     doneCount: (n: number, total: number) => `${n} of ${total} at full speed`,
-    next: (span: string) => `Next: ${span}`,
+    next: (span: string) => `Next: ${span.toLowerCase()}`,
   },
 
   transport: {
