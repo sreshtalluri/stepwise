@@ -674,8 +674,8 @@ export const privacy = {
       items: [
         // components/RemoveLessonDialog.tsx -> POST /jobs/{job_id}/removal
         "Use Report or remove this video on the lesson, or paste the lesson's link below. It deletes the video and the 3D lesson for everyone, straight away. Anyone with the link can do it; you do not have to be the person who added the clip.",
-        // no contact address exists
-        "You need the lesson's link. There is no email address for requests yet.",
+        // privacy.contact: a free Gmail forwarding to the owner until the domain exists
+        "You need the lesson's link. For anything else (a rights claim, a question, or if the button does not work) email stepwisedance.help@gmail.com. A person reads it and replies by hand.",
       ],
     },
   ],
@@ -684,6 +684,7 @@ export const privacy = {
   linkSubmit: "Continue",
   linkInvalid: "That is not a lesson link from this site. It looks like /lesson/ followed by an id.",
   footer: "Privacy",
+  contact: "stepwisedance.help@gmail.com",
   // Shown where a video is handed over (the paste box and the upload page), so
   // the promise is read at the moment it matters, not only in the footer.
   // Every clause is code: retention.TTL_DAYS == 180 since last open (the same
