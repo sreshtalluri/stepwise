@@ -123,8 +123,14 @@ def _deployed_sha() -> str | None:
 # spec at deploy with no build at all. It is also how DEPLOYMENT.md §7.1's
 # warm-container trap shows up in Sentry: an error whose release is the
 # PREVIOUS sha, after a deploy, came from a container that outlived it.
+#
+# ALWAYS attached, even with no sha: the container re-imports this file, gets
+# None from _deployed_sha(), and must still declare the same number of
+# dependencies as the deploy did, or every function dies at startup with
+# "Function has N dependencies but container got N+1 object ids". Its value
+# inside the container is irrelevant -- the object is bound by id at deploy.
 _SHA = _deployed_sha()
-OBS_SECRETS = SENTRY_SECRET + ([modal.Secret.from_dict({"STEPWISE_GIT_SHA": _SHA})] if _SHA else [])
+OBS_SECRETS = SENTRY_SECRET + [modal.Secret.from_dict({"STEPWISE_GIT_SHA": _SHA or ""})]
 OBSERVABILITY_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "observability.py")
 
 # Light image for stages 1-3: just enough to prove CUDA and pull weights.
