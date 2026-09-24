@@ -303,3 +303,33 @@ def test_unknown_job_is_404_but_a_just_dispatched_one_is_queued(api):
     # Dispatched (job-meta written) but the worker has not written status yet.
     api.results_volume.files["/job_fresh.job-meta.json"] = b'{"clip_id": "fresh"}'
     assert api.get_job_status("job_fresh")["state"] == "queued"
+
+
+def test_stored_result_is_served_as_is_and_validated_once(api, monkeypatch):
+    from fastapi import HTTPException
+    import gzip
+    from pathlib import Path
+    fixture = Path(__file__).resolve().parents[2] / "packages/motion-contract/fixtures/good-lesson.json"
+    doc = json.loads(fixture.read_text())
+    job_id = doc["job_id"]
+    _seed_lesson(api, "good", job_id)
+    stored = gzip.compress(json.dumps(doc).encode())
+    api.results_volume.files["/good.motion-result.json.gz"] = stored
+    api.results_volume.files[f"/{job_id}.job-status.json"] = json.dumps({
+        "schema_version": "1.0.0", "job_id": job_id, "state": "succeeded", "stage_message": "",
+        "progress": 1.0, "error": None, "retry_count": 0}).encode()
+    api._PRIMED.add(job_id)  # no background thread in a test
+    calls = []
+    real = api.validate_motion_result
+    monkeypatch.setattr(api, "validate_motion_result", lambda d: calls.append(1) or real(d))
+
+    for _ in range(2):
+        resp = api.get_job_result(job_id)
+        assert resp.body == stored and resp.headers["content-encoding"] == "gzip"
+    assert len(calls) == 1, "validated on every open again"
+
+    # A contract-invalid stored document is still refused, never served.
+    api.results_volume.files["/good.motion-result.json.gz"] = gzip.compress(b'{"persons": 3}')
+    with pytest.raises(HTTPException) as e:
+        api.get_job_result(job_id)
+    assert e.value.status_code == 500

@@ -63,6 +63,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -579,6 +580,8 @@ def get_job_status(job_id: str) -> dict:
         # worse than a 500 (DESIGN.md §7h's honesty rule applies to plumbing
         # too, not just copy).
         raise HTTPException(500, f"job-status document failed contract validation: {result.errors}")
+    if doc["state"] == "succeeded":
+        _prime_result(job_id)
     return doc
 
 
@@ -642,8 +645,61 @@ def retry_job(job_id: str, http: Request) -> dict:
 # this shipped have an npz and no stored document.
 # ---------------------------------------------------------------------------
 
+# (clip_id, job_id, sha256 of the stored bytes) already validated in this
+# replica. An export writes a new object, so a new sha, so it is validated
+# again; nothing else can change what a key names.
+_VALID_STORED: set[tuple[str, str, str]] = set()
+_PRIMED: set[str] = set()
+
+
+def _stored_result(job_id: str, clip_id: str) -> Optional[bytes]:
+    """The stored MotionResult as gzip bytes, contract-validated once, or None.
+
+    Validation stays (DESIGN.md §7h: never serve a contract-invalid document)
+    but runs once per stored object, not per open -- it is 2.9 s of the cost
+    on a laptop and most of the 13 s on Modal.
+    """
+    stored = _r2_read(storage.motion_result_key(clip_id)) \
+        or _volume_read_bytes(results_volume, f"/{clip_id}.motion-result.json.gz")
+    if stored is None:
+        return None
+    key = (clip_id, job_id, hashlib.sha256(stored).hexdigest())
+    if key in _VALID_STORED:
+        return stored
+    doc = json.loads(gzip.decompress(stored))
+    stamped = doc.get("job_id") != job_id
+    if stamped:
+        # Written by whichever job first reconstructed this clip; a deduplicated
+        # upload is normally handed that same job_id, so this is rare. Stamping
+        # keeps "the id of the job that produced this result" honest.
+        doc["job_id"] = job_id
+    result = validate_motion_result(doc)
+    if not result.valid:
+        raise HTTPException(500, f"Stored MotionResult failed contract validation: {result.errors}")
+    if stamped:
+        return gzip.compress(json.dumps(doc, separators=(",", ":")).encode(), 6)
+    _VALID_STORED.add(key)
+    return stored
+
+
+def _prime_result(job_id: str) -> None:
+    """Validate a just-succeeded lesson in the background, so the learner's
+    first open (seconds later, from the processing screen) is a cache hit."""
+    if job_id in _PRIMED:
+        return
+    _PRIMED.add(job_id)
+
+    def run():
+        try:
+            _stored_result(job_id, _clip_id_for(job_id))
+        except Exception as e:  # noqa: BLE001 -- the real request reports it
+            print(f"[result] could not prime {job_id}: {e}")
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 @app.get("/jobs/{job_id}/result")
-def get_job_result(job_id: str) -> dict:
+def get_job_result(job_id: str):
     status = get_job_status(job_id)
     if status["state"] != "succeeded":
         raise HTTPException(409, f"Job is '{status['state']}', not 'succeeded'.")
@@ -654,26 +710,24 @@ def get_job_result(job_id: str) -> dict:
     # poll, so the extra read is free where it matters.
     _refuse_if_removed(clip_id)
 
-    stored = _r2_read(storage.motion_result_key(clip_id)) \
-        or _volume_read_bytes(results_volume, f"/{clip_id}.motion-result.json.gz")
+    stored = _stored_result(job_id, clip_id)
     if stored is not None:
-        doc = json.loads(gzip.decompress(stored))
-        # The stored document was written by whichever job first reconstructed
-        # this clip. A second, deduplicated upload is handed that same job_id,
-        # so this is normally a no-op -- but stamping it is cheap and keeps the
-        # contract's "id of the job that produced this result" honest either way.
-        doc["job_id"] = job_id
-    else:
-        try:
-            doc = motion_result.build_motion_result(
-                job_id, clip_id,
-                _volume_read_bytes(results_volume, f"/{clip_id}.npz"),
-                _volume_read_json(results_volume, f"/{clip_id}.export-manifest.json"),
-                _volume_read_json(results_volume, f"/{clip_id}.performance.json"),
-                _volume_read_json(results_volume, f"/{clip_id}.beats.json"),
-            )
-        except motion_result.MotionResultUnavailable as e:
-            raise HTTPException(e.status, e.detail) from e
+        _touch(clip_id)
+        # Already gzipped and already validated: handed over byte-for-byte.
+        # Re-parsing, re-validating and re-encoding an 11.7 MB document on
+        # every open took 13 s before the first byte on Modal (solo-02).
+        return Response(stored, media_type="application/json",
+                        headers={"Content-Encoding": "gzip"})
+    try:
+        doc = motion_result.build_motion_result(
+            job_id, clip_id,
+            _volume_read_bytes(results_volume, f"/{clip_id}.npz"),
+            _volume_read_json(results_volume, f"/{clip_id}.export-manifest.json"),
+            _volume_read_json(results_volume, f"/{clip_id}.performance.json"),
+            _volume_read_json(results_volume, f"/{clip_id}.beats.json"),
+        )
+    except motion_result.MotionResultUnavailable as e:
+        raise HTTPException(e.status, e.detail) from e
 
     result = validate_motion_result(doc)
     if not result.valid:
