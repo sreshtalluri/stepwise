@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Focus } from "./Stage3D";
-import { defaultPersonIndex, SPEEDS, type MotionResult } from "../lib/motion";
+import { defaultPersonIndex, sourceAspect, SPEEDS, type MotionResult } from "../lib/motion";
 import { load, openingStructure, save } from "../lib/structure";
 import { parseHandoff } from "../lib/flow";
 import {
@@ -173,9 +173,15 @@ function useLesson(
     [doc, lessonId],
   );
 
-  // ---- views: the top bar's toggles, tiled. The mesh on the video, plus the front on a desktop.
+  // ---- the source frame's shape: a 9:16 short and a 16:9 YouTube clip lay out differently.
+  const aspect = useMemo(() => sourceAspect(doc), [doc]);
+  /** Square or wider: on a phone the video goes full-width on top with the 3D under it. */
+  const wide = aspect >= 1;
+
+  // ---- views: the top bar's toggles, tiled. The mesh on the video, plus the front on a
+  // desktop — and on a phone too when the clip is wide, since the 3D fills the space under it.
   const maxPanels = phone ? MAX_PANELS.phone : MAX_PANELS.desk;
-  const [panelPicks, setPanels] = useState<PanelId[]>(phone ? ["overlay"] : ["overlay", "front"]);
+  const [panelPicks, setPanels] = useState<PanelId[]>(phone && !wide ? ["overlay"] : ["overlay", "front"]);
   // Rotating a desktop-sized pick onto a phone keeps the picks, just draws the first two.
   const panels = panelPicks.slice(0, maxPanels);
   const toggleView = useCallback((id: PanelId) => setPanels((p) => togglePanel(p.slice(0, maxPanels), id, maxPanels)), [maxPanels]);
@@ -373,7 +379,7 @@ function useLesson(
   const crop = useVideoCrop(video, doc, focusRef, timeRef, selected, follow && panels.includes("video"), mirrored);
 
   return {
-    doc, title, videoUrl, glbUrls, lessonId, endS,
+    doc, title, videoUrl, glbUrls, lessonId, endS, aspect, wide,
     video, setVideo, timeRef, displayTime, playing, setPlaying, play, pause, togglePlay, seek,
     structure, editStructure, authored, countsFrom, tapOne, nudgeOne, tryOne, alternates,
     eights, loop, setLoop, loopEight, here, hereCount, stepLoop, loopLen, setLoopLen, next, done, sameSpan,

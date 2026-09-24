@@ -398,6 +398,12 @@
   overflow: hidden;
   height: clamp(360px, 70dvh, 720px);
 }
+/* A wide demo clip takes its own shape: no bars above and below it. */
+.fd-demo-stage[data-wide] {
+  height: auto;
+  aspect-ratio: var(--ar);
+  max-height: clamp(360px, 70dvh, 720px);
+}
 .fd-demo-stage video {
   position: absolute;
   inset: 0;
@@ -755,6 +761,26 @@
 @media (orientation: landscape) and (max-height: 520px) {
   .fd-pstage {
     height: calc(100dvh - 96px);
+  }
+}
+/* A wide (YouTube) clip: the stage takes the clip's own shape instead of a tall box
+   with bars above and below, and on a desktop the stage gets the wider column. */
+.fd-proc-grid[data-wide] .fd-pstage {
+  height: auto;
+  aspect-ratio: var(--ar);
+  max-height: min(76dvh, 860px);
+}
+@media (min-width: 900px) {
+  .fd-proc-grid[data-wide] {
+    grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.8fr);
+  }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  .fd-proc-grid[data-wide] {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.8fr);
+  }
+  .fd-proc-grid[data-wide] .fd-pstage {
+    max-height: calc(100dvh - 96px);
   }
 }
 .fd-mirror {

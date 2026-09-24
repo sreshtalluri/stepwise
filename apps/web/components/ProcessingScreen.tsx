@@ -149,6 +149,8 @@ function Room({
   const [mirror, setMirror] = useState(false);
   const [muted, setMuted] = useState(true);
   const [paused, setPaused] = useState(false);
+  /** The clip's width / height once its metadata is in: a wide clip gets a wide stage. */
+  const [aspect, setAspect] = useState(0);
 
   useEffect(() => {
     setSrc(localClipUrl(jobId) ?? `/api/jobs/${encodeURIComponent(jobId)}/video`);
@@ -183,7 +185,11 @@ function Room({
   }, [nextSpeed, togglePlay]);
 
   return (
-    <div className="fd-proc-grid">
+    <div
+      className="fd-proc-grid"
+      data-wide={aspect >= 1 ? "" : undefined}
+      style={aspect ? ({ ["--ar" as string]: aspect } as React.CSSProperties) : undefined}
+    >
       <div className="fd-pstage" onClick={togglePlay} role="button" tabIndex={-1} aria-label={copy.videoLabel}>
         <span className="fd-tag">{copy.videoLabel}</span>
         <div className="fd-mirror" style={{ transform: mirror ? "scaleX(-1)" : undefined }}>
@@ -197,6 +203,7 @@ function Room({
               loop
               onPlay={() => setPaused(false)}
               onPause={() => setPaused(true)}
+              onLoadedMetadata={(e) => setAspect(e.currentTarget.videoWidth / (e.currentTarget.videoHeight || 1))}
             />
           )}
           <SkeletonOverlay jobId={jobId} video={video} available={dancersIn} />
