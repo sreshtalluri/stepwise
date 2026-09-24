@@ -3,7 +3,8 @@
  * is unit-testable and is tested in motion.test.ts.
  */
 import type { CropRect, MotionResult, Visibility } from "../../../packages/motion-contract/src/ts/generated/motion-result";
-import { REGIONS, lookupJoint } from "./regions";
+import { jointWorldPosition } from "./footContact";
+import { FOOT_JOINTS, REGIONS, lookupJoint } from "./regions";
 
 export type { CropRect, MotionResult, Visibility };
 
@@ -796,10 +797,10 @@ export const VIEW_PRESETS: ViewPreset[] = [
  * pelvis→neck is 6° off the normal on the upright half of solo-02, vs 12° off +Y);
  * only the camera rig was tilted.
  *
- * `level` false, or grounding "none", returns the camera's own axes. The "camera"
- * preset uses that on purpose — it is the one view that is not estimated, so it stays
- * in the source camera's frame. "none" uses it because there is no floor to level to,
- * and a body-derived up is a dancer's lean, not gravity.
+ * `level` false returns the camera's own axes. The "camera" preset uses that on
+ * purpose — it is the one view that is not estimated, so it stays in the source
+ * camera's frame. Grounding "none" levels to the feet instead (`feetUp`), never to the
+ * torso: a body-derived up is a dancer's lean, not gravity.
  */
 export interface StageBasis {
   right: Vec3;
@@ -812,10 +813,12 @@ export function stageBasis(doc: MotionResult, level = true): StageBasis {
   const camX: Vec3 = [m[0], m[1], m[2]];
   const camY: Vec3 = [m[4], m[5], m[6]];
   const camZ: Vec3 = [m[8], m[9], m[10]];
-  const plane = !level || doc.grounding.status === "none" ? null : doc.grounding.floor_plane;
-  if (!plane) return { right: camX, up: camY, back: camZ };
+  if (!level) return { right: camX, up: camY, back: camZ };
+  const plane = doc.grounding.status === "none" ? null : doc.grounding.floor_plane;
+  const normal = plane ? (plane.normal as Vec3) : feetUp(doc);
+  if (!normal) return { right: camX, up: camY, back: camZ };
 
-  let up = norm(plane.normal as Vec3);
+  let up = norm(normal);
   // Up is the side of the floor the phone's picture-up points to — the dancer's head,
   // and the pipeline's own sign convention (grounding.py: normal[1] > 0), which the
   // placement in Stage3D relies on. NOT "the side the camera is on": a phone resting on
@@ -828,6 +831,51 @@ export function stageBasis(doc: MotionResult, level = true): StageBasis {
   if (Math.hypot(...back) < 1e-3) back = reject([-camY[0], -camY[1], -camY[2]], up);
   back = norm(back);
   return { right: cross(up, back), up, back };
+}
+
+/**
+ * Grounding "none": an orbit up from where the feet are, or null for the camera's own.
+ *
+ * A moving camera (job_a10682e7, a follow-cam) never grounds: the floor it sees tilts
+ * as the phone pitches (lowest-foot plane 5.0 deg in the first half of that clip, 11.1
+ * deg in the second), so no single plane passes the solver, and the orbit fell back to
+ * the phone's axes — a Side view slanted by the clip's mean 8.6 deg pitch. Nothing is
+ * DRAWN from this (DESIGN.md §10: no fake floor); it only levels the orbit, the way a
+ * grounded clip's floor does. Least squares of each observed sample's lowest observed
+ * foot height on where the dancer STANDS (root x, z) — the root, not the foot, so a kick
+ * forward is not read as a slope — ridged toward level so a dancer who never travels, or
+ * has no visible feet, gets the camera's axes as before.
+ * On the static clips this lands within 1.5-2 deg of the solver's own floor normal.
+ */
+const FEET_UP_PRIOR_M = 0.1; // calibration knob: spread (std, metres) at which the fit and "level" weigh equally
+
+function feetUp(doc: MotionResult): Vec3 | null {
+  const byName = new Map(doc.joint_hierarchy.joints.map((j) => [j.name, j.index]));
+  const feet = FOOT_JOINTS.map((n) => lookupJoint(byName, n)).filter((j): j is number => j !== undefined);
+  const pts: Vec3[] = [];
+  doc.persons.forEach((person, p) =>
+    person.samples.forEach((s, i) => {
+      if (!person.root_trajectory[i]?.provenance.observed) return;
+      let low = Infinity;
+      for (const j of feet) {
+        if (s.joints[j]?.visibility === "observed") low = Math.min(low, jointWorldPosition(doc, p, i, j)[1]);
+      }
+      const root = person.root_trajectory[i].position;
+      if (low < Infinity) pts.push([root[0], low, root[2]]);
+    }),
+  );
+  if (pts.length < 3) return null;
+  const mean = [0, 1, 2].map((k) => pts.reduce((a, v) => a + v[k], 0) / pts.length);
+  let xx = 0, xz = 0, zz = 0, xy = 0, zy = 0;
+  for (const v of pts) {
+    const x = v[0] - mean[0], y = v[1] - mean[1], z = v[2] - mean[2];
+    xx += x * x; xz += x * z; zz += z * z; xy += x * y; zy += z * y;
+  }
+  const ridge = pts.length * FEET_UP_PRIOR_M ** 2;
+  xx += ridge; zz += ridge;
+  const det = xx * zz - xz * xz;
+  const a = (xy * zz - zy * xz) / det, b = (zy * xx - xy * xz) / det; // y ≈ a x + b z
+  return [-a, 1, -b];
 }
 
 /** `subject + dist * (direction of azimuth/elevation in `basis`)`. */
