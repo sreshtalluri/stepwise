@@ -293,3 +293,13 @@ def test_reuploading_a_reencode_starts_no_gpu_job(api, tmp_path):
     # And the removal is therefore complete for BOTH uploaders at once.
     api.remove_lesson(second.clip_id, None)
     assert api.uploads_volume.files == {}
+
+
+def test_unknown_job_is_404_but_a_just_dispatched_one_is_queued(api):
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as e:
+        api.get_job_status("job_never_existed")
+    assert e.value.status_code == 404
+    # Dispatched (job-meta written) but the worker has not written status yet.
+    api.results_volume.files["/job_fresh.job-meta.json"] = b'{"clip_id": "fresh"}'
+    assert api.get_job_status("job_fresh")["state"] == "queued"

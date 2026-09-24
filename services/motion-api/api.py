@@ -533,10 +533,13 @@ def get_job_status(job_id: str) -> dict:
         # the most misleading possible answer, since the thing it is waiting
         # for is never coming.
         _refuse_if_removed(_clip_id_for(job_id))
-        # Not a 404: a job that was just spawned and hasn't written its first
-        # "queued" doc yet is a real, valid state, not a missing job. Distinct
-        # from "job_id never existed" only by convention -- this service does
-        # not keep its own job registry (the results Volume is the registry).
+        # A job that was just spawned and hasn't written its first "queued"
+        # doc yet is a real, valid state -- but _store_and_dispatch writes
+        # job-meta BEFORE the spawn, so no meta either means this job_id never
+        # existed. Without the 404 a mistyped lesson link waits on "queued"
+        # forever.
+        if _volume_read_json(results_volume, f"/{job_id}.job-meta.json") is None:
+            raise HTTPException(404, "No lesson at this link.")
         return {
             "schema_version": "1.0.0",
             "job_id": job_id,
