@@ -32,6 +32,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import urllib.request
 
 import jobstore
@@ -175,9 +176,12 @@ def record(name: str, props: dict, headers, client_host, *, job_id=None, clip_id
     """A server-side event (job_created). Best-effort."""
     def run():
         with jobstore.connection() as conn:
+            visitor = _visitor(conn, headers, client_host)
             conn.execute("INSERT INTO events (name, job_id, clip_id, day_hash, props) "
                          "VALUES (%s, %s, %s, %s, %s::jsonb)",
-                         (name, job_id, clip_id, _visitor(conn, headers, client_host), json.dumps(props)))
+                         (name, job_id, clip_id, visitor, json.dumps(props)))
+            if _posthog_ok(conn):
+                _forward_soon(visitor, [(name, props, job_id)])
     _guarded(name, run)
 
 
@@ -215,6 +219,10 @@ def record_finished(doc: dict, clip_id: str, persons_of) -> None:
                 conn.execute("INSERT INTO events (name, job_id, clip_id, props) "
                              "VALUES ('job_finished', %s, %s, %s::jsonb)",
                              (key[0], clip_id, json.dumps(props)))
+                # No visitor here (the worker finished it, not a browser): the
+                # job id is the PostHog distinct_id.
+                if _posthog_ok(conn):
+                    _forward_soon(key[0], [("job_finished", props, key[0])])
         _FINISHED.add(key)
     _guarded("job_finished", run)
 
@@ -227,16 +235,18 @@ def record_finished(doc: dict, clip_id: str, persons_of) -> None:
 # geoip is off, so the only address PostHog could see is Modal's.
 # ---------------------------------------------------------------------------
 
-def posthog_batch(key: str, visitor: bytes, rows: list, when: str) -> dict:
-    """rows are validate()'s (name, props, lesson) tuples."""
+def posthog_batch(key: str, visitor: bytes | str, rows: list, when: str) -> dict:
+    """rows are validate()'s (name, props, lesson) tuples. `visitor` is the
+    day_hash, or a job id for job_finished, which has no visitor."""
+    distinct = visitor if isinstance(visitor, str) else visitor.hex()
     return {"api_key": key, "batch": [
-        {"event": name, "distinct_id": visitor.hex(), "timestamp": when,
+        {"event": name, "distinct_id": distinct, "timestamp": when,
          "properties": {**props, **({"lesson": lesson} if lesson else {}),
                         "$process_person_profile": False, "$geoip_disable": True, "$ip": None}}
         for name, props, lesson in rows]}
 
 
-def forward(visitor: bytes, rows: list, when: str) -> None:
+def forward(visitor: bytes | str, rows: list, when: str) -> None:
     """POST the batch to PostHog. No POSTHOG_KEY -> no-op. Runs after the
     response (api.py BackgroundTasks); a failure is logged and dropped."""
     key = os.environ.get("POSTHOG_KEY")
@@ -250,6 +260,48 @@ def forward(visitor: bytes, rows: list, when: str) -> None:
         urllib.request.urlopen(req, timeout=3).close()
     except Exception as e:  # noqa: BLE001 -- dashboards are optional
         print(f"[analytics] posthog forward dropped: {type(e).__name__}: {e}")
+
+
+def posthog_daily_cap() -> int:
+    """Events a day we send PostHog. 30k/day keeps a month under the free
+    tier's 1M; Neon still gets everything past it."""
+    return int(os.environ.get("POSTHOG_DAILY_CAP") or 30000)  # ponytail: beta cap; raise or drop at public launch
+
+
+def _posthog_ok(conn) -> bool:
+    """POSTHOG_KEY is set and today's events (all of them, in Neon) are under
+    the cap. ponytail: counts Neon rows, not what PostHog actually took; a
+    counter of forwarded events is the upgrade if the two drift."""
+    if not os.environ.get("POSTHOG_KEY"):
+        return False
+    (n,) = conn.execute("SELECT count(*) FROM events WHERE occurred_at >= %s", (_today(),)).fetchone()
+    if n <= posthog_daily_cap():
+        return True
+    if _CAPPED_ON != _today():  # once a day per container
+        _note_capped(n)
+    return False
+
+
+_CAPPED_ON: dt.date | None = None
+
+
+def _note_capped(n: int) -> None:
+    global _CAPPED_ON
+    _CAPPED_ON = _today()
+    print(f"[analytics] PostHog daily cap reached ({n} events today); Neon only until midnight UTC")
+    try:
+        import observability
+        observability.message("PostHog daily cap reached", "web", level="warning", events_today=str(n))
+    except Exception:  # noqa: BLE001 -- a warning about dashboards must never break a request
+        pass
+
+
+def _forward_soon(visitor, rows: list) -> None:
+    """forward() off the request thread, for the server-side events, which have
+    no BackgroundTasks to hand."""
+    if os.environ.get("POSTHOG_KEY"):
+        threading.Thread(target=forward, daemon=True, args=(
+            visitor, rows, dt.datetime.now(dt.timezone.utc).isoformat())).start()
 
 
 def ingest(body: bytes, headers, client_host, defer=None) -> int:
@@ -280,7 +332,7 @@ def ingest(body: bytes, headers, client_host, defer=None) -> int:
                 with conn.cursor() as cur:
                     cur.executemany("INSERT INTO events (name, job_id, day_hash, props) "
                                     "VALUES (%s, %s, %s, %s::jsonb)", rows)
-                if defer and os.environ.get("POSTHOG_KEY"):
+                if defer and _posthog_ok(conn):
                     defer(forward, visitor, kept[:room], dt.datetime.now(dt.timezone.utc).isoformat())
             return len(rows)
     return _guarded("batch", run, 0)

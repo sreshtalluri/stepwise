@@ -281,3 +281,21 @@ def test_rollup_folds_old_days_and_keeps_recent_rows(pg):
         "SELECT visitors, finished FROM report_daily WHERE day < current_date - 300").fetchone()
     assert (visitors, finished) == (2, 1)
     assert pg.execute("SELECT error_code, jobs FROM report_failures").fetchall() == [("export_error", 1)]
+
+
+@needs_pg
+def test_job_events_are_forwarded_with_a_key_and_under_the_daily_cap(pg, monkeypatch):
+    sent = []
+    monkeypatch.setattr(analytics, "_forward_soon", lambda visitor, rows: sent.append((visitor, rows)))
+    monkeypatch.setenv("POSTHOG_KEY", "phc_test")
+    monkeypatch.setenv("POSTHOG_DAILY_CAP", "0")
+    analytics.record("job_created", {"source": "file"}, UA, "1.1.1.1", job_id="job_x", clip_id="x")
+    assert sent == []  # over today's cap: Neon only
+    monkeypatch.delenv("POSTHOG_DAILY_CAP")
+    analytics.record("job_created", {"source": "file"}, UA, "1.1.1.1", job_id="job_f", clip_id="f")
+    analytics.record_finished({"job_id": "job_f", "state": "failed", "retry_count": 0,
+                               "error": {"code": "export_error"}}, "f", lambda: 1)
+    (created, finished) = sent
+    assert created[1] == [("job_created", {"source": "file"}, "job_f")] and isinstance(created[0], bytes)
+    assert finished[0] == "job_f" and finished[1][0][0] == "job_finished"
+    assert analytics.posthog_batch("k", "job_f", finished[1], "t")["batch"][0]["distinct_id"] == "job_f"
