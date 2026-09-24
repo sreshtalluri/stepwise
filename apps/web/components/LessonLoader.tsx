@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import LessonViewer from "./LessonViewer";
 import RemoveLessonDialog from "./RemoveLessonDialog";
 import LessonLoading from "./LessonLoading";
+import StateScreen from "./StateScreen";
 import { LESSONS, lessonSource } from "../lib/lessons";
 import { captureThumb, forgetLesson, hasThumb, recordOpened } from "../lib/myLessons";
 import { lesson as lessonCopy } from "../lib/copy";
@@ -90,31 +90,25 @@ export default function LessonLoader({ lessonId }: { lessonId: string }) {
 
   if (load.kind === "loading") return <LessonLoading />;
 
+  return <LoadFailed status={load.status} lessonId={lessonId} />;
+}
+
+function LoadFailed({ status, lessonId }: { status: number; lessonId: string }) {
   const copy = lessonCopy.load;
-  const job = encodeURIComponent(lessonId);
+  if (status === 409) {
+    return (
+      <StateScreen pose="sit" title={copy.notReady} body={copy.notReadyBody}
+        action={{ label: copy.notReadyLink, href: `/job/${encodeURIComponent(lessonId)}` }} />
+    );
+  }
+  if (status === 410) {
+    return <StateScreen pose="wave" title={copy.removed} body={copy.removedBody} action={{ label: copy.removedLink, href: "/" }} />;
+  }
+  if (status === 404) {
+    return <StateScreen pose="shrug" title={copy.notFound} body={copy.notFoundBody} action={{ label: copy.notFoundLink, href: "/upload" }} />;
+  }
   return (
-    <main className="wrap app-screen">
-      {load.status === 409 ? (
-        <>
-          <h1 className="app-title">{copy.notReady}</h1>
-          <Link href={`/job/${job}`} className="btn" style={{ marginTop: 20 }}>
-            {copy.notReadyLink}
-          </Link>
-        </>
-      ) : load.status === 410 ? (
-        <h1 className="app-title">{copy.removed}</h1>
-      ) : load.status === 404 ? (
-        <>
-          <h1 className="app-title">{copy.notFound}</h1>
-          <Link href="/upload" className="btn" style={{ marginTop: 20 }}>
-            {copy.notFoundLink}
-          </Link>
-        </>
-      ) : (
-        <h1 className="app-title" role="alert">
-          {copy.failed}
-        </h1>
-      )}
-    </main>
+    <StateScreen pose="look" title={copy.failed} body={copy.failedBody} alert
+      action={{ label: copy.failedLink, onClick: () => window.location.reload() }} />
   );
 }

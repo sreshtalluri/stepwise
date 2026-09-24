@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SkeletonOverlay from "./SkeletonOverlay";
+import StateScreen, { StateNote } from "./StateScreen";
 import { processing as copy } from "../lib/copy";
-import { flowSteps, handoffHref, type Step } from "../lib/flow";
+import { failedBody, flowSteps, handoffHref, type Step } from "../lib/flow";
 import { localClipUrl, timeRemaining, useJobStatus, type JobStatus } from "../lib/jobStatus";
 import { prefersReducedMotion } from "../lib/reveal";
 
@@ -33,10 +34,15 @@ const HEARTBEAT_MS = 1000;
 
 type Milestones = NonNullable<JobStatus["milestones"]>;
 
+type Retry = { kind: "idle" | "sending" } | { kind: "error"; message: string; final: boolean };
+
 export default function ProcessingScreen({ jobId }: { jobId: string }) {
-  const feed = useJobStatus(jobId);
+  // Bumped after a retry is accepted, so the poll starts again.
+  const [epoch, setEpoch] = useState(0);
+  const feed = useJobStatus(jobId, 2000, epoch);
   const status = feed.kind === "ok" ? feed.status : null;
   const done = status?.state === "succeeded";
+  const [retry, setRetry] = useState<Retry>({ kind: "idle" });
 
   // Milestones only ride on live documents, so keep the latest of each.
   const [milestones, setMilestones] = useState<Milestones>({});
@@ -45,21 +51,44 @@ export default function ProcessingScreen({ jobId }: { jobId: string }) {
     if (incoming) setMilestones((prev) => ({ ...prev, ...incoming }));
   }, [incoming]);
 
+  /**
+   * POST /jobs/{id}/retry. The API allows two retries, then answers 409
+   * retries_exhausted with its own sentence, shown as-is. Any other 409 means
+   * the job is no longer failed (a retry from another tab), so just watch it.
+   */
+  async function sendRetry() {
+    setRetry({ kind: "sending" });
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+      const body = (await res.json().catch(() => null)) as { detail?: { error?: { code?: string; message?: string } } } | null;
+      const error = typeof body?.detail === "object" ? body.detail.error : undefined;
+      if (res.ok || (res.status === 409 && !error)) {
+        setRetry({ kind: "idle" });
+        setEpoch((e) => e + 1);
+      } else if (error?.message) {
+        setRetry({ kind: "error", message: error.message, final: error.code === "retries_exhausted" });
+      } else {
+        setRetry({ kind: "error", message: copy.retryFailed, final: false });
+      }
+    } catch {
+      setRetry({ kind: "error", message: copy.retryFailed, final: false });
+    }
+  }
+
   if (status?.state === "failed" && status.error) {
+    const final = !status.error.retryable || (retry.kind === "error" && retry.final);
     return (
-      <main className="fd fd-proc">
-        <div className="fd-add">
-          <h1 className="fd-h1 fd-h1-app">{copy.failedTitle}</h1>
-          <p className="fd-lede" role="alert">
-            {status.error.message}
-          </p>
-          {status.error.retryable ? (
-            <Link href="/upload" className="fd-btn" style={{ marginTop: 20 }}>
-              {copy.retry}
-            </Link>
-          ) : null}
-        </div>
-      </main>
+      <StateScreen
+        pose="sitback"
+        title={copy.failedTitle}
+        body={retry.kind === "error" ? retry.message : failedBody(status.error)}
+        alert
+        action={
+          final
+            ? { label: copy.addDifferent, href: "/upload" }
+            : { label: retry.kind === "sending" ? copy.retrying : copy.retry, onClick: sendRetry, disabled: retry.kind === "sending" }
+        }
+      />
     );
   }
 
@@ -101,7 +130,7 @@ function Rail({ feed }: { feed: ReturnType<typeof useJobStatus> }) {
         </p>
         <CopyLink />
       </div>
-      {feed.kind === "unreachable" && <p className="fd-rail-row fd-note">{copy.unreachable}</p>}
+      {feed.kind === "unreachable" && <StateNote pose="look" message={copy.unreachable} />}
     </div>
   );
 }

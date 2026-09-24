@@ -8,6 +8,9 @@ import "./front.css";
 // dancers, loops of any length under Counts and parts, 0.5x to 1x, mirror, and
 // a 3D body drawn on the video. No "upload" (links work too) and no "the dancer".
 export const metadata: Metadata = {
+  // Absolute URLs for the share image (app/opengraph-image.png). No custom
+  // domain yet (docs/DEPLOYMENT.md); NEXT_PUBLIC_SITE_URL overrides.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://stepwise.sreshta-talluri.workers.dev"),
   title: "stepwise: learn any dance, step by step",
   description:
     "Add a dance video up to 60 seconds long, with one to six dancers. Loop any part, slow it down, mirror it, and see each dancer as a 3D body on the video.",

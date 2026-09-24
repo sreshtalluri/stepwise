@@ -258,3 +258,51 @@ test("the handover privacy line states only what the code does", () => {
   assert.match(copy.privacy.atHandover, /remove it from the lesson page/);
   assert.doesNotMatch(copy.privacy.atHandover, /\b(never|forever|guarantee|secure|encrypted)\b/i);
 });
+
+test("state screens: one headline, one line, one action, each true today", () => {
+  const load = copy.lesson.load;
+  const screens: [string, string, string][] = [
+    [load.notReady, load.notReadyBody, load.notReadyLink],
+    [load.removed, load.removedBody, load.removedLink],
+    [load.notFound, load.notFoundBody, load.notFoundLink],
+    [load.failed, load.failedBody, load.failedLink],
+    [copy.site.notFound.title, copy.site.notFound.body, copy.site.notFound.action],
+    [copy.site.crashed.title, copy.site.crashed.body, copy.site.crashed.action],
+    [copy.processing.failedTitle, copy.processing.failedRetryable, copy.processing.retry],
+    [copy.myLessons.emptyTitle, copy.myLessons.emptyBody, copy.myLessons.emptyLink],
+  ];
+  for (const [title, body, action] of screens) {
+    assert.match(title, /^[A-Z][^.]*\.$/, `headline is one sentence: ${title}`);
+    assert.ok(body.length > 0 && body.length < 120, `one line: ${body}`);
+    assert.match(action, /^[A-Z][^.]*$/, `action is a label, not a sentence: ${action}`);
+  }
+  // There is no app, only a website: not in any form.
+  for (const [path, line] of lines) assert.ok(!/\bapps?\b/i.test(line), `${path}: ${line}`);
+});
+
+test("a removed lesson's page covers both ways a lesson goes — retention.TTL_DAYS = 180, removal", () => {
+  // The sweeper writes the same tombstone as a takedown, so a 410 can be either.
+  const body = copy.lesson.load.removedBody;
+  assert.match(body, /when someone asks/);
+  assert.match(body, /six months unopened/);
+  assert.doesNotMatch(copy.lesson.load.removed, /asked|expired|you/i);
+});
+
+test("processing says only what the page observes, and never shows raw pipeline text", () => {
+  // While it cannot reach the service the page cannot see the job, only its own polling.
+  assert.match(copy.processing.unreachable, /This page keeps checking\./);
+  assert.doesNotMatch(copy.processing.unreachable, /keeps running|will catch up/);
+  // The retryable line is ours and hedged: the API says a retry "could plausibly" work.
+  assert.match(copy.processing.failedRetryable, /may work/);
+  assert.doesNotMatch(copy.processing.failedRetryable, /error:|exception|traceback/i);
+});
+
+test("the site's crash screen is not about lessons — global-error wraps every route", () => {
+  for (const line of Object.values(copy.site.crashed)) assert.doesNotMatch(line, /lesson(?!s and clips)/i);
+});
+
+test("a too-large file is not told to check its connection", () => {
+  assert.doesNotMatch(copy.upload.errors.tooLarge, /connection/i);
+  // It names no byte count: the host in front of the service may stop a file below 200 MB.
+  assert.doesNotMatch(copy.upload.errors.tooLarge, /\d/);
+});

@@ -1,8 +1,9 @@
 import Link from "next/link";
+import { Lockup } from "../components/brand/Mark";
 import CountOff from "../components/front/CountOff";
 import Demo from "../components/front/Demo";
 import LinkDoor from "../components/front/LinkDoor";
-import { marketing as copy, PRODUCT_NAME, upload } from "../lib/copy";
+import { marketing as copy, upload } from "../lib/copy";
 
 /**
  * The landing, A2 "Count off" (docs/DESIGN.md §7d, §7e). Paper room, loud at
@@ -19,7 +20,7 @@ export default function MarketingPage() {
   return (
     <main className="fd">
       <nav className="fd-nav">
-        <Link href="/" className="fd-logo">{PRODUCT_NAME}</Link>
+        <Lockup />
         <div className="fd-nav-r">
           <Link href="/lessons">{copy.nav.myLessons}</Link>
           <Link href="/upload" className="fd-btn fd-btn-sm">{copy.nav.add}</Link>

@@ -2,10 +2,12 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
+import { Lockup } from "../../components/brand/Mark";
 import { useRouter } from "next/navigation";
 import LinkDoor from "../../components/front/LinkDoor";
-import { PRODUCT_NAME, marketing, upload as copy } from "../../lib/copy";
-import { submitFile, type Submitted } from "../../lib/submit";
+import { marketing, upload as copy } from "../../lib/copy";
+import { submitFile, type Failure, type Submitted } from "../../lib/submit";
+import { FAILURE_POSE, StateNote, type StateAction } from "../../components/StateScreen";
 
 /**
  * "Add a clip", A2 (docs/DESIGN.md §7d, §11). The link door is the landing
@@ -20,8 +22,9 @@ import { submitFile, type Submitted } from "../../lib/submit";
 export default function UploadPage() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ error: string; kind: Failure } | null>(null);
   const [busy, setBusy] = useState(false);
+  const lastFile = useRef<File | null>(null);
 
   async function go(work: Promise<Submitted>) {
     setError(null);
@@ -30,14 +33,29 @@ export default function UploadPage() {
     if ("jobId" in out) router.push(`/job/${encodeURIComponent(out.jobId)}`);
     else {
       setBusy(false);
-      setError(out.error);
+      setError(out);
     }
   }
+
+  function send(file: File) {
+    lastFile.current = file;
+    void go(submitFile(file));
+  }
+
+  const chooseFile = () => inputRef.current?.click();
+  // One next step per failure, beside the sentence (components/StateScreen.tsx).
+  const next: Record<Failure, StateAction> = {
+    limit: { label: copy.actions.myLessons, href: "/lessons" },
+    invite: { label: copy.actions.chooseFile, onClick: chooseFile },
+    refused: { label: copy.actions.chooseFile, onClick: chooseFile },
+    file: { label: copy.actions.chooseFile, onClick: chooseFile },
+    unreachable: { label: copy.actions.tryAgain, onClick: () => lastFile.current && send(lastFile.current) },
+  };
 
   return (
     <main className="fd">
       <nav className="fd-nav">
-        <Link href="/" className="fd-logo">{PRODUCT_NAME}</Link>
+        <Lockup />
         <div className="fd-nav-r">
           <Link href="/lessons">{marketing.nav.myLessons}</Link>
         </div>
@@ -46,7 +64,7 @@ export default function UploadPage() {
       <div className="fd-add">
         <h1 className="fd-h1 fd-h1-app">{copy.title}</h1>
 
-        <LinkDoor id="add" />
+        <LinkDoor id="add" onAddFile={chooseFile} />
 
         <div className="fd-or">{copy.or}</div>
 
@@ -59,7 +77,7 @@ export default function UploadPage() {
           onDrop={(e) => {
             e.preventDefault();
             const file = e.dataTransfer.files[0];
-            if (file) void go(submitFile(file));
+            if (file) send(file);
           }}
         >
           <b>{copy.choose}</b>
@@ -72,14 +90,12 @@ export default function UploadPage() {
           hidden
           onChange={(e) => {
             const file = e.target.files?.[0];
-            if (file) void go(submitFile(file));
+            // Cleared, so choosing the same file again after a failure still fires.
+            e.target.value = "";
+            if (file) send(file);
           }}
         />
-        {error && (
-          <p role="alert" className="form-error">
-            {error}
-          </p>
-        )}
+        {error && <StateNote pose={FAILURE_POSE[error.kind]} message={error.error} action={next[error.kind]} />}
         <p className="fd-note">{copy.rights}</p>
 
         <h2 className="fd-works-h">{copy.worksBestHeading}</h2>

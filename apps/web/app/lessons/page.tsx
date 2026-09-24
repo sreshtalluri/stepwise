@@ -5,6 +5,7 @@ import Link from "next/link";
 import { LESSONS } from "../../lib/lessons";
 import { myLessons as copy } from "../../lib/copy";
 import { forgetLesson, listMyLessons, type SavedLesson } from "../../lib/myLessons";
+import { StateBlock } from "../../components/StateScreen";
 import s from "./lessons.module.css";
 
 /**
@@ -27,11 +28,9 @@ export default function MyLessonsPage() {
       <p className="muted">{copy.subtitle}</p>
 
       {list?.length === 0 && (
-        <div className="dropzone">
-          <p>{copy.empty}</p>
-          <Link href="/upload" className="btn" style={{ marginTop: 16 }}>
-            {copy.emptyLink}
-          </Link>
+        <div style={{ padding: "32px 0 16px" }}>
+          <StateBlock pose="ready" dots heading="h2" title={copy.emptyTitle} body={copy.emptyBody}
+            action={{ label: copy.emptyLink, href: "/upload" }} />
         </div>
       )}
 

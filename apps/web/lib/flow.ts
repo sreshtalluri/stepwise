@@ -57,6 +57,18 @@ export function flowSteps(status: JobStatus | null): Step[] {
   return [{ key: "clip", label: s.clip, state: "done", note: s.playing }, dancers, body];
 }
 
+// ---------------------------------------------------------------- failure
+
+/**
+ * The failed screen's line. A refusal (too_many_dancers) is the service's own
+ * sentence, shown as-is. A retryable failure's message is the raw exception
+ * text (modal_app.py pipeline_error / export_error): that is for Sentry, never
+ * the page, so it gets our line instead.
+ */
+export function failedBody(error: { message: string; retryable: boolean }): string {
+  return error.retryable ? copy.failedRetryable : error.message;
+}
+
 // ---------------------------------------------------------------- handoff
 
 /**

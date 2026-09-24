@@ -4,7 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { privacy, upload } from "../../lib/copy";
-import { submitLink } from "../../lib/submit";
+import { submitLink, type Failure } from "../../lib/submit";
+import { FAILURE_POSE, StateNote, type StateAction } from "../StateScreen";
 
 const copy = upload.link;
 
@@ -17,12 +18,12 @@ const copy = upload.link;
  * once there is a link to use them on (audit: an invite field and a greyed
  * button before anything was pasted read as a wall).
  */
-export default function LinkDoor({ id }: { id: string }) {
+export default function LinkDoor({ id, onAddFile }: { id: string; onAddFile?: () => void }) {
   const router = useRouter();
   const [url, setUrl] = useState("");
   const [invite, setInvite] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ error: string; kind: Failure } | null>(null);
   const open = url.trim().length > 0;
 
   async function send() {
@@ -32,9 +33,22 @@ export default function LinkDoor({ id }: { id: string }) {
     if ("jobId" in out) router.push(`/job/${encodeURIComponent(out.jobId)}`);
     else {
       setBusy(false);
-      setError(out.error);
+      setError(out);
     }
   }
+
+  // One next step per failure. The file door works for everyone, so a link
+  // the service would not take points there.
+  const addFile: StateAction = onAddFile
+    ? { label: upload.actions.addFile, onClick: onAddFile }
+    : { label: upload.actions.addFile, href: "/upload" };
+  const next: Record<Failure, StateAction> = {
+    limit: { label: upload.actions.myLessons, href: "/lessons" },
+    invite: addFile,
+    refused: addFile,
+    file: addFile,
+    unreachable: { label: upload.actions.tryAgain, onClick: () => void send() },
+  };
 
   return (
     <form
@@ -80,11 +94,7 @@ export default function LinkDoor({ id }: { id: string }) {
           <p className="fd-note">{copy.rights}</p>
         </div>
       )}
-      {error && (
-        <p role="alert" className="form-error">
-          {error}
-        </p>
-      )}
+      {error && <StateNote pose={FAILURE_POSE[error.kind]} message={error.error} action={next[error.kind]} />}
     </form>
   );
 }
