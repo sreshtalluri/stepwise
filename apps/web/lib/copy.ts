@@ -548,8 +548,8 @@ export const privacy = {
       items: [
         // ratelimit._ip_hash, 001_init.sql events has no ip column
         "To stop one person using up the day's processing, each new lesson and each removal is counted against a keyed hash of your IP address. The key changes every day, so one day's counts cannot be matched to the next. The address itself is not written to our database, and these counts are kept after a lesson is deleted.",
-        // wrangler.jsonc (Cloudflare Worker), modal_app.py, storage.py (R2), layout.tsx (Fontshare)
-        "The site runs on Cloudflare, processing runs on Modal, and files are stored on Modal and Cloudflare. Fonts load from Fontshare. Like any web host, these services see your requests, including your IP address.",
+        // wrangler.jsonc (Cloudflare Worker), modal_app.py, storage.py (R2), layout.tsx (Google Fonts, Fontshare)
+        "The site runs on Cloudflare, processing runs on Modal, and files are stored on Modal and Cloudflare. Fonts load from Google Fonts and Fontshare. Like any web host, these services see your requests, including your IP address.",
       ],
     },
     {

@@ -1,7 +1,9 @@
 /*
  * Navigation surface styling. Tokens and type scale are DESIGN.md §3 and §5
- * verbatim. Load the two Fontshare faces alongside this file:
- *   https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@700,800&f[]=switzer@400,500,600&display=swap
+ * verbatim. Load the two faces alongside this file (Bricolage Grotesque from
+ * Google Fonts, Switzer from Fontshare; apps/web/app/layout.tsx has both):
+ *   https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&display=swap
+ *   https://api.fontshare.com/v2/css?f[]=switzer@400,500,600,700&display=swap
  *
  * Rules this file is written to keep:
  *   - weight and size carry count state; no highlight box, no pill, no second colour

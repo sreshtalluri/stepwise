@@ -1,8 +1,10 @@
 /*
  * The lesson page (components/LessonViewer.tsx and ./*). Its own file, every class
- * prefixed `ls-`, and its own copy of the DESIGN.md §3/§5/§9 tokens scoped to `.ls`,
- * so the landing styles in app/globals.css can change without moving this page.
- * Values are DESIGN.md's, verbatim.
+ * prefixed `ls-`, and its own copy of the DESIGN.md §3/§9 colour and motion tokens
+ * scoped to `.ls`, so the landing styles can change without moving this page.
+ * The two type families (--font-display, --font-ui) are NOT copied: they come
+ * from app/globals.css, so the lesson and the front door share one typeface
+ * pair. Values are DESIGN.md's, verbatim.
  */
 
 .ls {
@@ -17,8 +19,6 @@
   --on-stage: #e8e1d8;
   --on-stage-muted: #b8aea3;
   --glass: rgb(28 25 23 / 0.72);
-  --font-display: "Cabinet Grotesk", "Switzer", system-ui, sans-serif;
-  --font-ui: "Switzer", system-ui, sans-serif;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --t: 160ms var(--ease);
   --r: 14px;

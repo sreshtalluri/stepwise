@@ -354,7 +354,7 @@ export function advance(timeS: number, dtS: number, o: AdvanceOptions): { timeS:
 // ---------------------------------------------------------------- dancers
 
 /** DESIGN.md §3 — differ in both hue and lightness, so they survive sunlight and CVD. */
-export const DANCER_COLORS = ["#E8952F", "#1E7A6F", "#C2417E", "#3F51B5"] as const;
+export const DANCER_COLORS = ["#F2891D", "#1E7A6F", "#C2417E", "#3F51B5"] as const;
 
 /**
  * One accent on screen at a time (DESIGN.md §3): the selected dancer's. With a
