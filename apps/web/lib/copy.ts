@@ -228,6 +228,8 @@ export const processing = {
     waiting: "Waiting",
   },
   waiting: "Waiting in the queue",
+  // Before the first status answer: the page does not know yet, so it says so.
+  checking: "Checking on your clip",
   // Only what the page itself does: it keeps polling (lib/jobStatus.ts). It
   // cannot see the job while it cannot reach it, so it says nothing about it.
   unreachable: "We cannot reach the job right now. This page keeps checking.",

@@ -99,7 +99,7 @@ export default function ProcessingScreen({ jobId }: { jobId: string }) {
   return (
     <main className="fd fd-proc">
       <Rail feed={feed} />
-      <Room jobId={jobId} done={done} steps={steps} current={current} dancersIn={milestones.dancers != null} />
+      <Room jobId={jobId} done={done} steps={steps} current={current} dancersIn={milestones.dancers != null} idle={status ? copy.waiting : copy.checking} />
     </main>
   );
 }
@@ -110,7 +110,8 @@ function Rail({ feed }: { feed: ReturnType<typeof useJobStatus> }) {
   const status = feed.kind === "ok" ? feed.status : null;
   const remaining = feed.kind === "ok" ? timeRemaining(feed.status, feed.elapsedMs) : null;
   const progress = status?.state === "succeeded" ? 1 : (status?.progress ?? 0);
-  const message = status?.state === "succeeded" ? copy.steps.ready : status?.stage_message || copy.waiting;
+  // Until the first answer the page does not know the state, so it does not claim a queue.
+  const message = status?.state === "succeeded" ? copy.steps.ready : status ? status.stage_message || copy.waiting : copy.checking;
 
   return (
     <div className="fd-rail">
@@ -167,12 +168,15 @@ function Room({
   steps,
   current,
   dancersIn,
+  idle,
 }: {
   jobId: string;
   done: boolean;
   steps: Step[];
   current: Step | undefined;
   dancersIn: boolean;
+  /** The line when no step is under way. */
+  idle: string;
 }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const [src, setSrc] = useState<string | null>(null);
@@ -249,7 +253,7 @@ function Room({
         <div className="fd-now">
           <Heartbeat done={done} />
           <div className="fd-now-meta">
-            <b>{done ? copy.heartbeatDone : current?.note || copy.waiting}</b>
+            <b>{done ? copy.heartbeatDone : current?.note || idle}</b>
             {!done && <span>{copy.heartbeat}</span>}
           </div>
         </div>
