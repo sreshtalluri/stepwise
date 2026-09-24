@@ -83,6 +83,65 @@ def _extract_audio(source: Path) -> Path:
     return tmp
 
 
+def _refine_grid(y: np.ndarray, sr: int, spc0: float) -> tuple[float, float]:
+    """(seconds_per_count, phase_s) of the constant grid that best fits the onsets.
+
+    librosa's tempo is quantized to whole 512-sample frames of lag: at 22.05 kHz
+    the only readings near 115-120 BPM are 112.3 / 117.5 / 123.0 / 129.2, and
+    `beat_track` spaces its beats at that period. A 2% tempo error drifts the
+    grid half a beat off within ~25 counts (solo-02: 117.45 read vs 115.07 true,
+    count 25 lands 0.25 s off the beat). So: keep librosa's reading only as the
+    starting point and search +-6% around it -- more than one quantization step,
+    well short of half/double -- at 0.5 ms / 4 ms resolution for the spacing and
+    phase whose grid lands on the most onset energy.
+    """
+    hop = 128  # ~6 ms envelope; 512 is what caused the quantization
+    env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop)
+    ft = librosa.frames_to_time(np.arange(len(env)), sr=sr, hop_length=hop)
+    best = (-1.0, spc0, 0.0)
+    for spc in np.arange(spc0 * 0.94, spc0 * 1.06, 0.0005):
+        n = int((ft[-1] - spc) / spc)
+        if n < 2:
+            break
+        phases = np.arange(0.0, spc, 0.004)
+        score = np.interp(phases[:, None] + spc * np.arange(n), ft, env).mean(axis=1)
+        i = int(np.argmax(score))
+        if score[i] > best[0]:
+            best = (float(score[i]), float(spc), float(phases[i]))
+    return best[1], best[2]
+
+
+def _count_one(y: np.ndarray, sr: int, spc: float, phase_s: float, music_start_s: float) -> tuple[float, float]:
+    """(count_one_s, margin): the first beat, at or after the music starts, of
+    the beat-of-the-bar (mod 4) with the strongest low-band (<150 Hz, kick)
+    onsets. `margin` is that phase's score over the runner-up.
+
+    Pop/dance music puts the kick on 1. Measured against Beat This! downbeats
+    (CPJKU, used offline as a reference, not shipped) this picks the right bar
+    phase on solo-01, solo-02 and group-synced-01; the dancer's joint speed at
+    15 fps did not separate the four phases on any of them. It does NOT know
+    which of two bars starts an 8-count phrase -- that stays the learner's
+    "set count 1".
+    """
+    hop = 256
+    S = np.abs(librosa.stft(y, hop_length=hop))
+    low = librosa.onset.onset_strength(
+        S=librosa.amplitude_to_db(S[librosa.fft_frequencies(sr=sr) < 150]), sr=sr, hop_length=hop)
+    ft = librosa.frames_to_time(np.arange(len(low)), sr=sr, hop_length=hop)
+    beats = phase_s + spc * np.arange(int((ft[-1] - 0.05 - phase_s) / spc) + 1)
+    if len(beats) < 8:
+        return float(beats[0]) if len(beats) else phase_s, 0.0
+    accent = np.array([low[(ft > b - 0.05) & (ft < b + 0.05)].max() for b in beats])
+    scores = np.array([accent[k::4].mean() for k in range(4)])
+    k = int(np.argmax(scores))
+    runner_up = np.sort(scores)[-2]
+    margin = float(scores[k] / runner_up) if runner_up > 0 else 1.0
+    # Skip bars before librosa heard any music (silent intro), half a beat of slack.
+    ones = beats[k::4]
+    later = ones[ones >= music_start_s - spc / 2]
+    return float(later[0] if len(later) else ones[0]), margin
+
+
 def _count_total(count_one_s: float, seconds_per_count: float, clip_duration_s: float) -> int:
     """Mirrors `normalizeStructure`'s countTotal formula in core.ts exactly."""
     return max(1, int((clip_duration_s - count_one_s) // seconds_per_count) + 1)
@@ -113,8 +172,11 @@ def propose_grid(source: str | Path, *, clip_duration_s: float | None = None) ->
         confidence = 0.0
     else:
         intervals = np.diff(beat_times)
-        seconds_per_count = float(np.median(intervals))
-        count_one_s = float(beat_times[0])
+        seconds_per_count, phase_s = _refine_grid(y, sr, float(np.median(intervals)))
+        bpm = 60.0 / seconds_per_count
+        count_one_s, downbeat_margin = _count_one(y, sr, seconds_per_count, phase_s, float(beat_times[0]))
+        if downbeat_margin < 1.1:
+            warnings.append("no beat of the bar is clearly accented; count 1 is a weak guess")
         # Regularity: tight, evenly-spaced intervals -> high confidence.
         # Coefficient of variation of 0 -> confidence 1; >=0.5 -> confidence 0.
         cv = float(np.std(intervals) / np.mean(intervals)) if np.mean(intervals) > 0 else 1.0
