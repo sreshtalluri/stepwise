@@ -1957,6 +1957,14 @@ api_image = (
     # maximum per container and leaves the workspace's 200 req/s limit as the
     # real bound.
     timeout=600,
+    # Pasted links are fetched from THIS container, so where Modal places it is
+    # where TikTok sees us. Unpinned, it lands anywhere, and TikTok gates by
+    # country (measured 2026-09-24 via a probe app, same image, same three
+    # public clips): 6/6 containers in "us" (GCP, AWS, Azure) downloaded all
+    # three; eu-south (Milan) got "requiring login" every time; ap (Pune)
+    # got redirected to tiktok.com/in/about, the India ban page. "us" is
+    # Modal's broad region at 1.15x the CPU/memory price.
+    region="us",
 )
 @modal.concurrent(max_inputs=100)
 @modal.asgi_app()

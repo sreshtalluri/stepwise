@@ -442,3 +442,15 @@ def test_live_yt_dlp_is_given_no_credentials():
                  "--netrc", "cookiefile"):
         assert f'"{flag}"' not in source, flag
     assert subprocess  # used by ingest, asserted present
+
+
+def test_link_fetching_container_is_pinned_to_the_us():
+    """TikTok gates by the fetcher's country: unpinned, Modal put the API in
+    Milan (login wall) or Pune (India ban page) and pasted links failed. Read
+    from modal_app.py's source, like test_api_image, so no modal import."""
+    import ast
+    tree = ast.parse(Path(__file__).with_name("modal_app.py").read_text())
+    web = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "web")
+    kwargs = {k.arg: k.value for d in web.decorator_list if isinstance(d, ast.Call)
+              for k in d.keywords}
+    assert isinstance(kwargs.get("region"), ast.Constant) and kwargs["region"].value == "us"
