@@ -44,6 +44,22 @@ class TempoAlternate:
 
 
 @dataclass
+class CountOneAlternate:
+    """Another beat that could be count 1, on the same grid.
+
+    `shift_counts` is how far it sits from the proposal's count 1 (-1 = one
+    count earlier). `confidence` is the share of the music's low-band accent
+    that falls on this beat-of-the-bar -- how hard the track leans on it, NOT a
+    probability that the dancer counts from it (solo-02's truth has the weaker
+    accent). Ordered strongest first, so a UI's "try another 1" can walk them.
+    """
+
+    count_one_s: float
+    shift_counts: int
+    confidence: float
+
+
+@dataclass
 class ProposedGrid:
     """A *guess*, shaped to slot into `LessonStructure["grid"]`
     (`{countOneS, secondsPerCount, countTotal}`) — see `to_grid()`.
@@ -60,6 +76,7 @@ class ProposedGrid:
     bpm: float
     alternates: list[TempoAlternate] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    count_one_alternates: list[CountOneAlternate] = field(default_factory=list)
 
     def to_grid(self) -> dict:
         """`{countOneS, secondsPerCount, countTotal}` — exact `CountGrid`
@@ -119,17 +136,24 @@ def _refine_grid(y: np.ndarray, sr: int, spc0: float) -> tuple[float, float]:
     return best[1], best[2]
 
 
-def _count_one(y: np.ndarray, sr: int, spc: float, phase_s: float, music_start_s: float) -> tuple[float, float]:
-    """(count_one_s, margin): the first beat, at or after the music starts, of
-    the beat-of-the-bar (mod 4) with the strongest low-band (<150 Hz, kick)
-    onsets. `margin` is that phase's score over the runner-up.
+def _count_one(y: np.ndarray, sr: int, spc: float, phase_s: float, music_start_s: float
+               ) -> tuple[float, float, list[CountOneAlternate]]:
+    """(count_one_s, margin, alternates).
 
-    Pop/dance music puts the kick on 1. Measured against Beat This! downbeats
-    (CPJKU, used offline as a reference, not shipped) this picks the right bar
-    phase on solo-01, solo-02 and group-synced-01; the dancer's joint speed at
-    15 fps did not separate the four phases on any of them. It does NOT know
-    which of two bars starts an 8-count phrase -- that stays the learner's
-    "set count 1".
+    1. The beat-of-the-bar (mod 4) with the strongest low-band (<150 Hz, kick)
+       onsets is the bar downbeat. Beat This! and madmom agree with it on all
+       four eval clips' bar phase.
+    2. But the dancer's 1 is not the bar's 1: on solo-02 (the one clip with an
+       owner label) the eight starts HALF A BAR before the downbeat all three
+       music models find (0.862 s vs 1.905 s). So count 1 is the EARLIEST
+       strong beat -- the downbeat or the half-bar beat, same parity -- at or
+       after the music starts: a clip is trimmed to where the dance starts, and
+       the music's strong beats are the only ones a dancer counts 1 on.
+
+    ponytail: fit to ONE labelled clip. The two rules disagree on solo-01 and
+    solo-07; the owner's set-count-1 taps on more clips decide it (README).
+    `margin` is the downbeat phase's score over the runner-up. `alternates` are
+    the other three beats of the bar, strongest accent first.
     """
     hop = 256
     S = np.abs(librosa.stft(y, hop_length=hop))
@@ -138,16 +162,22 @@ def _count_one(y: np.ndarray, sr: int, spc: float, phase_s: float, music_start_s
     ft = librosa.frames_to_time(np.arange(len(low)), sr=sr, hop_length=hop)
     beats = phase_s + spc * np.arange(int((ft[-1] - 0.05 - phase_s) / spc) + 1)
     if len(beats) < 8:
-        return float(beats[0]) if len(beats) else phase_s, 0.0
+        return float(beats[0]) if len(beats) else phase_s, 0.0, []
     accent = np.array([low[(ft > b - 0.05) & (ft < b + 0.05)].max() for b in beats])
     scores = np.array([accent[k::4].mean() for k in range(4)])
     k = int(np.argmax(scores))
     runner_up = np.sort(scores)[-2]
     margin = float(scores[k] / runner_up) if runner_up > 0 else 1.0
-    # Skip bars before librosa heard any music (silent intro), half a beat of slack.
-    ones = beats[k::4]
-    later = ones[ones >= music_start_s - spc / 2]
-    return float(later[0] if len(later) else ones[0]), margin
+    # Skip beats before librosa heard any music (silent intro), half a beat of slack.
+    first = int(np.searchsorted(beats, music_start_s - spc / 2))
+    first = min(first, len(beats) - 4)
+    one = first + (k - first) % 2  # earliest beat with the downbeat's parity
+    share = scores / scores.sum() if scores.sum() > 0 else np.full(4, 0.25)
+    alternates = [
+        CountOneAlternate(float(beats[i]), int(i - one), round(float(share[i % 4]), 3))
+        for i in sorted(range(first, first + 4), key=lambda i: -share[i % 4]) if i != one
+    ]
+    return float(beats[one]), margin, alternates
 
 
 def _count_total(count_one_s: float, seconds_per_count: float, clip_duration_s: float) -> int:
@@ -169,6 +199,7 @@ def propose_grid(source: str | Path, *, clip_duration_s: float | None = None) ->
             audio_path.unlink(missing_ok=True)
 
     warnings: list[str] = []
+    count_one_alternates: list[CountOneAlternate] = []
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, units="frames")
     bpm = float(np.atleast_1d(tempo)[0])
     beat_times = librosa.frames_to_time(beat_frames, sr=sr)
@@ -182,7 +213,7 @@ def propose_grid(source: str | Path, *, clip_duration_s: float | None = None) ->
         intervals = np.diff(beat_times)
         seconds_per_count, phase_s = _refine_grid(y, sr, float(np.median(intervals)))
         bpm = 60.0 / seconds_per_count
-        count_one_s, downbeat_margin = _count_one(y, sr, seconds_per_count, phase_s, float(beat_times[0]))
+        count_one_s, downbeat_margin, count_one_alternates = _count_one(y, sr, seconds_per_count, phase_s, float(beat_times[0]))
         if downbeat_margin < 1.1:
             warnings.append("no beat of the bar is clearly accented; count 1 is a weak guess")
         # Regularity: tight, evenly-spaced intervals -> high confidence.
@@ -215,4 +246,5 @@ def propose_grid(source: str | Path, *, clip_duration_s: float | None = None) ->
         bpm=bpm,
         alternates=alternates,
         warnings=warnings,
+        count_one_alternates=count_one_alternates,
     )

@@ -88,3 +88,25 @@ def test_the_contract_validator_agrees_with_the_number_this_service_writes():
 
     doc["proposed_counts"] = dict(out, count_total=out["count_total"] + 1)
     assert _check_invariants(doc), "the invariant does not actually catch an off-by-one grid"
+
+
+@pytest.mark.skipif(not _CONTRACT_PY.exists(), reason="motion-contract python package not present")
+def test_count_one_alternates_survive_and_match_the_schema():
+    # "Try another 1" only works if the candidates reach the viewer; one past
+    # the end of the clip is dropped rather than offered.
+    import json
+
+    import jsonschema
+
+    times = _timeline()
+    alts = [
+        {"count_one_s": 1.4, "shift_counts": 2, "confidence": 0.33},
+        {"count_one_s": 0.0, "shift_counts": -1, "confidence": 0.22},
+        {"count_one_s": 99.0, "shift_counts": 1, "confidence": 0.2},
+    ]
+    out = _proposed_counts(_grid(count_one_alternates=alts), times)
+    assert [a["shift_counts"] for a in out["count_one_alternates"]] == [2, -1]
+    assert "count_one_alternates" not in _proposed_counts(_grid(), times)  # older producers
+
+    schema = json.loads((_CONTRACT_PY.parent / "schema" / "motion-result.schema.json").read_text())
+    jsonschema.validate(out, {"$defs": schema["$defs"], **schema["$defs"]["ProposedCounts"]})

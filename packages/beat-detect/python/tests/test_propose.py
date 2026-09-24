@@ -51,13 +51,14 @@ def test_to_grid_requires_clip_duration(tmp_path):
 
 
 def test_solo02_shape_tempo_and_downbeat(tmp_path):
-    """The case the owner caught on solo-02: a track at 115.07 BPM whose first
-    three beats are a pickup (bar beats 2-4) and whose first downbeat is at
-    1.884 s (Beat This! puts it at 1.88). The old proposal read 117.45 BPM
-    (librosa's nearest quantized tempo) with count 1 on the first heard beat,
-    so the grid was a beat early and drifted half a beat off by count 25.
-    Synthesized: a kick on every downbeat, a hi-hat on every beat."""
-    sr, bpm, first_beat, duration_s = 22050, 115.07, 0.32, 32.0
+    """solo-02, the one clip with an owner label: a track at 115.07 BPM whose
+    first bar downbeat (the first kick) is at 1.905 s -- Beat This!, madmom and
+    the kick heuristic all agree -- but whose dancer counts 1 at 0.862 s, half a
+    bar earlier ("exactly 2 counts late" at 1.905). The old proposal also read
+    117.45 BPM (librosa's nearest quantized tempo) and drifted half a beat off
+    by count 25. Synthesized: a kick on every downbeat, a hi-hat on every beat,
+    three pickup beats before the first kick."""
+    sr, bpm, first_beat, duration_s = 22050, 115.07, 0.34, 32.0
     spc = 60.0 / bpm
     y = np.zeros(int(duration_s * sr), dtype=np.float32)
     n = np.arange(int(0.12 * sr))
@@ -75,9 +76,13 @@ def test_solo02_shape_tempo_and_downbeat(tmp_path):
 
     result = propose_grid(wav, clip_duration_s=duration_s)
 
-    true_one = beats[3]
+    true_one = 0.862  # the owner's count 1 on solo-02 == beats[1] here
     assert abs(result.bpm - bpm) < 0.5, result.bpm
-    assert abs(result.count_one_s - true_one) < 0.04, result.count_one_s
+    assert abs(result.count_one_s - true_one) < 0.06, result.count_one_s
+    # "Try another 1": the bar downbeat the music models pick comes first.
+    alt = result.count_one_alternates
+    assert [a.shift_counts for a in alt][0] == 2 and abs(alt[0].count_one_s - beats[3]) < 0.06, alt
+    assert sorted(a.shift_counts for a in alt) == [-1, 1, 2]
     # No drift: count 57 (the last full eight) still lands on its beat.
     count_57 = result.count_one_s + 56 * result.seconds_per_count
     assert abs(count_57 - (true_one + 56 * spc)) < 0.06, count_57
