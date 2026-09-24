@@ -172,6 +172,24 @@ function makeGoodLesson() {
       floor_plane: { normal: [0, 1, 0], point: [0, 0, 0] },
     },
     accent_color: { hex: "#D9A441", source: "sampled" },
+    // The confident-proposal case. Shaped exactly as packages/beat-detect's
+    // ProposedGrid.to_beat_proposal() emits it, and consistent with this
+    // fixture's own 30-count choreography: count_total is computed against
+    // sample_times_s[N-1] (13.93333), NOT source_video.duration_s (14.0) --
+    // the same end-of-clip the navigation package uses, so the proposal and
+    // the count strip cannot disagree by one count.
+    beat_proposal: {
+      count_one_s: 0.06667,
+      seconds_per_count: 0.46667,
+      count_total: 30,
+      confidence: 0.92,
+      bpm: 128.6,
+      alternates: [
+        { label: "double-time", seconds_per_count: 0.23334, bpm: 257.2 },
+        { label: "half-time", seconds_per_count: 0.93334, bpm: 64.3 },
+      ],
+      warnings: [],
+    },
     joint_hierarchy: joints,
     persons: [
       {
@@ -191,6 +209,10 @@ function makeGoodLesson() {
         { name: "bytetrack", version: "upstream-main", license: "MIT", license_flags: [] },
         { name: "sam-3d-body-dinov3", version: "hf:facebook/sam-3d-body-dinov3", license: "SAM License", license_flags: ["itar-military-use-prohibited", "citation-required-for-research-publication"] },
         { name: "mhr", version: "v1.0.1", license: "Apache-2.0", license_flags: ["body-model-asset-license-see-zip"] },
+        // Not a learned model -- a DSP stage (librosa.beat.beat_track). Listed
+        // because models[] is "one entry per stage actually invoked", and this
+        // is where the licence audit looks (docs/LICENSES.md).
+        { name: "librosa", version: "1.0.0", license: "ISC", license_flags: [] },
       ],
       measured_performance: { fps: 3.52, peak_vram_mb: 18200, cost_usd: 0.09 },
     },
@@ -437,6 +459,26 @@ function makeTwoDancerLesson() {
     // present it falls back per AccentColor's `source` enum (OPEN-DECISIONS.md
     // E4 -- sampling quality with >1 person is unproven).
     accent_color: { hex: "#5B4CC4", source: "fallback" },
+    // The DOUBTED-proposal case, so a consumer has something to render the
+    // honest path against. Tempo fell outside the plausible dance-practice
+    // band, so beat-detect clamps confidence to 0.4 and says why -- the
+    // half-time alternate here (124 BPM) is almost certainly the right read.
+    // A UI that shows this grid without the warning has stripped the only
+    // thing stopping a wrong count 1 reading as fact (DESIGN.md section 7h).
+    beat_proposal: {
+      count_one_s: 0.4,
+      seconds_per_count: 0.96774,
+      count_total: 8,
+      confidence: 0.4,
+      bpm: 62.0,
+      alternates: [
+        { label: "double-time", seconds_per_count: 0.48387, bpm: 124.0 },
+        { label: "half-time", seconds_per_count: 1.93548, bpm: 31.0 },
+      ],
+      warnings: [
+        "tempo 62 BPM is outside the typical 70-180 dance-practice range; half/double-time confusion is the likely explanation (see alternates)",
+      ],
+    },
     joint_hierarchy: joints,
     persons: [personA, personB],
     model_report: {
@@ -446,6 +488,10 @@ function makeTwoDancerLesson() {
         { name: "bytetrack", version: "upstream-main", license: "MIT", license_flags: [] },
         { name: "sam-3d-body-dinov3", version: "hf:facebook/sam-3d-body-dinov3", license: "SAM License", license_flags: ["itar-military-use-prohibited", "citation-required-for-research-publication"] },
         { name: "mhr", version: "v1.0.1", license: "Apache-2.0", license_flags: ["body-model-asset-license-see-zip"] },
+        // Not a learned model -- a DSP stage (librosa.beat.beat_track). Listed
+        // because models[] is "one entry per stage actually invoked", and this
+        // is where the licence audit looks (docs/LICENSES.md).
+        { name: "librosa", version: "1.0.0", license: "ISC", license_flags: [] },
       ],
       // Not extrapolated from the solo-01 gate number -- this fixture is
       // hand-built, not a real run, so this is a plausible placeholder

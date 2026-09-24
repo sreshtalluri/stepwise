@@ -4,13 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Stage3D from "./Stage3D";
 import {
   defaultPersonIndex,
-  dancerColor,
   viewLabel,
   VIEW_PRESETS,
   SPEEDS,
   type MotionResult,
   type ViewId,
 } from "../lib/motion";
+import { LessonNavigator } from "../../../packages/navigation/src/index";
+import type { LessonStructure, LoopSpan, PlaybackMode } from "../../../packages/navigation/src/index";
+import { isStillProposed, loopTimesS, timelineEndS } from "../../../packages/navigation/src/index";
+import "../../../packages/navigation/src/navigation.css";
+import { restore, save as saveStructure, seed } from "../lib/lessonStructure";
 
 /**
  * The video is the clock. `requestVideoFrameCallback` hands back the exact
@@ -84,9 +88,11 @@ export interface LessonViewerProps {
   videoUrl: string;
   /** One GLB URL per entry in `doc.persons`. */
   glbUrls: string[];
+  /** Storage scope for the counts and parts the learner authors here. */
+  lessonId: string;
 }
 
-export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonViewerProps) {
+export default function LessonViewer({ doc, title, videoUrl, glbUrls, lessonId }: LessonViewerProps) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const { timeRef, displayTime } = useVideoClock(video);
 
@@ -96,9 +102,36 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonVi
   const [mirrored, setMirrored] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [playing, setPlaying] = useState(false);
-  const [loop, setLoop] = useState<{ a: number; b: number } | null>(null);
-  const [loopAnchor, setLoopAnchor] = useState<number | null>(null);
   const [absent, setAbsent] = useState<string[]>([]);
+
+  // The clip ends at the last sample slot, never at source_video.duration_s
+  // (packages/navigation/src/core.ts, and the reason the contract insists
+  // sample_times_s exists).
+  const endS = useMemo(() => timelineEndS(doc.sample_times_s), [doc]);
+
+  // The learner's counts and parts. See lib/lessonStructure.ts for why the
+  // store is client-side and where a server store attaches once D5 lands.
+  //
+  // Two steps, not one. The initial value must be identical on the server and
+  // the client, because this page is prerendered -- so it is the machine's
+  // proposal (or the plain default), and the browser's saved copy is applied
+  // after mount. Reading localStorage during render would hydrate a different
+  // count strip than the HTML shipped.
+  const [structure, setStructure] = useState<LessonStructure>(() => seed(doc, endS));
+  useEffect(() => {
+    const saved = restore(lessonId, endS);
+    if (saved) setStructure(saved);
+  }, [lessonId, endS]);
+  const [mode, setMode] = useState<PlaybackMode>("all");
+  const [loop, setLoop] = useState<LoopSpan>(() => ({ startCount: 1, endCount: Math.min(8, structure.grid.countTotal) }));
+
+  const changeStructure = useCallback(
+    (next: LessonStructure) => {
+      setStructure(next);
+      saveStructure(lessonId, next);
+    },
+    [lessonId],
+  );
   // D2: the two stages start equal and either can be promoted. Remembered per person
   // in v2 — this session-only version is the honest placeholder.
   const [promoted, setPromoted] = useState<"none" | "3d" | "video">("none");
@@ -117,63 +150,59 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonVi
     [video, duration],
   );
 
-  // A-B loop. Edges are plain times here; snapping them to count boundaries belongs
-  // to the count strip, which is W6's package (DESIGN.md §7).
+  /**
+   * Looping, in counts.
+   *
+   * THE VIDEO REMAINS THE ONLY CLOCK. The navigation package ships an
+   * `advance(timeS, dtS, ...)` helper for a host that owns its own clock; this
+   * host deliberately does not use it. Running it would mean a second clock
+   * ticking beside `requestVideoFrameCallback`, and the two would drift on
+   * every playbackRate change and seek -- the exact failure `useVideoClock`
+   * exists to avoid. So the package converts counts to seconds
+   * (`loopTimesS`), and the video element still does the looping.
+   *
+   * `timeupdate` fires ~4x/s, so the wrap can overshoot the loop end by a few
+   * frames. That is the same behaviour this viewer already had, and a tighter
+   * wrap would mean polling in rAF -- i.e. a second clock again.
+   */
   useEffect(() => {
-    if (!video || !loop) return;
+    if (!video || mode !== "loop") return;
+    const [a, b] = loopTimesS(structure.grid, loop);
+    const end = Math.min(b, endS);
     const onTime = () => {
-      if (video.currentTime >= loop.b) video.currentTime = loop.a;
+      if (video.currentTime >= end) video.currentTime = a;
     };
     video.addEventListener("timeupdate", onTime);
     return () => video.removeEventListener("timeupdate", onTime);
-  }, [video, loop]);
+  }, [video, mode, structure.grid, loop, endS]);
 
-  const togglePlay = useCallback(() => {
-    if (!video) return;
-    if (video.paused) void video.play();
-    else video.pause();
-  }, [video]);
+  const setPlayingFromNav = useCallback(
+    (want: boolean) => {
+      if (!video) return;
+      if (want) void video.play();
+      else video.pause();
+    },
+    [video],
+  );
 
-  const cycleLoop = useCallback(() => {
-    if (loop) {
-      setLoop(null);
-      setLoopAnchor(null);
-    } else if (loopAnchor === null) {
-      setLoopAnchor(timeRef.current);
-    } else {
-      const a = Math.min(loopAnchor, timeRef.current);
-      const b = Math.max(loopAnchor, timeRef.current);
-      if (b - a > 0.2) setLoop({ a, b });
-      setLoopAnchor(null);
-    }
-  }, [loop, loopAnchor, timeRef]);
-
-  // DESIGN.md §8 keyboard map. Ignored while a control has focus so the canvas never
-  // traps keys away from the rest of the page (OPEN-DECISIONS C6).
+  // DESIGN.md §8 keyboard map. space / ←→ / L now belong to <LessonNavigator>,
+  // which steps by COUNT rather than by a made-up quarter-second and knows what
+  // "loop" means. Registering them here too would double-handle every press
+  // (space would toggle twice and appear dead), so only the two keys the
+  // navigator does not own are handled here.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
       const k = e.key.toLowerCase();
-      if (k === " ") { e.preventDefault(); togglePlay(); }
-      else if (k === "m") setMirrored((v) => !v);
-      else if (k === "l") cycleLoop();
+      if (k === "m") setMirrored((v) => !v);
       else if (k === "s") setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s as 1) + 1) % SPEEDS.length]);
-      // One count is a W6 concept; until the count strip exists, an arrow steps a
-      // quarter-second so the shortcut is not silently dead.
-      else if (k === "arrowleft") seek(timeRef.current - 0.25);
-      else if (k === "arrowright") seek(timeRef.current + 0.25);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, cycleLoop, seek, timeRef]);
+  }, []);
 
   const grounded = doc.grounding.status === "grounded";
-  const chipColor = useMemo(
-    () => doc.persons.map((_, i) => dancerColor(doc, i, selected)),
-    [doc, selected],
-  );
-
   const stageClass = (which: "3d" | "video") =>
     `stage ${promoted === "none" ? "" : promoted === which ? "promoted" : "demoted"}`;
 
@@ -238,22 +267,6 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonVi
       {!grounded && <p className="note">No floor — feet not visible in this clip.</p>}
       {absent.length > 0 && <p className="note">{absent.join(" · ")}.</p>}
 
-      {doc.persons.length > 1 && (
-        <div className="chips dancers" role="group" aria-label="Dancers">
-          {doc.persons.map((person, i) => (
-            <button
-              key={person.person_id}
-              className={`chip ${i === selected ? "on" : ""}`}
-              onClick={() => setSelected(i)}
-              aria-pressed={i === selected}
-            >
-              <span className="swatch" style={{ background: chipColor[i] }} />
-              Dancer {i + 1}
-            </button>
-          ))}
-        </div>
-      )}
-
       <div className="rails">
         <div className="chips views" role="group" aria-label="Views">
           {VIEW_PRESETS.map((preset) => (
@@ -270,55 +283,83 @@ export default function LessonViewer({ doc, title, videoUrl, glbUrls }: LessonVi
         </div>
       </div>
 
-      {/* Tier 1, the overview bar. The count strip that sits under it is W6's package
-          (DESIGN.md §7); this bar is the whole-dance scrubber it describes, and the
-          region outside an active loop is dimmed rather than the inside highlighted. */}
-      <div className="overview">
-        {loop && (
-          <>
-            <span className="loop-out" style={{ left: 0, width: `${(loop.a / duration) * 100}%` }} />
-            <span className="loop-out" style={{ left: `${(loop.b / duration) * 100}%`, right: 0 }} />
-          </>
-        )}
-        <input
-          className="scrub"
-          type="range"
-          min={0}
-          max={duration}
-          step={0.01}
-          value={displayTime}
-          onChange={(e) => seek(Number(e.target.value))}
-          aria-label="Scrub the whole dance"
-        />
-      </div>
+      {/*
+        Both navigation tiers (DESIGN.md §7), from W6's package. It is fully
+        controlled and renderer-free: it reads `timeS` from the video clock and
+        calls `onSeek`, which sets `video.currentTime`; the next
+        requestVideoFrameCallback republishes that into `timeRef`, and
+        Stage3D's useFrame calls `mixer.setTime(timeRef.current)`. So one
+        scrub moves the video and the mesh through a single clock, and this
+        component owns no clock of its own.
 
-      <div className="transport">
-        <button className={`btn ${playing ? "active" : ""}`} onClick={togglePlay}>
-          {playing ? "Pause" : "Play all"}
-          <small>space</small>
-        </button>
+        The dancer chips the viewer used to draw itself now come from the
+        package (same four DESIGN.md §3 colours, same one-tap switch) -- two
+        rows of dancer chips would be two controls for one piece of state.
+      */}
+      <LessonNavigator
+        result={doc}
+        structure={structure}
+        onStructureChange={changeStructure}
+        timeS={displayTime}
+        onSeek={seek}
+        playing={playing}
+        onPlayingChange={setPlayingFromNav}
+        mode={mode}
+        onModeChange={setMode}
+        loop={loop}
+        onLoopChange={setLoop}
+        selectedPersonId={doc.persons[selected].person_id}
+        onSelectPerson={(id) => setSelected(Math.max(0, doc.persons.findIndex((p) => p.person_id === id)))}
+      >
+        {/* Viewer-owned controls, passed through into the transport row so
+            there is one row of controls rather than two competing ones. */}
         <button
-          className="btn"
+          className="sw-btn"
           onClick={() => setSpeed(SPEEDS[(SPEEDS.indexOf(speed as 1) + 1) % SPEEDS.length])}
         >
-          {speed}×<small>speed</small>
+          {speed}× speed
         </button>
-        <button className={`btn ${mirrored ? "active" : ""}`} onClick={() => setMirrored((v) => !v)}>
+        <button className={`sw-btn ${mirrored ? "sw-on" : ""}`} onClick={() => setMirrored((v) => !v)}>
           {mirrored ? "Mirror on" : "Mirror off"}
-          <small>M</small>
-        </button>
-        <button className={`btn ${loop ? "active" : ""}`} onClick={cycleLoop}>
-          {loop ? "Loop on" : loopAnchor !== null ? "Set loop end" : "Loop off"}
-          <small>L</small>
         </button>
         <button
-          className={`btn ${compareView ? "active" : ""}`}
+          className={`sw-btn ${compareView ? "sw-on" : ""}`}
           onClick={() => setCompareView(compareView ? null : view === "side" ? "front" : "side")}
         >
           {compareView ? "Compare on" : "Compare off"}
-          <small>two angles</small>
         </button>
-      </div>
+      </LessonNavigator>
+
+      {/*
+        DESIGN.md §7h, at the one place it bites hardest. A proposed count 1
+        rendered as a fact is precisely the failure this project guards
+        against, so the label says which it is -- and says it in the label
+        rather than in a tooltip or a separate readout (§8, state in the
+        label). It stops saying "proposed" the moment the learner moves the
+        grid, because from then on it genuinely is theirs.
+      */}
+      {doc.beat_proposal && (
+        <p className="note">
+          {!isStillProposed(doc, structure) ? (
+            "Counts set by you."
+          ) : (
+            <>
+              {/* The raw score, not a "high/low" word: the score is not
+                  calibrated against ground truth, so banding it into a
+                  confident-sounding adjective would mislead someone who
+                  understood how it was computed. And it scores the TEMPO —
+                  count 1 is the weaker half of the guess, so the note says
+                  so rather than letting one number cover both. */}
+              Counts proposed from the music — {Math.round(doc.beat_proposal.bpm)} BPM, tempo confidence{" "}
+              {doc.beat_proposal.confidence}. Count 1 is the first beat found, not a detected downbeat — set your own
+              in “Counts and parts”.
+              {doc.beat_proposal.warnings.map((w) => (
+                <span key={w}> {w}.</span>
+              ))}
+            </>
+          )}
+        </p>
+      )}
 
       {compareView && (
         <div className="chips views second" role="group" aria-label="Second angle">

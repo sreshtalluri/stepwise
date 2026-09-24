@@ -45,12 +45,19 @@ export const copy = {
   counts: {
     editor: "Counts and parts",
     /**
-     * Says plainly that the grid is hand-set. Beat detection is a later,
-     * proposal-only feature (PRD §5 cut-list), and a guessed grid must never be
-     * presented as a detected one.
+     * Two variants, because since 2026-09-20 there are two ways a grid can get
+     * here and saying the wrong one is a lie either way. The old single line
+     * ("Nothing here was detected from the music") was written when detection
+     * did not exist; once `MotionResult.beat_proposal` started seeding the
+     * grid it became false, and false in the direction DESIGN.md §7h cares
+     * about least forgivingly — a statement of fact about where a number came
+     * from. `isStillProposed()` in core.ts decides which line applies.
      */
     summary: (total: number, perMinute: number, countOneS: string) =>
       `${total} counts, ${perMinute} a minute, count 1 at ${countOneS}. Set these by hand. Nothing here was detected from the music.`,
+    /** Same facts, but the grid is still the machine's guess, not the learner's. */
+    summaryProposed: (total: number, perMinute: number, countOneS: string) =>
+      `${total} counts, ${perMinute} a minute, count 1 at ${countOneS}. Proposed from the music — change anything here and it becomes yours.`,
     setOne: "Set count 1 here",
     tap: (taps: number) => `Tap the counts (${taps})`,
     tapping: (perMinute: number) => `Tapping at ${perMinute} a minute`,

@@ -83,6 +83,49 @@ base_image = (
 
 VENDOR_DIR = os.path.join(os.path.dirname(__file__), "vendor", "fast-sam-3d-body")
 
+# W11 -> contract: beat/count proposal. Its own tiny CPU image, and NOT a few
+# extra lines in cv_image, for three measured reasons:
+#
+#   1. cv_image is a CUDA 12.4 *devel* image that compiles Detectron2 from
+#      source. docs/INTEGRATION.md §5 measured a ~13 minute rebuild when two
+#      small pip packages landed in a mid-stack layer and invalidated that
+#      compile. librosa pulls numba + llvmlite, which pin hard against numpy --
+#      the single most fragile axis in that image (it already carries three
+#      separate pins written to stop numpy/cuDNN/onnxruntime fighting).
+#   2. Beat detection is ffmpeg plus an FFT. Running it inside the GPU function
+#      bills L40S time for CPU work.
+#   3. This is not a new idea in this repo -- it is the third instance of the
+#      two-environment split already settled as OPEN-DECISIONS.md E5 and
+#      already exercised by gltf_image: separate environments, plain data
+#      (here a JSON sidecar) over the boundary, never a live Python object.
+#
+# Reason 4, found by building it (2026-09-20) rather than by reasoning: the
+# split is not merely cheaper here, it is REQUIRED. **librosa 1.0.0 needs
+# Python >= 3.12**; cv_image is pinned to 3.11 because Detectron2's pinned
+# commit compiles against that (PRD G3). Installing librosa into cv_image
+# therefore cannot give you the library W11 measured on -- pip would silently
+# resolve 0.11.0 instead, a different beat tracker, and every proposed count 1
+# would move for a reason nobody would connect to a CUDA pin. Measured, not
+# assumed: the first build of this image used 3.11 and pip refused with
+# "Ignored the following versions that require a different python version:
+# 1.0.0 Requires-Python >=3.12".
+#
+# Only the package source is uploaded, not packages/beat-detect/python itself,
+# which carries a multi-hundred-MB .venv after a local `uv run`.
+BEAT_PKG_DIR = os.path.join(
+    os.path.dirname(__file__), "..", "..", "packages", "beat-detect", "python", "beat_detect"
+)
+
+beat_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .apt_install("ffmpeg")  # propose_grid() shells out to it to pull audio from an mp4
+    # ISC licence, chosen over madmom/BeatNet on licence grounds --
+    # see packages/beat-detect/README.md. Pinned: a beat tracker changing
+    # its defaults would silently move every proposed count 1.
+    .pip_install("librosa==1.0.0", "numpy")
+    .add_local_dir(BEAT_PKG_DIR, remote_path="/app/beat_detect")
+)
+
 # Real CV image (stage 4+). CUDA *devel* base, not debian_slim: Detectron2
 # compiles a CUDA extension at install time and needs nvcc + CUDA_HOME, which
 # a runtime-only base image does not have. TORCH_CUDA_ARCH_LIST is set
@@ -429,6 +472,17 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         "Measured for THIS clip's dancer count -- do not extrapolate the solo-01 gate numbers.)"
     )
 
+    # Counts (W11). Runs on its own CPU image, so this blocks on cheap work,
+    # not on the L40S. Deliberately non-fatal: a clip with no audio is a
+    # lesson without a proposed grid, not a failed job -- the learner still
+    # taps their own counts in (packages/navigation's gridFromTaps), which is
+    # the path that always wins anyway.
+    write_status("processing", "Finding counts", 0.96)  # DESIGN.md §7c's own wording
+    try:
+        propose_beats.remote(clip_id, float(result["sample_times_s"][-1]))
+    except Exception as e:  # noqa: BLE001 -- never let a missing grid fail a good reconstruction
+        print(f"[beats] proposal stage failed for {clip_id}, continuing without one: {e}")
+
     # W4 spec item 2: dispatch export ONLY after run_clip succeeds, in order.
     # Blocking .remote() here is fine -- this whole function was already
     # dispatched off the HTTP request via .spawn() in api.py, so blocking
@@ -457,6 +511,63 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         "estimated_cost_usd": round(cost, 4),
         "export": export_result,
     }
+
+
+@app.function(
+    image=beat_image,
+    volumes={CLIPS_DIR: eval_clips, UPLOADS_DIR: uploads, RESULTS_DIR: results},
+    timeout=600,
+)
+def propose_beats(clip_id: str, clip_end_s: float) -> dict | None:
+    """Propose where the counts fall, and write it beside the npz.
+
+    CPU only (no `gpu=`), seconds of work. Returns the
+    `MotionResult.beat_proposal` object, and also persists it to
+    `{clip_id}.beats.json` on the results Volume so api.py can attach it when
+    it assembles the document -- same sidecar pattern as
+    `{clip_id}.performance.json` and `{clip_id}.export-manifest.json`.
+
+    `clip_end_s` is deliberately a parameter rather than something this
+    function re-derives with ffprobe: the counts have to be laid out against
+    the SAME end-of-clip the viewer navigates, which is
+    `sample_times_s[-1]`, not the container's `duration_s`. Those differ by up
+    to one sample period, and letting the two halves each measure the clip
+    their own way is exactly how a grid ends up one count long.
+
+    Returns None rather than raising when there is no usable audio -- an
+    absent proposal is a normal outcome (a silent clip, a screen recording),
+    and `beat_proposal` is optional in the contract precisely so this case
+    needs no placeholder. Never invent a grid to fill the field.
+    """
+    import json
+    import os
+    import sys
+
+    sys.path.insert(0, "/app")
+    from beat_detect import propose_grid
+
+    upload_path = f"{UPLOADS_DIR}/{clip_id}.mp4"
+    if not os.path.exists(upload_path):
+        uploads.reload()  # same eventual-consistency guard as run_clip's
+    video_path = upload_path if os.path.exists(upload_path) else f"{CLIPS_DIR}/{clip_id}.mp4"
+
+    try:
+        proposal = propose_grid(video_path, clip_duration_s=clip_end_s).to_beat_proposal()
+    except Exception as e:  # noqa: BLE001 -- no audio track, ffmpeg refusal, silence
+        print(f"[beats] no proposal for {clip_id}: {type(e).__name__}: {e}")
+        return None
+
+    with open(f"{RESULTS_DIR}/{clip_id}.beats.json", "w") as f:
+        json.dump(proposal, f)
+    results.commit()
+
+    print(
+        f"[beats] {clip_id}: {proposal['bpm']:.1f} BPM, "
+        f"{proposal['seconds_per_count']:.4f}s/count, count 1 at {proposal['count_one_s']:.3f}s, "
+        f"{proposal['count_total']} counts, confidence {proposal['confidence']}"
+        + (f", warnings={proposal['warnings']}" if proposal["warnings"] else "")
+    )
+    return proposal
 
 
 @app.function(image=base_image, gpu=GPU_TIER, timeout=600)

@@ -103,6 +103,63 @@ test("rejects a joint_hierarchy whose index doesn't match its array position", (
   assert.ok(result.errors.some((e) => e.includes("must equal 3")));
 });
 
+test("a document with no beat_proposal at all is valid — absence means nobody asked", () => {
+  const doc = loadFixture("failure-lesson.json");
+  assert.equal("beat_proposal" in doc, false, "failure-lesson must stay the no-proposal fixture");
+  assert.equal(validateMotionResult(doc).valid, true);
+});
+
+test("good-lesson carries a confident beat proposal, two-dancer carries a doubted one", () => {
+  const confident = loadFixture("good-lesson.json").beat_proposal;
+  assert.equal(confident.warnings.length, 0);
+  assert.ok(confident.confidence > 0.9);
+
+  // The honesty case: a proposal that made it into the document while knowing
+  // it is probably a half/double-time lock. The warning and the alternates are
+  // what a consumer must carry through; a bare grid would strip them.
+  const doubted = loadFixture("two-dancer-lesson.json").beat_proposal;
+  assert.ok(doubted.confidence <= 0.4);
+  assert.ok(doubted.warnings.some((w: string) => w.includes("half/double-time")));
+  assert.deepEqual(
+    doubted.alternates.map((a: { label: string }) => a.label).sort(),
+    ["double-time", "half-time"],
+  );
+});
+
+test("rejects a beat_proposal confidence outside 0..1", () => {
+  const doc = clone(loadFixture("good-lesson.json"));
+  doc.beat_proposal.confidence = 1.4;
+  assert.equal(validateMotionResult(doc).valid, false);
+});
+
+test("rejects a beat_proposal whose count_total describes a different timeline", () => {
+  const doc = clone(loadFixture("good-lesson.json"));
+  // The classic mistake this guards: counting against source_video.duration_s
+  // of some other clip, or forgetting to recompute after changing the spacing.
+  doc.beat_proposal.count_total = 120;
+  const result = validateMotionResult(doc);
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => e.includes("describes a different timeline")));
+});
+
+test("rejects an alternate that is not a half/double re-reading of the same grid", () => {
+  const doc = clone(loadFixture("good-lesson.json"));
+  doc.beat_proposal.alternates[0].seconds_per_count = 0.31;
+  const result = validateMotionResult(doc);
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => e.includes("must re-read the same grid")));
+});
+
+test("rejects a beat_proposal missing the fields that make it a proposal rather than a fact", () => {
+  // confidence / alternates / warnings are required precisely so a producer
+  // cannot ship a bare grid that reads as ground truth (DESIGN.md §7h).
+  for (const field of ["confidence", "alternates", "warnings", "bpm"]) {
+    const doc = clone(loadFixture("good-lesson.json"));
+    delete doc.beat_proposal[field];
+    assert.equal(validateMotionResult(doc).valid, false, `deleting beat_proposal.${field} must fail validation`);
+  }
+});
+
 test("job-status: a minimal queued job is valid", () => {
   const result = validateJobStatus({
     schema_version: "1.0.0",

@@ -107,7 +107,7 @@ export type CropRect = null | {
  */
 export interface MotionResult {
   /**
-   * MotionResult contract version. Bump on any breaking field change; consumers should refuse to parse an unrecognized version rather than guess.
+   * MotionResult contract version. Consumers should refuse to parse an unrecognized version rather than guess. VERSIONING RULE (recorded 2026-09-20, previously only implied — see packages/motion-contract/README.md 'Versioning rule' for the worked reasoning): bump this const when a consumer written against the previous version could MISREAD a conforming document — a property removed, moved to a different parent, retyped, made required, or given different semantics under the same name. Do NOT bump for a purely additive OPTIONAL property: every document that was valid before is still valid, and every consumer that ignores unknown keys is unaffected. Because this schema is `additionalProperties: false`, a pinned OLD COPY of the schema will still reject a document carrying a newer optional property — so the paired consumer rule is: validate against the schema shipped alongside the code you are running, and treat `schema_version`, not the property set, as the compatibility signal. Known precedent, recorded rather than quietly fixed: commit 8791e3f moved `animation` from a required top-level field to a required field on each `persons[]` entry while leaving this const at 1.0.0. By the rule above that was a bump-class change. It is deliberately NOT retro-bumped — no consumer had shipped against the old shape, and renumbering now would invalidate every committed fixture and every stored result for no reader benefit. The rule binds from here forward. `beat_proposal` (added the same day) is the first change made UNDER the rule, and is additive and optional, so this const stays 1.0.0.
    */
   schema_version: "1.0.0";
   /**
@@ -139,6 +139,7 @@ export interface MotionResult {
     | [PersonResult, PersonResult, PersonResult, PersonResult, PersonResult]
     | [PersonResult, PersonResult, PersonResult, PersonResult, PersonResult, PersonResult];
   model_report: ModelReport;
+  beat_proposal?: BeatProposal;
 }
 export interface SourceVideo {
   /**
@@ -389,4 +390,48 @@ export interface ModelReportEntry {
    * Free-text compliance flags relevant to this specific job/output, e.g. "itar-military-use-prohibited", "citation-required-for-research-publication". Empty array for permissively-licensed stages.
    */
   license_flags: string[];
+}
+/**
+ * OPTIONAL. The machine's guess at where the counts fall, produced by packages/beat-detect from this clip's audio. Omit the key entirely when no proposal was made (clip has no audio track, the detector did not run, or this document predates the field) — absence means 'nobody asked', it is NOT a low-confidence proposal. Top-level rather than per-person because counts belong to the dance, not the dancer (DESIGN.md section 7a2: switching dancer leaves counts and parts unchanged). This is the third machine estimate about the clip in this document, alongside `grounding` (floor solve, which honestly returns "none") and `accent_color` (hue sample, which declares `source`) — each carries its own honesty marker rather than being presented as fact. What does NOT live here: the counts and parts the LEARNER authors. MotionResult describes a finished job and never changes after it is written; authored lesson structure is per-learner and mutable, and has no server-side home until OPEN-DECISIONS.md D5 (accounts) is resolved. See apps/web/lib/lessonStructure.ts.
+ */
+export interface BeatProposal {
+  /**
+   * Timeline seconds (same clock as `sample_times_s`) at which the proposal puts count 1. WEAKER THAN THE TEMPO, and knowingly so: the detector finds BEATS, not DOWNBEATS (librosa's beat_track has no downbeat model; madmom's DBN does but was rejected on licence grounds — see packages/beat-detect/README.md). This value is simply the first detected beat, so it can legitimately be off by up to one beat even when `confidence` is high. `confidence` scores the tempo track, not this anchor. A UI presenting this must leave 'set count 1 here' one action away (OPEN-DECISIONS.md A5, still open on exactly how that correction should feel).
+   */
+  count_one_s: number;
+  /**
+   * Proposed spacing of one count (one count = one beat).
+   */
+  seconds_per_count: number;
+  /**
+   * How many counts fit between `count_one_s` and the end of the clip, computed with the same formula as normalizeStructure() in packages/navigation/src/core.ts so the proposal and the authoring surface cannot disagree by one.
+   */
+  count_total: number;
+  /**
+   * The detector's own trust in the TEMPO, from beat-interval regularity times evidence coverage. It is not calibrated against ground truth and is not a probability of being right; it is a score that goes down when the beats it found were irregular or few. High regularity does not rule out a consistent half/double-time lock (see `alternates`) — it only rules out inconsistent tracking.
+   */
+  confidence: number;
+  /**
+   * The proposed tempo, display/debug only. `seconds_per_count` is what playback and count arithmetic use; deriving one from the other in a consumer risks rounding the grid off the beat.
+   */
+  bpm: number;
+  /**
+   * The half-time and double-time readings of the same grid. Always populated when a proposal exists — the ambiguity is inherent to the method, not an occasional warning, so a UI can offer both corrections without asking the pipeline again.
+   */
+  alternates: TempoAlternate[];
+  /**
+   * Plain-language reasons this particular proposal deserves less trust, e.g. too few beats found, or a tempo outside the typical dance-practice band where half/double confusion is the likeliest explanation. Empty array is normal and means no clip-specific anomaly — it is NOT a claim that the proposal is right.
+   */
+  warnings: string[];
+}
+export interface TempoAlternate {
+  /**
+   * Which re-reading of the SAME beat grid this is. Any autocorrelation-based beat tracker regularly locks onto 2x or 0.5x the tempo a human would tap; these are the two readings the detector did not pick, carried so a correction is one tap rather than a re-detection.
+   */
+  label: "double-time" | "half-time";
+  /**
+   * This reading's spacing. The anchor (`count_one_s`) is unchanged — an alternate re-hypothesizes the subdivision, not where count 1 falls.
+   */
+  seconds_per_count: number;
+  bpm: number;
 }

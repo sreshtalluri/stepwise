@@ -10,6 +10,7 @@ import {
   deletePart,
   eightStartCount,
   gridFromTaps,
+  isStillProposed,
   loopLabel,
   loopTimesS,
   mergePartWithNext,
@@ -17,6 +18,7 @@ import {
   normalizeStructure,
   partLabel,
   partRangeAtCount,
+  proposedGrid,
   partRanges,
   retempo,
   sampleIndexAt,
@@ -25,8 +27,8 @@ import {
   startingStructure,
   timeOfCount,
   timelineEndS,
-} from "../src/core.js";
-import type { LessonStructure } from "../src/core.js";
+} from "../src/core";
+import type { LessonStructure } from "../src/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.join(here, "..", "..", "motion-contract", "fixtures");
@@ -228,4 +230,40 @@ test("a loop clipped by the end of the clip still loops", () => {
   const r = advance(endS - 0.001, 0.5, o);
   assert.ok(r.timeS >= a && r.timeS <= endS, "wrapped inside the clip, not past its end");
   assert.equal(r.playing, true);
+});
+
+// ------------------------------------------------------------ the proposal
+
+test("a proposal seeds a grid, and its count total is re-derived against the real clip end", () => {
+  const p = proposedGrid(good)!;
+  assert.equal(p.countOneS, good.beat_proposal.count_one_s);
+  assert.equal(p.secondsPerCount, good.beat_proposal.seconds_per_count);
+
+  // normalizeStructure recomputes countTotal from endS with the same formula
+  // beat-detect used, so seeding cannot push the count strip past the timeline.
+  const seeded = normalizeStructure({ grid: p, parts: [] }, timelineEndS(good.sample_times_s));
+  assert.equal(seeded.grid.countTotal, good.beat_proposal.count_total);
+});
+
+test("a clip with no proposal has none — no grid is invented to fill the gap", () => {
+  assert.equal(failure.beat_proposal, undefined);
+  assert.equal(proposedGrid(failure), null);
+  assert.equal(isStillProposed(failure, startingStructure(timelineEndS(failure.sample_times_s))), false);
+});
+
+test("the grid stops being the machine's the moment a human moves it", () => {
+  const endS = timelineEndS(good.sample_times_s);
+  const seeded = normalizeStructure({ grid: proposedGrid(good)!, parts: [] }, endS);
+  assert.equal(isStillProposed(good, seeded), true);
+
+  // Every correction the editor offers has to flip it, including the two that
+  // exist specifically because the detector's own guess is weak.
+  assert.equal(isStillProposed(good, setCountOne(seeded, 1.25, endS)), false, "'set 1 here'");
+  assert.equal(isStillProposed(good, retempo(seeded, "half", endS)), false, "half-time");
+  assert.equal(isStillProposed(good, retempo(seeded, "double", endS)), false, "double-time");
+  assert.equal(isStillProposed(good, gridFromTaps(seeded, [0.4, 0.9, 1.4], endS)!), false, "tap-in");
+
+  // Renaming a part is not a claim about the beat, so it must NOT flip.
+  const renamed = { ...seeded, parts: [{ id: "x", name: "Chorus", startCount: 1 }] };
+  assert.equal(isStillProposed(good, renamed), true);
 });

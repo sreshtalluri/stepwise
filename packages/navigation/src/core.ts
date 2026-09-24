@@ -15,7 +15,7 @@
  *     (DESIGN.md §12.7).
  */
 
-import type { MotionResult } from "../../motion-contract/src/ts/generated/motion-result.js";
+import type { MotionResult } from "../../motion-contract/src/ts/generated/motion-result";
 
 // ---------------------------------------------------------------- timeline
 
@@ -188,6 +188,43 @@ export function normalizeStructure(structure: LessonStructure, endS: number): Le
     grid: { countOneS, secondsPerCount, countTotal },
     parts: parts.map((p, i) => (/^Part \d+$/.test(p.name) ? { ...p, name: `Part ${i + 1}` } : p)),
   };
+}
+
+// ------------------------------------------------------------- the proposal
+
+/**
+ * The machine's guess at the grid, if the pipeline made one
+ * (`MotionResult.beat_proposal`, added to the contract 2026-09-20).
+ *
+ * Returned as a plain `CountGrid` so it can seed a `LessonStructure` — but
+ * note what is deliberately NOT returned: the confidence, the tempo, the
+ * half/double alternates and the warnings that travel with it. Those stay on
+ * `result.beat_proposal` for whoever renders the honesty line, because a grid
+ * on its own cannot tell you that it is a guess (DESIGN.md §7h).
+ */
+export function proposedGrid(result: MotionResult): CountGrid | null {
+  const p = result.beat_proposal;
+  if (!p) return null;
+  return { countOneS: p.count_one_s, secondsPerCount: p.seconds_per_count, countTotal: p.count_total };
+}
+
+/**
+ * True while the grid on screen is still the machine's; false once a human has
+ * moved it. THE distinction this surface turns on: every label that says where
+ * the counts came from asks this, so there is one answer rather than one per
+ * caller.
+ *
+ * Compared rather than flagged, so it cannot go stale, survive an undo, or
+ * outlive a re-anchor. Parts are ignored on purpose — naming a part is not a
+ * claim about the beat.
+ */
+export function isStillProposed(result: MotionResult, structure: LessonStructure): boolean {
+  const p = proposedGrid(result);
+  if (!p) return false;
+  const g = structure.grid;
+  // Well under one video frame: a restored structure is a JSON round-trip of
+  // these same numbers, not a recomputation of them.
+  return Math.abs(g.countOneS - p.countOneS) < 1e-6 && Math.abs(g.secondsPerCount - p.secondsPerCount) < 1e-6;
 }
 
 /**

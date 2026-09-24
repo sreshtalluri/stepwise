@@ -118,6 +118,57 @@ def test_rejects_joint_index_mismatch(good_lesson):
     assert any("must equal 3" in e for e in result.errors)
 
 
+def test_document_without_beat_proposal_is_valid(failure_lesson):
+    """Absence means nobody asked — not a low-confidence proposal."""
+    assert "beat_proposal" not in failure_lesson
+    assert validate_motion_result(failure_lesson).valid is True
+
+
+def test_beat_proposal_fixtures_cover_confident_and_doubted(good_lesson):
+    confident = good_lesson["beat_proposal"]
+    assert confident["warnings"] == []
+    assert confident["confidence"] > 0.9
+
+    # The honesty case: a proposal shipped while knowing it is probably a
+    # half/double-time lock. The warning and alternates are what a consumer
+    # must carry through; a bare grid would strip exactly those.
+    doubted = load_fixture("two-dancer-lesson.json")["beat_proposal"]
+    assert doubted["confidence"] <= 0.4
+    assert any("half/double-time" in w for w in doubted["warnings"])
+    assert sorted(a["label"] for a in doubted["alternates"]) == ["double-time", "half-time"]
+
+
+def test_rejects_beat_proposal_confidence_out_of_range(good_lesson):
+    doc = copy.deepcopy(good_lesson)
+    doc["beat_proposal"]["confidence"] = 1.4
+    assert validate_motion_result(doc).valid is False
+
+
+def test_rejects_beat_proposal_count_total_from_another_timeline(good_lesson):
+    doc = copy.deepcopy(good_lesson)
+    doc["beat_proposal"]["count_total"] = 120
+    result = validate_motion_result(doc)
+    assert result.valid is False
+    assert any("describes a different timeline" in e for e in result.errors)
+
+
+def test_rejects_alternate_that_is_not_a_half_or_double_rereading(good_lesson):
+    doc = copy.deepcopy(good_lesson)
+    doc["beat_proposal"]["alternates"][0]["seconds_per_count"] = 0.31
+    result = validate_motion_result(doc)
+    assert result.valid is False
+    assert any("must re-read the" in e for e in result.errors)
+
+
+@pytest.mark.parametrize("field", ["confidence", "alternates", "warnings", "bpm"])
+def test_rejects_beat_proposal_missing_what_makes_it_a_proposal(good_lesson, field):
+    """These fields are required precisely so a producer cannot ship a bare
+    grid that reads as ground truth (DESIGN.md §7h)."""
+    doc = copy.deepcopy(good_lesson)
+    del doc["beat_proposal"][field]
+    assert validate_motion_result(doc).valid is False
+
+
 def test_job_status_minimal_queued_job_is_valid():
     result = validate_job_status(
         {

@@ -2,7 +2,14 @@
 name = "beat-detect"
 version = "0.1.0"
 description = "Automatic beat/downbeat proposal for a clip's audio. Not UI. Manual tap-in always wins (see README)."
-requires-python = ">=3.11"
+# 3.12, not 3.11: the pinned librosa (1.0.0, what uv.lock resolves and what the
+# README's measurements were taken on) declares Requires-Python >=3.12. Under
+# 3.11 pip silently falls back to librosa 0.11.0 -- a different beat tracker,
+# and every proposed count 1 moves. Stating it here makes that a resolver error
+# instead of a quiet downgrade. Note this rules out sharing the CV pipeline's
+# image, which is pinned to 3.11 by Detectron2 (docs/PRD.md G3); beat detection
+# gets its own Modal image for that reason.
+requires-python = ">=3.12"
 dependencies = [
     "librosa>=0.10",
     "numpy>=1.26",
@@ -10,6 +17,10 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    # Test-only: validates to_beat_proposal() against the real
+    # packages/motion-contract schema file, so the two packages cannot drift.
+    # Not a runtime dependency — this package emits plain dicts.
+    "jsonschema>=4.23",
     "pytest>=8.3",
     "soundfile>=0.12",
 ]

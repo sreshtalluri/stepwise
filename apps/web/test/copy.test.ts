@@ -2,6 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import * as copy from "../lib/copy";
+// The navigation package's strings are user-facing in this app now that the
+// lesson page renders <LessonNavigator>, so they belong in the same sweep.
+// packages/navigation/src/copy.ts was shaped for exactly this and says so.
+import { copy as navigation } from "../../../packages/navigation/src/copy";
 
 /**
  * The copy lint. docs/DESIGN.md §7h records that the banned overclaim was
@@ -32,6 +36,7 @@ function collect(value: unknown, path: string, out: [string, string][]): void {
 
 const lines: [string, string][] = [];
 collect(copy, "copy", lines);
+collect(navigation, "navigation", lines);
 
 test("there is copy to check", () => {
   assert.ok(lines.length > 30, `only found ${lines.length} strings`);

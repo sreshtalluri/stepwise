@@ -23,6 +23,40 @@ fixtures/               two hand-authored example MotionResult documents (see fi
 scripts/                codegen + fixture-generation + a validate CLI
 ```
 
+## Versioning rule
+
+Recorded 2026-09-20, when adding `beat_proposal` made it necessary. It had
+been implied by the word "frozen" and by one line in the schema ("bump on any
+breaking field change"), which turned out not to be specific enough to settle
+an actual case.
+
+**Bump `schema_version` when a consumer written against the previous version
+could misread a conforming document.** Concretely: a property removed, moved
+to a different parent, retyped, newly required, or given different semantics
+under the same name.
+
+**Do not bump for a purely additive optional property.** Every document that
+was valid before is still valid, and every consumer that ignores unknown keys
+is unaffected. `beat_proposal` is exactly this case, so the contract stays at
+`1.0.0`.
+
+There is a wrinkle, and it is the reason the rule needs a second half. These
+schemas are `additionalProperties: false`, so a **pinned old copy of the
+schema will reject a new document** even though nothing breaking happened. The
+paired consumer rule: validate against the schema shipped alongside the code
+you are running, and treat `schema_version` — not the property set — as the
+compatibility signal. Do not vendor a copy of the schema and keep validating
+against it.
+
+**One precedent, recorded rather than quietly fixed.** Commit `8791e3f` moved
+`animation` from a required top-level field onto each `persons[]` entry and
+left the version at `1.0.0`. By the rule above that was a bump-class change —
+and `docs/INTEGRATION.md` §3.1 is the record of it breaking a real consumer
+that had not been told. It is deliberately **not** retro-bumped: no consumer
+had shipped against the old shape, and renumbering now would invalidate every
+committed fixture and every stored result for no reader benefit. The rule
+binds from `beat_proposal` forward.
+
 ## Regenerating types
 
 The generated files under `src/ts/generated/` and
@@ -68,6 +102,15 @@ flagging up front:
   `animation.glb_asset_id` are stable ids; resolving an id to a fetchable,
   expiring URL is a separate lookup at render time and deliberately outside
   this contract.
+- **`beat_proposal` is a proposal, and the schema makes that structural.**
+  `confidence`, `bpm`, `alternates` and `warnings` are all *required* when the
+  object is present, so a producer cannot emit a bare `{countOneS,
+  secondsPerCount, countTotal}` that reads as ground truth. The counts the
+  *learner* authors are deliberately NOT in this document: `MotionResult`
+  describes a finished job and never changes after it is written, while
+  authored structure is mutable and per-learner. It lives client-side for now
+  (`apps/web/lib/lessonStructure.ts`) because `OPEN-DECISIONS.md` D5
+  (accounts) is unresolved and there is no identity to key it by.
 - **Mesh-region masking technique is out of scope here** (`OPEN-DECISIONS.md`
   E3). This contract guarantees per-joint `visibility`/`provenance` exist for
   any exporter technique to consume; it does not choose between separate

@@ -277,6 +277,53 @@ block in `MotionResult` v1.1, or a separate document), which is exactly the kind
 of decision `docs/OPEN-DECISIONS.md` exists for and which is not recorded there.
 Flagged, not invented.
 
+> **CLOSED 2026-09-20, branch `lesson-structure`.** All four links now exist.
+>
+> - **Contract.** `MotionResult.beat_proposal` — optional, top level, sibling of
+>   `grounding` and `accent_color`, the document's two other machine estimates
+>   about the clip. It carries the whole guess (`confidence`, `bpm`,
+>   `alternates`, `warnings`), all required when the object is present, so a
+>   bare grid that reads as fact is not a document a producer can emit.
+>   Additive and optional, so `schema_version` stays `1.0.0` — under the
+>   versioning rule now written down in `packages/motion-contract/README.md`,
+>   which this change forced and which also records §3.1's `animation` move as
+>   the bump-class change it was.
+> - **Pipeline.** `modal_app.py::propose_beats` on its own CPU image, called by
+>   `run_clip` after reconstruction, writing `{clip_id}.beats.json` beside the
+>   npz; `api.py` attaches it when assembling the document. A separate image and
+>   not two lines in `cv_image` for a reason that only showed up on the first
+>   build: **librosa 1.0.0 requires Python ≥3.12 and `cv_image` is pinned to
+>   3.11** by Detectron2 (PRD G3). Installing it there cannot give you the
+>   library W11 measured on — pip silently resolves 0.11.0 instead, a different
+>   beat tracker, and every proposed count 1 moves.
+> - **Viewer.** `apps/web` renders `<LessonNavigator>`, and the duplicated
+>   transport/chips/scrub bar §3.4 describes are deleted rather than left beside
+>   it. The video stays the only clock: the navigator is given `timeS` from
+>   `useVideoClock` and calls back into `video.currentTime`; the package's
+>   `advance()` helper is deliberately unused, since running it would be the
+>   second clock. Two config lines were needed —
+>   `turbopack.root` (this app is a workspace in a repo with no root
+>   `package.json`, so Next confined resolution to `apps/web`), and dropping the
+>   `.js` suffixes inside `packages/navigation` (legal under its
+>   `moduleResolution: "bundler"`, and Turbopack has no `.js`→`.ts` rewrite).
+> - **Authored structure.** Client-side, `localStorage`, keyed per lesson
+>   (`apps/web/lib/lessonStructure.ts`), because D5 leaves no server-side
+>   identity to key it by. `restore()`/`save()` are the entire seam a server
+>   store attaches to later, with no contract change.
+>
+> One real bug this surfaced, of exactly §3.1's shape — a true statement that
+> silently became false when the thing below it changed. The counts editor read
+> *"Nothing here was detected from the music."* That was written when detection
+> did not exist; the moment `beat_proposal` started seeding the grid it became a
+> false claim about where a number came from, which is the §7h failure mode
+> stated backwards. `isStillProposed()` in `packages/navigation/src/core.ts` is
+> now the single place that answers "machine or human", and both the editor
+> summary and the viewer's honesty line ask it.
+>
+> Verified on real hardware: `modal run modal_app.py::propose_beats --clip-id
+> solo-01` produced `143.6 BPM, 0.4180s/count, count 1 at 0.070s, 47 counts,
+> confidence 0.905`, and that document validates against the frozen contract.
+
 ### 3.5 Smaller notes
 
 - **`evaluation/clips.yaml`** merged cleanly. `w8-worker` repurposed

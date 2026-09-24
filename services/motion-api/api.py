@@ -422,6 +422,24 @@ def _build_motion_result(job_id: str, clip_id: str) -> dict:
             "measured_performance": perf,
         },
     }
+
+    # Counts, if the beat stage produced any (modal_app.py::propose_beats wrote
+    # this sidecar). Optional on purpose: a clip with no audio gets no key at
+    # all rather than a placeholder grid, so the viewer can tell "nobody asked"
+    # from "we guessed badly". Passed through verbatim -- reshaping a proposal
+    # here would put a second copy of the contract mapping in a second
+    # language; ProposedGrid.to_beat_proposal() is the only place that mapping
+    # lives.
+    beat_proposal = _volume_read_json(results_volume, f"/{clip_id}.beats.json")
+    if beat_proposal is not None:
+        doc["beat_proposal"] = beat_proposal
+        doc["model_report"]["models"].append(
+            # Not a learned model -- a DSP stage. Listed because models[] is
+            # "one entry per stage actually invoked" and this is where the
+            # licence audit looks (docs/LICENSES.md).
+            {"name": "librosa", "version": "1.0.0", "license": "ISC", "license_flags": []}
+        )
+
     return doc
 
 

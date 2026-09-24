@@ -72,6 +72,31 @@ class ProposedGrid:
             "countTotal": self.count_total,
         }
 
+    def to_beat_proposal(self) -> dict:
+        """The `MotionResult.beat_proposal` object (motion-result.schema.json).
+
+        Unlike `to_grid()`, this carries the whole guess — confidence, tempo,
+        alternates and warnings — because the contract deliberately requires
+        them: a consumer handed a bare grid has lost the only thing stopping a
+        wrong count 1 from reading as fact (DESIGN.md §7h). This is the single
+        place the field names change from Python to contract spelling; nothing
+        downstream should be hand-mapping these.
+        """
+        if self.count_total is None:
+            raise ValueError("count_total is unknown; pass clip_duration_s to propose_grid()")
+        return {
+            "count_one_s": self.count_one_s,
+            "seconds_per_count": self.seconds_per_count,
+            "count_total": self.count_total,
+            "confidence": self.confidence,
+            "bpm": self.bpm,
+            "alternates": [
+                {"label": a.label, "seconds_per_count": a.seconds_per_count, "bpm": a.bpm}
+                for a in self.alternates
+            ],
+            "warnings": list(self.warnings),
+        }
+
 
 def _extract_audio(source: Path) -> Path:
     """Extract mono 22.05kHz audio from a video via ffmpeg. Returns a temp wav path."""

@@ -15,7 +15,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { MotionResult } from "../../motion-contract/src/ts/generated/motion-result.js";
+import type { MotionResult } from "../../motion-contract/src/ts/generated/motion-result";
 import {
   accentForPerson,
   advance,
@@ -26,6 +26,7 @@ import {
   deletePart,
   eightStartCount,
   gridFromTaps,
+  isStillProposed,
   loopLabel,
   loopSpanForPart,
   loopTimesS,
@@ -40,9 +41,9 @@ import {
   splitPartAt,
   timeOfCount,
   timelineEndS,
-} from "./core.js";
-import type { LessonStructure, LoopSpan, PlaybackMode } from "./core.js";
-import { copy } from "./copy.js";
+} from "./core";
+import type { LessonStructure, LoopSpan, PlaybackMode } from "./core";
+import { copy } from "./copy";
 
 export interface LessonNavigatorProps {
   result: MotionResult;
@@ -385,7 +386,12 @@ function StructureEditor(p: LessonNavigatorProps & { endS: number }) {
 
       <div className="sw-editor-body">
         <p className="sw-editor-note">
-          {copy.counts.summary(grid.countTotal, perMinute, `${grid.countOneS.toFixed(2)}s`)}
+          {/* Which line is the truth depends on where this grid came from. */}
+          {(isStillProposed(p.result, p.structure) ? copy.counts.summaryProposed : copy.counts.summary)(
+            grid.countTotal,
+            perMinute,
+            `${grid.countOneS.toFixed(2)}s`,
+          )}
         </p>
 
         <div className="sw-editor-row">

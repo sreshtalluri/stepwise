@@ -180,6 +180,28 @@
     "hex": "#5B4CC4",
     "source": "fallback"
   },
+  "beat_proposal": {
+    "count_one_s": 0.4,
+    "seconds_per_count": 0.96774,
+    "count_total": 8,
+    "confidence": 0.4,
+    "bpm": 62,
+    "alternates": [
+      {
+        "label": "double-time",
+        "seconds_per_count": 0.48387,
+        "bpm": 124
+      },
+      {
+        "label": "half-time",
+        "seconds_per_count": 1.93548,
+        "bpm": 31
+      }
+    ],
+    "warnings": [
+      "tempo 62 BPM is outside the typical 70-180 dance-practice range; half/double-time confusion is the likely explanation (see alternates)"
+    ]
+  },
   "joint_hierarchy": {
     "rotation_convention": "local-to-parent quaternion, relative to MHR rest (A-pose), glTF component order [x,y,z,w]",
     "root_joint_index": 0,
@@ -89343,6 +89365,12 @@
         "license_flags": [
           "body-model-asset-license-see-zip"
         ]
+      },
+      {
+        "name": "librosa",
+        "version": "1.0.0",
+        "license": "ISC",
+        "license_flags": []
       }
     ],
     "measured_performance": {

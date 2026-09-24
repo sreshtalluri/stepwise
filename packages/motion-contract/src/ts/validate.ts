@@ -73,6 +73,36 @@ function checkInvariants(doc: MotionResult): string[] {
     });
   });
 
+  // beat_proposal is optional; when present it must be internally consistent
+  // with the timeline it claims to describe. Neither rule is expressible in
+  // JSON Schema, and both guard against a proposal that LOOKS fine field by
+  // field while quietly describing a different clip or a different grid.
+  const beat = doc.beat_proposal;
+  if (beat) {
+    // Same formula, and the same end-of-clip, as normalizeStructure() in
+    // packages/navigation/src/core.ts: the clip ends at the last sample slot,
+    // never at source_video.duration_s. Tolerance of one count, because a
+    // boundary landing on the last sample is a float coin-flip, not an error.
+    const endS = doc.sample_times_s[n - 1];
+    const expected = Math.max(1, Math.floor((endS - beat.count_one_s) / beat.seconds_per_count) + 1);
+    if (Math.abs(beat.count_total - expected) > 1) {
+      errors.push(
+        `beat_proposal.count_total is ${beat.count_total} but the grid (count_one_s ${beat.count_one_s}, seconds_per_count ${beat.seconds_per_count}) over a clip ending at ${endS}s yields ${expected} — the proposal describes a different timeline`,
+      );
+    }
+    // An alternate is the SAME anchor re-read at half or double the
+    // subdivision. If the spacing isn't exactly that, the "one tap to fix a
+    // half/double lock" affordance the alternates exist for silently lies.
+    for (const alt of beat.alternates) {
+      const want = alt.label === "double-time" ? beat.seconds_per_count / 2 : beat.seconds_per_count * 2;
+      if (Math.abs(alt.seconds_per_count - want) > 1e-4) {
+        errors.push(
+          `beat_proposal.alternates "${alt.label}" has seconds_per_count ${alt.seconds_per_count}, expected ${want} — an alternate must re-read the same grid, not propose an unrelated tempo`,
+        );
+      }
+    }
+  }
+
   if (doc.grounding.status === "none" && doc.grounding.floor_plane !== null) {
     errors.push('grounding.status is "none" but floor_plane is not null — DESIGN.md §10 forbids a floor when grounding failed');
   }

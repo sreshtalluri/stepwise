@@ -9,8 +9,8 @@
 
 import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { MotionResult } from "../../motion-contract/src/ts/generated/motion-result.js";
-import { LessonNavigator, PartsRail } from "../src/LessonNavigator.js";
+import type { MotionResult } from "../../motion-contract/src/ts/generated/motion-result";
+import { LessonNavigator, PartsRail } from "../src/LessonNavigator";
 import {
   advance,
   currentCount,
@@ -18,8 +18,8 @@ import {
   partRangeAtCount,
   startingStructure,
   timelineEndS,
-} from "../src/core.js";
-import type { LessonStructure, LoopSpan, PlaybackMode } from "../src/core.js";
+} from "../src/core";
+import type { LessonStructure, LoopSpan, PlaybackMode } from "../src/core";
 import "../src/navigation.css";
 import "./demo.css";
 

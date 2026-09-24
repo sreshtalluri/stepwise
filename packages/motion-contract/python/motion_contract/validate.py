@@ -71,6 +71,36 @@ def _check_invariants(doc: dict[str, Any]) -> list[str]:
                         f"provenance.suppressed is null — an absent joint must carry a suppression reason"
                     )
 
+    # beat_proposal is optional; when present it must be internally consistent
+    # with the timeline it claims to describe. Neither rule is expressible in
+    # JSON Schema, and both guard against a proposal that LOOKS fine field by
+    # field while quietly describing a different clip or a different grid.
+    beat = doc.get("beat_proposal")
+    if beat:
+        # Same formula, and the same end-of-clip, as normalizeStructure() in
+        # packages/navigation/src/core.ts: the clip ends at the last sample
+        # slot, never at source_video.duration_s. Tolerance of one count,
+        # because a boundary landing on the last sample is a float coin-flip.
+        end_s = sample_times[n - 1]
+        expected = max(1, int((end_s - beat["count_one_s"]) // beat["seconds_per_count"]) + 1)
+        if abs(beat["count_total"] - expected) > 1:
+            errors.append(
+                f"beat_proposal.count_total is {beat['count_total']} but the grid "
+                f"(count_one_s {beat['count_one_s']}, seconds_per_count {beat['seconds_per_count']}) "
+                f"over a clip ending at {end_s}s yields {expected} — the proposal describes a different timeline"
+            )
+        # An alternate is the SAME anchor re-read at half or double the
+        # subdivision. If the spacing isn't exactly that, the "one tap to fix a
+        # half/double lock" affordance the alternates exist for silently lies.
+        for alt in beat["alternates"]:
+            want = beat["seconds_per_count"] / 2 if alt["label"] == "double-time" else beat["seconds_per_count"] * 2
+            if abs(alt["seconds_per_count"] - want) > 1e-4:
+                errors.append(
+                    f"beat_proposal.alternates \"{alt['label']}\" has seconds_per_count "
+                    f"{alt['seconds_per_count']}, expected {want} — an alternate must re-read the "
+                    "same grid, not propose an unrelated tempo"
+                )
+
     grounding = doc["grounding"]
     if grounding["status"] == "none" and grounding["floor_plane"] is not None:
         errors.append('grounding.status is "none" but floor_plane is not null — DESIGN.md §10 forbids a floor when grounding failed')
