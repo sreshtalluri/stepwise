@@ -28,6 +28,8 @@ from smoothing import (
     decompose,
     detector_joint_signals,
     recompose,
+    repair_clip_orientation,
+    repair_orientation_detours,
     smooth_clip_result,
     smooth_track,
 )
@@ -285,6 +287,78 @@ def test_bone_constraint_correction_reaches_the_suppression_stage():
     )
     assert out[7]["visibility"][10, -1] != OBSERVED, \
         "a joint the bone constraint had to yank must not come back plain `observed`"
+
+
+def _turning_body(F, yaw_deg_per_frame, bend_rad=0.4):
+    """A whole body yawing steadily about +y, the right arm lifting slowly."""
+    names, parents, offsets = _skeleton()
+    rv = np.zeros((F, len(names), 3))
+    rv[:, 0, 1] = np.radians(yaw_deg_per_frame) * np.arange(F)
+    rv[:, names.index("r_uparm"), 2] = np.linspace(0.0, bend_rad, F)
+    skel, _, _ = _build(rv, offsets, parents)
+    return names, parents, skel
+
+
+def _flip(skel_row, names, parents):
+    """What the estimator emits on a hood frame: the body turned 180 deg about
+    the vertical, with left and right limbs traded (a mirror, not a turn)."""
+    off, lq, ls = decompose(skel_row[None], parents)
+    other = {n: {"l": "r", "r": "l"}.get(n[0], n[0]) + n[1:] for n in names}
+    swap = [names.index(other[n]) if other[n] in names else i for i, n in enumerate(names)]
+    lq = lq[:, swap] * np.array([1, -1, -1, 1])  # mirror x: (x, y, z, w) -> (x, -y, -z, w)
+    lq[:, 0] = (Rotation.from_euler("y", 180, degrees=True) * Rotation.from_quat(lq[0, 0])).as_quat()
+    return recompose(off, lq, ls, parents)[0]
+
+
+def test_one_and_two_frame_flips_are_repaired_and_the_rest_is_untouched():
+    F = 40
+    names, parents, skel = _turning_body(F, 2.0)
+    flipped = skel.copy()
+    flipped[10] = _flip(skel[10], names, parents)
+    flipped[25] = _flip(skel[25], names, parents)
+    flipped[26] = _flip(skel[26], names, parents)
+    fixed, bad = repair_orientation_detours(np.arange(F) * DT, flipped, np.ones(F, bool), parents, 0)
+    assert np.flatnonzero(bad).tolist() == [10, 25, 26], np.flatnonzero(bad)
+    assert np.array_equal(fixed[~bad], flipped[~bad]), "unflagged samples must be byte-identical"
+    # Back on the true pose (the truth here is exactly the interpolation), to float32.
+    assert np.abs(fixed[bad, :, :3] - skel[bad, :, :3]).max() < 0.05  # cm
+    q = Rotation.from_quat(fixed[:, 0, 3:7])
+    assert np.degrees((q[1:] * q[:-1].inv()).magnitude()).max() < 2.5
+
+
+def test_real_turns_and_fast_spins_are_left_alone():
+    t = np.arange(60) * DT
+    for yaw in (12.0, 40.0, 70.0):  # a slow full turn, a quick one, a spin faster than 1 rev/s
+        _, parents, skel = _turning_body(60, yaw)
+        fixed, bad = repair_orientation_detours(t, skel, np.ones(60, bool), parents, 0)
+        assert not bad.any(), (yaw, np.flatnonzero(bad))
+        assert np.array_equal(fixed, skel.astype(np.float32))
+
+
+def test_a_flip_next_to_a_gap_is_not_guessed_at():
+    F = 20
+    names, parents, skel = _turning_body(F, 2.0)
+    skel[8] = _flip(skel[8], names, parents)
+    observed = np.ones(F, bool)
+    observed[7] = False  # no observed neighbour on one side: no evidence which side is right
+    _, bad = repair_orientation_detours(np.arange(F) * DT, skel, observed, parents, 0)
+    assert not bad.any()
+
+
+def test_repair_clip_orientation_keeps_the_estimate_and_flags_it():
+    F = 20
+    names, parents, skel = _turning_body(F, 2.0)
+    skel[5] = _flip(skel[5], names, parents)
+    per_frame = [{3: {"skel_state": skel[i].astype(np.float32)}} for i in range(F)]
+    report = repair_clip_orientation(
+        {"per_frame": per_frame, "sample_times_s": np.arange(F) * DT, "confident_track_ids": [3]},
+        hierarchy={"root_joint_index": 0,
+                   "joints": [{"name": n, "parent_index": int(p)} for n, p in zip(names, parents)]},
+    )
+    assert report == {3: [5]}
+    assert per_frame[5][3]["orientation_repaired"] is True
+    assert np.array_equal(per_frame[5][3]["skel_state_raw"], skel[5].astype(np.float32))
+    assert "orientation_repaired" not in per_frame[4][3]
 
 
 if __name__ == "__main__":
