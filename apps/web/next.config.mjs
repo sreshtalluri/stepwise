@@ -102,6 +102,7 @@ export default {
     return [
       { source: "/lesson/:path*", headers: noindex },
       { source: "/job/:path*", headers: noindex },
+      { source: "/owner", headers: noindex },
     ];
   },
 

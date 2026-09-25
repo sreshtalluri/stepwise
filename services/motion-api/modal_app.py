@@ -1177,6 +1177,10 @@ INVITE_SECRET = optional_secret("stepwise-invite")
 # PostHog for dashboards (analytics.forward). Absent -> nothing leaves Neon.
 POSTHOG_SECRET = optional_secret("stepwise-posthog")
 
+# STEPWISE_OWNER_KEY: the owner's count-1 tool (api.py /owner/*, owner.py).
+# Absent -> those endpoints are 404, closed by default.
+OWNER_SECRET = optional_secret("stepwise-owner")
+
 
 # glTF sampler interpolation, fixed up after pymomentum writes the file.
 #
@@ -2393,7 +2397,7 @@ api_image = (
 @app.function(
     image=api_image,
     secrets=(R2_SECRET + DB_SECRET + ORIGIN_SECRET + INVITE_SECRET + POSTHOG_SECRET
-             + OBS_SECRETS),
+             + OWNER_SECRET + OBS_SECRETS),
     # Scale to zero. A cold start is a few seconds on the upload endpoint,
     # where it is invisible, and on the first two-second job poll, where it is
     # also invisible. min_containers=1 pins ~$45/month of always-on container

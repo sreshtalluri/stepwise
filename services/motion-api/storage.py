@@ -208,12 +208,31 @@ def prune_versions(clip_id: str, keep: set) -> list[str]:
 # --- reads and writes ------------------------------------------------------
 
 def put_bytes(key: str, data: bytes, content_type: str,
-              content_encoding: Optional[str] = None) -> str:
-    extra = {"ContentType": content_type, "CacheControl": CACHE_CONTROL}
+              content_encoding: Optional[str] = None,
+              metadata: Optional[dict] = None,
+              cache_control: str = CACHE_CONTROL) -> str:
+    extra = {"ContentType": content_type, "CacheControl": cache_control}
     if content_encoding:
         extra["ContentEncoding"] = content_encoding
+    if metadata:
+        extra["Metadata"] = metadata
     client().put_object(Bucket=bucket(), Key=key, Body=data, **extra)
     return key
+
+
+def publish_motion_result(clip_id: str, gz: bytes, validated: str) -> list[str]:
+    """A rewritten, already-validated MotionResult (gzip bytes) -> R2, laid out
+    exactly as modal_app._publish_to_r2 lays out an export's: the immutable
+    `{clip}.{sha12}.json.gz` first, then the no-cache latest copy whose
+    `version` metadata names it, so the pointer never names a missing object.
+    Returns the keys written."""
+    version = content_version(gz)
+    gzip_json = {"content_type": "application/json", "content_encoding": "gzip"}
+    return [
+        put_bytes(motion_result_key(clip_id, version), gz, metadata={"validated": validated}, **gzip_json),
+        put_bytes(motion_result_key(clip_id), gz, metadata={"validated": validated, "version": version},
+                  cache_control=MUTABLE_CACHE_CONTROL, **gzip_json),
+    ]
 
 
 def put_file(key: str, path: str, content_type: str,

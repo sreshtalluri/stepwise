@@ -261,6 +261,10 @@ export interface ProposedCounts {
    */
   count_one_confidence?: number;
   /**
+   * OPTIONAL and additive, so no schema_version bump (README): absent means "detector". Who put count_one_s where it is. "owner" = the site owner checked this clip by ear and SET count 1 (services/motion-api `POST /owner/jobs/{job_id}/count-one`), snapped onto this same grid: seconds_per_count, bpm and the grid are the detector's, only the phase moved, and the detector's pick is kept in count_one_alternates; count_one_confidence, when present, is 1 (a person decided the phase). It is the canonical count 1 every new learner opens on; a learner's own authored grid still wins on their device. Nothing else in this object changes meaning.
+   */
+  count_one_source?: "detector" | "owner";
+  /**
    * Plain-language reasons this proposal may be wrong, from the producer. Meant to be shown, not logged.
    */
   warnings: string[];

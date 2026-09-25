@@ -69,7 +69,7 @@ jobs:
           ../../.venv/bin/python -m pytest -q -rs \
             test_grounding.py test_retention.py test_fingerprint.py \
             test_api_rotations.py test_schema.py test_observability.py test_ratelimit.py test_analytics.py test_ingest.py \
-            test_milestones.py test_export_status.py test_export_watchdog.py \
+            test_milestones.py test_export_status.py test_export_watchdog.py test_owner.py \
             tools/test_region_mask.py
 
       - name: motion-contract (python)
@@ -153,7 +153,7 @@ jobs:
           uv venv --python 3.12
           uv pip install -r services/motion-api/requirements-api.txt pytest
           cd services/motion-api
-          ../../.venv/bin/python -m pytest -q test_schema.py test_ratelimit.py test_analytics.py
+          ../../.venv/bin/python -m pytest -q test_schema.py test_ratelimit.py test_analytics.py test_owner.py
         env:
           DATABASE_URL: postgresql://postgres:stepwise@localhost:5432/postgres
 

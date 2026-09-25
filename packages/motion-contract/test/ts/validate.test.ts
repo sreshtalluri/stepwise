@@ -114,6 +114,14 @@ test("rejects a joint_hierarchy whose index doesn't match its array position", (
   assert.ok(result.errors.some((e) => e.includes("must equal 3")));
 });
 
+test("count_one_source is optional and closed: owner validates, anything else does not", () => {
+  const doc = clone(loadFixture("good-lesson.json"));
+  doc.proposed_counts.count_one_source = "owner";
+  assert.deepEqual(validateMotionResult(doc).errors, []);
+  doc.proposed_counts.count_one_source = "learner";
+  assert.equal(validateMotionResult(doc).valid, false);
+});
+
 test("proposed_counts is optional — a document without one is still valid", () => {
   const doc = clone(loadFixture("good-lesson.json"));
   delete doc.proposed_counts;
