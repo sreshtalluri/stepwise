@@ -639,3 +639,13 @@ def test_link_fetching_container_is_pinned_to_the_us():
     kwargs = {k.arg: k.value for d in web.decorator_list if isinstance(d, ast.Call)
               for k in d.keywords}
     assert isinstance(kwargs.get("region"), ast.Constant) and kwargs["region"].value == "us"
+
+
+def test_invite_codes_ignore_case_and_spaces(monkeypatch):
+    """A phone capitalises the first letter; "Andaaz " is still the code."""
+    import ingest
+    monkeypatch.setenv("STEPWISE_INVITE_CODES", "andaaz, Step-ABCD")
+    for code in ("andaaz", "Andaaz", " ANDAAZ ", "step-abcd"):
+        assert ingest.invite_code_ok(code), code
+    assert not ingest.invite_code_ok("andaa")
+    assert not ingest.invite_code_ok(None)
