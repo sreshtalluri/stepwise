@@ -179,8 +179,6 @@ class RTMODetector:
         frame_rate: int = 15,
         **kwargs,
     ):
-        from bytetracker import BYTETracker
-
         self.rtmo = RTMOWithBoxes(
             onnx_model,
             model_input_size=model_input_size,
@@ -190,12 +188,24 @@ class RTMODetector:
             backend="onnxruntime",
             device=device,
         )
-        self.tracker = BYTETracker(
+        self._tracker_args = dict(
             track_thresh=track_thresh,
             track_buffer=track_buffer,
             match_thresh=match_thresh,
             frame_rate=frame_rate,
         )
+        self.reset()
+
+    def reset(self) -> None:
+        """Fresh ByteTrack state. The ONNX session is reused across clips by a
+        warm container; track ids and Kalman state must never be. The id
+        counter is class-level in bytetracker, so a new BYTETracker alone would
+        number a warm container's second clip from where the first stopped."""
+        from bytetracker import BYTETracker
+        from bytetracker.basetrack import BaseTrack
+
+        BaseTrack._count = 0
+        self.tracker = BYTETracker(**self._tracker_args)
 
     def run_human_detection(
         self,

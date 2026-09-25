@@ -149,6 +149,16 @@ base_image = (
 
 VENDOR_DIR = os.path.join(os.path.dirname(__file__), "vendor", "fast-sam-3d-body")
 
+# Baked into cv_image (see the run_commands there). facebookresearch/dinov3
+# `main` as of 2026-07-15 -- the code the runtime zipball fetch was getting.
+DINOV3_SHA = "6876159a11b4df116f30f667f8c9888617df0751"
+DINOV3_HUB_DIR = "/root/.cache/torch/hub/facebookresearch_dinov3_main"
+RTMO_URL = ("https://download.openmmlab.com/mmpose/v1/projects/rtmo/onnx_sdk/"
+            "rtmo-m_16xb16-600e_body7-640x640-39e78cc4_20231211.zip")
+RTMO_ONNX_PATH = ("/root/.cache/rtmlib/hub/checkpoints/"
+                  "rtmo-m_16xb16-600e_body7-640x640-39e78cc4_20231211.onnx")
+RTMO_ONNX_SHA256 = "750d872151ff4652f02c738efc3a547e112ce9b688fe920bc17f948e8c3afdac"
+
 # Real CV image (stage 4+). CUDA *devel* base, not debian_slim: Detectron2
 # compiles a CUDA extension at install time and needs nvcc + CUDA_HOME, which
 # a runtime-only base image does not have. TORCH_CUDA_ARCH_LIST is set
@@ -271,6 +281,27 @@ cv_image = (
     )
     # Last build step on purpose: a new layer here rebuilds nothing above it.
     .pip_install("sentry-sdk>=2.35")
+    # The two things every cold start used to download (docs/research/
+    # pipeline-latency.md #2), fetched once here instead, pinned, and put
+    # exactly where the runtime code already looks first -- so no job ever
+    # touches github.com or download.openmmlab.com, and neither being down can
+    # fail one.
+    #   * dinov3's hub code: sam_3d_body/models/backbones/dinov3.py loads
+    #     ~/.cache/torch/hub/facebookresearch_dinov3_main with source="local"
+    #     when it exists (it used to fetch the `main` zipball). Weights are not
+    #     in it -- pretrained=False; they come from the SAM 3D Body checkpoint.
+    #   * RTMO-m/body7: rtmlib's download_checkpoint returns the cached .onnx
+    #     without a network call when it is present. Same URL as
+    #     tools/rtmo_detector.py's RTMO_M_BODY7_URL; the hash is of the onnx
+    #     that zip held on 2026-09-24.
+    .run_commands(
+        f"mkdir -p {DINOV3_HUB_DIR} && cd {DINOV3_HUB_DIR} && git init -q"
+        f" && git fetch -q --depth 1 https://github.com/facebookresearch/dinov3 {DINOV3_SHA}"
+        " && git checkout -q FETCH_HEAD",
+        "python3 -c \"from rtmlib.tools.file import download_checkpoint; "
+        f"print(download_checkpoint('{RTMO_URL}'))\"",
+        f"echo '{RTMO_ONNX_SHA256}  {RTMO_ONNX_PATH}' | sha256sum -c -",
+    )
     # Mounted at container start, not baked into the image layer -- editing
     # the adapter doesn't force a rebuild of everything above it.
     .add_local_dir(VENDOR_DIR, remote_path="/app/fast-sam-3d-body")
@@ -363,15 +394,64 @@ def verify_cv_stack():
 GPU_HOURLY_USD = {"L40S": 1.95, "A10G": 1.10, "T4": 0.59}
 
 
-@app.function(
+SAM3D_CKPT = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/model.ckpt"
+SAM3D_MHR = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
+
+
+@app.cls(
     image=cv_image,
     gpu=GPU_TIER,
     volumes={WEIGHTS_DIR: weights, CLIPS_DIR: eval_clips, UPLOADS_DIR: uploads, RESULTS_DIR: results},
     secrets=OBS_SECRETS,
     timeout=3600,
+    # Scale to zero, Modal's default idle window (60 s). No standing GPU cost:
+    # a warm container only exists because a job (or a warm() ping) just ran.
+    min_containers=0,
 )
+class Reconstructor:
+    """The GPU stage, with its models loaded once per container instead of
+    once per job (docs/research/pipeline-latency.md #2: 20-25 s every job).
+
+    api.py calls `warm()` the moment an upload/link request arrives, so the
+    cold start and model load overlap ingest, then `run()` once the clip is
+    stored. `run()` is run_clip below, unchanged in contract.
+
+        modal run modal_app.py::Reconstructor.run --clip-id solo-01
+    """
+
+    @modal.enter()
+    def load(self):
+        import sys
+        from concurrent.futures import ThreadPoolExecutor
+
+        sys.path.insert(0, "/app/fast-sam-3d-body")
+        from tools.process_clip import load_detector, load_model
+
+        self._load_model = lambda: load_model(SAM3D_CKPT, SAM3D_MHR)
+        self._pool = ThreadPoolExecutor(1)
+        # In the background: the first clip's ffmpeg + detection pass (13-41 s)
+        # runs while this loads, and process_clip only waits on it before pass 2.
+        self.model = self._pool.submit(self._load_model)
+        self.detector = load_detector()
+
+    @modal.method()
+    def warm(self) -> bool:
+        """Nothing: its only job is to make Modal start this container now."""
+        return True
+
+    @modal.method()
+    def run(self, clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1,
+            job_id: str | None = None, retry_count: int = 0, beats_call_id: str | None = None):
+        if self.model.done() and self.model.exception() is not None:
+            # A failed load must not poison a warm container for every later job.
+            self.model = self._pool.submit(self._load_model)
+        return run_clip(clip_id, fps, max_seconds, bbox_thr, job_id, retry_count, beats_call_id,
+                        detector=self.detector, model=self.model)
+
+
 def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1,
-             job_id: str | None = None, retry_count: int = 0, beats_call_id: str | None = None):
+             job_id: str | None = None, retry_count: int = 0, beats_call_id: str | None = None,
+             detector=None, model=None):
     """Stage 5: the week-one deliverable. One real clip -- a real user upload
     (services/motion-api/api.py writes it to the `stepwise-uploads` Volume) or
     an evaluation/clips.yaml clip (the `stepwise-eval` Volume, checked as a
@@ -382,10 +462,13 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     W8: emits job-status.schema.json-compliant progress documents to the
     results Volume as `{job_id}.job-status.json`, one write per real pipeline
     stage transition. W4: api.py's HTTP layer polls/serves this file, and this
-    function itself now dispatches export_clip_gltf.remote() once reconstruction
-    succeeds -- so the whole run_clip -> export_clip_gltf order (spec item 2)
-    happens inside one spawned worker, and "succeeded" is only written once a
-    GLB actually exists for every dancer, not right after reconstruction.
+    function spawns export_clip_gltf once reconstruction succeeds (spec item 2)
+    and returns, releasing the GPU. Export, on a CPU container, writes the
+    terminal status, so "succeeded" is still only written once a GLB exists for
+    every dancer and is published, not right after reconstruction.
+
+    Runs inside `Reconstructor.run` (models already loaded, handed in as
+    `detector`/`model`); called bare it loads them itself.
 
     Flow redesign: `beats_call_id` is the propose_counts call api.py spawned at
     dispatch. This worker only collects it (never re-proposes), and carries
@@ -396,6 +479,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     """
     import json
     import os
+    import shutil
     import sys
     import time
 
@@ -409,7 +493,6 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
 
     job_id = job_id or f"job_{clip_id}_{int(time.time())}"
     tags = {"clip_id": clip_id, "job_id": job_id, "retry_count": retry_count}
-    status_path = f"{RESULTS_DIR}/{job_id}.job-status.json"
     beats_path = f"{RESULTS_DIR}/{clip_id}.beats.json"
 
     # Beats are CPU-only and independent of reconstruction. api.py spawns them
@@ -439,22 +522,8 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
 
     def write_status(state: str, stage_message: str, progress, error=None):
         poll_beats()
-        doc = {
-            "schema_version": "1.0.0",
-            "job_id": job_id,
-            "state": state,
-            "stage_message": stage_message,
-            "progress": progress,
-            "error": error,
-            "retry_count": retry_count,
-        }
-        shown = {k: v for k, v in milestones.items() if v is not None}
-        if shown and state in ("queued", "processing"):
-            doc["milestones"] = shown
-        with open(status_path, "w") as f:
-            json.dump(doc, f)
-        results.commit()
-        print(f"[job-status] {state} {progress if progress is not None else '-'}  {stage_message}")
+        _write_job_status(job_id, state, stage_message, progress, retry_count, error,
+                          {k: v for k, v in milestones.items() if v is not None})
 
     def on_progress(stage: str, message: str, progress, frames_done=None, frames_total=None) -> None:
         if frames_done is not None:
@@ -486,21 +555,24 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         # there is no delivery guarantee beyond "eventually consistent".
         uploads.reload()
     video_path = upload_path if os.path.exists(upload_path) else f"{CLIPS_DIR}/{clip_id}.mp4"
-    checkpoint_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/model.ckpt"
-    mhr_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
 
+    # A warm container runs many clips; their frames must not pile up in /tmp.
+    frames_dir = f"/tmp/{clip_id}_frames"
+    shutil.rmtree(frames_dir, ignore_errors=True)
     t0 = time.time()
     try:
         result = process_clip(
             video_path=video_path,
-            checkpoint_path=checkpoint_path,
-            mhr_path=mhr_path,
-            frames_dir=f"/tmp/{clip_id}_frames",
+            checkpoint_path=SAM3D_CKPT,
+            mhr_path=SAM3D_MHR,
+            frames_dir=frames_dir,
             fps=fps,
             max_seconds=max_seconds,
             bbox_thr=bbox_thr,
             on_progress=on_progress,
             on_detections=on_detections,
+            detector=detector,
+            model=model,
         )
     except Exception as e:  # noqa: BLE001 -- surface as a job-status failure, not a bare crash
         write_status(
@@ -510,6 +582,8 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         )
         observability.capture(e, "run_clip", stage="reconstruct", **tags)
         raise
+    finally:
+        shutil.rmtree(frames_dir, ignore_errors=True)
     wall_s = time.time() - t0
 
     if result.get("refused"):
@@ -580,16 +654,17 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     )
 
     # W4 spec item 2: dispatch export ONLY after run_clip succeeds, in order.
-    # Blocking .remote() here is fine -- this whole function was already
-    # dispatched off the HTTP request via .spawn() in api.py, so blocking
-    # inside this worker does not block any client. "succeeded" is written
-    # only once the GLB(s) genuinely exist, not right after reconstruction --
-    # a client polling job status should never see "succeeded" for a job
-    # whose MotionResult/assets aren't actually fetchable yet.
+    # Spawned, not .remote(): export is CPU work, and blocking here held this
+    # L40S idle for the whole export -- once 286 s while export itself queued
+    # for a GPU (docs/research/pipeline-latency.md #1). export_clip_gltf now
+    # owns the terminal status write, in the same strict order as before:
+    # files committed -> R2 published -> "succeeded"; any failure there is a
+    # retryable `export_error`. This status is the last thing run_clip writes,
+    # and it is committed before the spawn, so it can never land after export's.
     write_status("processing", "Building the 3D body file", 0.97)
     try:
-        export_result = export_clip_gltf.remote(clip_id, job_id)
-    except Exception as e:  # noqa: BLE001 -- a real crash in the export stage, not a pipeline_error
+        export_call = export_clip_gltf.spawn(clip_id, job_id, retry_count)
+    except Exception as e:  # noqa: BLE001 -- could not even hand over to export
         write_status(
             "failed", "", None,
             error={"code": "export_error", "message": str(e), "retryable": True},
@@ -597,7 +672,6 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         observability.capture(e, "run_clip", stage="export", **tags)
         raise
 
-    write_status("succeeded", "", 1.0)
     return {
         "refused": False,
         "wall_s": wall_s,
@@ -606,7 +680,8 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         "n_frames_ok": result["n_frames_ok"],
         "n_frames_total": result["n_frames_total"],
         "estimated_cost_usd": round(cost, 4),
-        "export": export_result,
+        # FunctionCall.from_id(...).get() to wait on it (e.g. evaluation).
+        "export_call_id": export_call.object_id,
     }
 
 
@@ -755,15 +830,23 @@ def inspect_mhr():
 
 
 # glTF export image (G6). Separate from cv_image on purpose (docs/PRD.md E5):
-# pymomentum-gpu's wheels are cp312/cp313 only and pin torch==2.8 -- verified
+# pymomentum's wheels are cp312/cp313 only and pin torch==2.8 -- verified
 # against its real PyPI metadata, not assumed from the PRD. Exchanges plain
 # arrays (npz) with cv_image's output, never a live Python object.
 GLTF_TOOLS_DIR = os.path.join(os.path.dirname(__file__), "tools")
 
 gltf_image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("torch==2.8.0")
-    .pip_install("pymomentum-gpu==0.1.114.post0")
+    # CPU builds of both: export does no CUDA work (the MHR basis loads with
+    # map_location="cpu"; pymomentum's save and every pygltflib rewrite run on
+    # the CPU). Measured 2026-09-24 against the pymomentum-gpu + CUDA-torch
+    # image this replaces (docs/research/pipeline-latency.md, "Export: CPU vs
+    # GPU"): byte-identical GLBs, MotionResult equal to 1 ulp (host-CPU float
+    # noise that also differs between two GPU hosts), same wall time, and 1.3 GB
+    # peak RSS instead of 4.9 GB. Same 0.1.114.post0 pin; the CPU index's torch
+    # keeps GBs of CUDA libraries this image never uses out of its cold start.
+    .pip_install("torch==2.8.0", index_url="https://download.pytorch.org/whl/cpu")
+    .pip_install("pymomentum-cpu==0.1.114.post0")
     # pygltflib: post-export GLB surgery, now for TWO independent reasons that
     # both land on the same dependency.
     #   * W10's region_mask.py splits the single skinned mesh
@@ -791,6 +874,10 @@ gltf_image = (
     # same reason boto3 has one; above the mounts because Modal allows no build
     # step after an add_local_*.
     .pip_install("jsonschema", "pydantic")
+    # export_clip_gltf now writes the job's terminal status itself (run_clip no
+    # longer waits on it), so its failures are reported from here. Own layer.
+    .pip_install("sentry-sdk>=2.35")
+    .add_local_file(OBSERVABILITY_PY, "/app/observability.py")
     # Mounted at container start, same pattern as cv_image's VENDOR_DIR --
     # editing region_mask.py doesn't force a rebuild of the layers above.
     .add_local_dir(GLTF_TOOLS_DIR, remote_path="/app/motion-api-tools")
@@ -1404,9 +1491,68 @@ def inspect_mhr_region_mapping():
     return {"joint_names": joint_names, "resolved": {k: joint_names[v] for k, v in mapping.items()}}
 
 
-@app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results},
-              secrets=R2_SECRET, timeout=600)
-def export_clip_gltf(clip_id: str, job_id: str | None = None):
+# No GPU (see gltf_image). cpu=2: the work is single-threaded -- 2, 4 and 8
+# cores measured the same -- and the second core is headroom for the Volume
+# and R2 I/O. memory: 1.25-1.33 GB peak RSS measured on a 1-dancer 45 s clip
+# and a 4-dancer clip; 3 GiB leaves room for 6 dancers at 60 s.
+@app.function(image=gltf_image, cpu=2.0, memory=3072, volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results},
+              secrets=R2_SECRET + OBS_SECRETS, timeout=600)
+def export_clip_gltf(clip_id: str, job_id: str | None = None, retry_count: int | None = None):
+    """The export stage, and -- when run_clip hands a job over (`retry_count`
+    given) -- the owner of that job's final status write.
+
+    run_clip spawns this and returns, so its L40S is free while export runs
+    (docs/research/pipeline-latency.md #1). The order that makes "succeeded"
+    safe to act on stays strict and lives here now: GLBs + MotionResult written
+    and committed, then published to R2 (both inside _export_clip_gltf), THEN
+    the status document says "succeeded". Any failure is `export_error`,
+    retryable, exactly as when run_clip wrote it.
+
+    Without `retry_count` (a standalone re-export) job status is not touched.
+    """
+    if retry_count is None:
+        return _export_clip_gltf(clip_id, job_id)
+    import sys
+    sys.path.insert(0, "/app")
+    import observability
+    try:
+        out = _export_clip_gltf(clip_id, job_id)
+    except Exception as e:  # noqa: BLE001 -- a real crash in the export stage, not a pipeline_error
+        _write_job_status(job_id, "failed", "", None, retry_count,
+                          error={"code": "export_error", "message": str(e), "retryable": True})
+        observability.capture(e, "export_clip_gltf", stage="export", clip_id=clip_id,
+                              job_id=job_id, retry_count=retry_count)
+        raise
+    _write_job_status(job_id, "succeeded", "", 1.0, retry_count)
+    return out
+
+
+def _write_job_status(job_id: str, state: str, stage_message: str, progress, retry_count: int,
+                      error=None, milestones: dict | None = None) -> None:
+    """One job-status.schema.json document to the results Volume, committed.
+
+    Shared by run_clip (every stage up to export) and export_clip_gltf (the
+    terminal write), so the two containers cannot drift on the document shape.
+    """
+    import json
+    doc = {
+        "schema_version": "1.0.0",
+        "job_id": job_id,
+        "state": state,
+        "stage_message": stage_message,
+        "progress": progress,
+        "error": error,
+        "retry_count": retry_count,
+    }
+    if milestones and state in ("queued", "processing"):
+        doc["milestones"] = milestones
+    with open(f"{RESULTS_DIR}/{job_id}.job-status.json", "w") as f:
+        json.dump(doc, f)
+    results.commit()
+    print(f"[job-status] {state} {progress if progress is not None else '-'}  {stage_message}")
+
+
+def _export_clip_gltf(clip_id: str, job_id: str | None = None):
     """Stage 6c: the real fix (W8) -- export the ACTUAL reconstructed motion
     from a run_clip() result, not a neutral pose. One GLB per confidently-
     tracked dancer (each PersonResult carries its own animation ref per the
@@ -2065,3 +2211,4 @@ def main():
     print(download_weights.remote())
     print("\n=== stage 3: inspect ===")
     inspect_weights.remote()
+

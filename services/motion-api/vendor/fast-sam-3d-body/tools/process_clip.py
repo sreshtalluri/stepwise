@@ -90,6 +90,26 @@ def extract_frames(video_path: str, out_dir: str, fps: float = 15.0, max_seconds
     return sample_times_s
 
 
+def load_detector(device: str = "cuda"):
+    """RTMO + ByteTrack. rtmlib's BaseTool does `'cuda' in device`, so a plain str."""
+    from tools.build_detector import HumanDetector
+
+    return HumanDetector(name="rtmo", device=device)
+
+
+def load_model(checkpoint_path: str, mhr_path: str, device: str = "cuda"):
+    """SAM 3D Body + MHR -> (model, model_cfg). The 20-25 s part of a cold job."""
+    import torch
+
+    from sam_3d_body import load_sam_3d_body
+
+    print(f"loading SAM 3D Body + MHR ({checkpoint_path}, {mhr_path})")
+    t0 = time.time()
+    loaded = load_sam_3d_body(checkpoint_path, device=torch.device(device), mhr_path=mhr_path)
+    print(f"SAM 3D Body loaded in {time.time() - t0:.1f}s")
+    return loaded
+
+
 def process_clip(
     video_path: str,
     checkpoint_path: str,
@@ -100,6 +120,8 @@ def process_clip(
     bbox_thr: float = 0.1,
     on_progress: StageCallback = None,
     on_detections: Optional[Callable[[dict], None]] = None,
+    detector=None,
+    model=None,
 ) -> dict:
     """Run the full detect+track+estimate pipeline over one clip.
 
@@ -140,24 +162,21 @@ def process_clip(
     """
     import torch
 
-    from sam_3d_body import load_sam_3d_body, SAM3DBodyEstimator
-    from tools.build_detector import HumanDetector
+    from sam_3d_body import SAM3DBodyEstimator
     from tools.skeleton_constraints import constrain_clip  # branch: bone-constraints
     from tools.hand_crops import annotate_clip  # branch: hands
     from tools.track_hygiene import clean_tracks
 
     _emit(on_progress, "loading", "Loading the motion model", 0.0)
-    device = torch.device("cuda")
-    print(f"loading SAM 3D Body + MHR ({checkpoint_path}, {mhr_path})")
-    model, model_cfg = load_sam_3d_body(checkpoint_path, device=device, mhr_path=mhr_path)
-
-    # rtmlib's BaseTool does `'cuda' in device`, which requires a plain str
-    # (a torch.device object isn't iterable) -- str(torch.device("cuda"))
-    # gives exactly "cuda", so this is safe, not just a truncation.
-    detector = HumanDetector(name="rtmo", device=str(device))
-    estimator = SAM3DBodyEstimator(
-        sam_3d_body_model=model, model_cfg=model_cfg, human_detector=detector
-    )
+    # A warm container (modal_app.Reconstructor) hands both in, loaded once;
+    # `model` may still be loading in the background, and is only waited on
+    # right before pass 2, so detection overlaps the load.
+    if detector is None:
+        detector = load_detector()
+    else:
+        detector.detector.reset()  # ByteTrack state is per clip
+    if model is None:
+        model = load_model(checkpoint_path, mhr_path)
 
     _emit(on_progress, "extracting_frames", "Reading the video", 0.05)
     print(f"extracting frames from {video_path} at {fps} fps")
@@ -233,6 +252,14 @@ def process_clip(
         })
 
     # ---- Pass 2: full reconstruction, confidently-tracked dancers only ----
+    if hasattr(model, "result"):  # a Future from the container's background load
+        model = model.result()
+    model, model_cfg = model
+    estimator = SAM3DBodyEstimator(
+        sam_3d_body_model=model, model_cfg=model_cfg, human_detector=detector
+    )
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()  # per clip, not per warm container
     per_frame = []
     peak_vram_bytes = 0
     t_start = time.time()

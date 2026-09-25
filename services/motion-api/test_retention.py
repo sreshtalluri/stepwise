@@ -90,8 +90,16 @@ def api(monkeypatch):
     # each one hands back a call id for run_clip to collect.
     fake_modal.Function = types.SimpleNamespace(
         from_name=lambda app, name, **k: types.SimpleNamespace(
-            spawn=lambda **kw: spawned.append(kw) if name == "run_clip"
-            else types.SimpleNamespace(object_id=f"fc-{name}")))
+            spawn=lambda **kw: types.SimpleNamespace(object_id=f"fc-{name}")))
+    # run_clip runs as Reconstructor.run; warm() is the ingest-time pre-warm.
+    warmed: list[str] = []
+
+    async def _warm():
+        warmed.append("warm")
+    fake_modal.Cls = types.SimpleNamespace(
+        from_name=lambda app, name, **k: lambda: types.SimpleNamespace(
+            run=types.SimpleNamespace(spawn=lambda **kw: spawned.append(kw)),
+            warm=types.SimpleNamespace(spawn=types.SimpleNamespace(aio=_warm))))
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
     for mod in ("api", "retention", "motion_result", "fingerprint"):
         sys.modules.pop(mod, None)
@@ -101,6 +109,7 @@ def api(monkeypatch):
     api_mod.eval_volume = FakeVolume("eval")
     api_mod._TOUCHED.clear()
     api_mod._spawned = spawned
+    api_mod._warmed = warmed
     return api_mod
 
 

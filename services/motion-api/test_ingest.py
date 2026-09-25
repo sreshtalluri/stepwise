@@ -54,8 +54,16 @@ def api(monkeypatch):
     # each one hands back a call id for run_clip to collect.
     fake_modal.Function = types.SimpleNamespace(
         from_name=lambda app, name, **k: types.SimpleNamespace(
-            spawn=lambda **kw: spawned.append(kw) if name == "run_clip"
-            else types.SimpleNamespace(object_id=f"fc-{name}")))
+            spawn=lambda **kw: types.SimpleNamespace(object_id=f"fc-{name}")))
+    # run_clip runs as Reconstructor.run; warm() is the ingest-time pre-warm.
+    warmed: list[str] = []
+
+    async def _warm():
+        warmed.append("warm")
+    fake_modal.Cls = types.SimpleNamespace(
+        from_name=lambda app, name, **k: lambda: types.SimpleNamespace(
+            run=types.SimpleNamespace(spawn=lambda **kw: spawned.append(kw)),
+            warm=types.SimpleNamespace(spawn=types.SimpleNamespace(aio=_warm))))
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
     for mod in ("api", "retention", "motion_result", "fingerprint", "ingest"):
         sys.modules.pop(mod, None)
@@ -65,6 +73,7 @@ def api(monkeypatch):
     api_mod.eval_volume = FakeVolume("eval")
     api_mod._TOUCHED.clear()
     api_mod._spawned = spawned
+    api_mod._warmed = warmed
     monkeypatch.setenv("STEPWISE_INVITE_CODES", "let-me-in")
     return api_mod
 
@@ -524,6 +533,29 @@ def test_file_upload_is_not_gated(api, monkeypatch, tmp_path):
     assert resp.clip_id and not resp.deduplicated
     assert len(api._spawned) == 1
     assert fingerprint  # silence the unused import; the real one ran above
+
+
+def test_prewarm_starts_a_gpu_only_for_real_ingest_requests(api):
+    """An upload, or a link with a valid invite code, warms a GPU container
+    before its body is read; nothing else does -- a closed door costs nothing."""
+    import asyncio
+
+    def hit(method, path, **headers):
+        req = types.SimpleNamespace(method=method, url=types.SimpleNamespace(path=path),
+                                    headers=headers)
+
+        async def call_next(_):
+            return "response"
+        before = len(api._warmed)
+        assert asyncio.run(api._prewarm_gpu(req, call_next)) == "response"
+        return len(api._warmed) - before
+
+    assert hit("POST", "/clips") == 1
+    assert hit("POST", "/clips/link", **{"x-invite-code": "let-me-in"}) == 1
+    assert hit("POST", "/clips/link") == 0
+    assert hit("POST", "/clips/link", **{"x-invite-code": "wrong"}) == 0
+    assert hit("GET", "/jobs/job_x") == 0
+    assert hit("POST", "/jobs/job_x/retry") == 0
 
 
 # ---------------------------------------------------------------------------

@@ -530,6 +530,11 @@ modal container stop <container-id>
 
 Then re-request. If the behaviour changes, that was it.
 
+The GPU stage is the same trap with a longer fuse: `Reconstructor` (the class
+`run_clip` runs in) loads its models once per container and stays warm for
+Modal's idle window after every job or `warm()` ping, and the vendored
+Fast-SAM-3D-Body tree is a mount. Stop any warm `Reconstructor` container too.
+
 ### 7.2 `/health` says `"assets": "volume-proxy"`
 
 Video seeking is broken for every lesson served while this is true. Read
@@ -556,7 +561,10 @@ stale rather than stuck.
 1. `modal app logs stepwise-motion` — is the container alive? (One day of
    retention. If it is older than that, you cannot answer this; see §5.3.)
 2. If the worker died, the status document simply stops updating; there is no
-   watchdog. `POST /jobs/{job_id}/retry` re-spawns at the same `job_id` and
+   watchdog. Two workers write it: `Reconstructor.run` up to "Building the 3D
+   body file" (0.97), then the CPU `export_clip_gltf` it spawned writes
+   `succeeded` or `export_error`. A job stuck at 0.97 is an export container
+   that died without raising (OOM, timeout) -- look for its logs, not the GPU's. `POST /jobs/{job_id}/retry` re-spawns at the same `job_id` and
    increments `retry_count` — but only for a document whose `error.retryable`
    is true, so a genuinely wedged job needs the worker's last state fixed first.
 

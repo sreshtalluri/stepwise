@@ -102,6 +102,31 @@ eval_volume = modal.Volume.from_name("stepwise-eval", create_if_missing=True)
 app = FastAPI(title="stepwise motion-api")
 
 
+# Defined BEFORE _only_through_the_worker on purpose: Starlette runs the
+# last-registered middleware first, so this only ever sees requests the origin
+# check has already let through.
+@app.middleware("http")
+async def _prewarm_gpu(request: Request, call_next):
+    """Start a GPU container the moment an upload or link request arrives.
+
+    Runs before the body is read, so the L40S cold start and model load
+    (~30 s, docs/research/pipeline-latency.md #2) overlap the upload transfer
+    or the link fetch instead of following them. `warm()` does nothing; the
+    container it starts sits idle until run() lands on it, or scales down
+    after Modal's idle window if the clip is refused or deduped (~$0.03).
+    Links only warm with a valid invite code, so a closed door costs nothing.
+    """
+    if request.method == "POST" and (
+            request.url.path == "/clips"
+            or (request.url.path == "/clips/link"
+                and ingest.invite_code_ok(request.headers.get("x-invite-code")))):
+        try:
+            await _reconstructor().warm.spawn.aio()
+        except Exception as e:  # noqa: BLE001 -- best-effort: run() still cold-starts one
+            print(f"[prewarm] could not warm a GPU container: {e}")
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def _only_through_the_worker(request: Request, call_next):
     # With STEPWISE_ORIGIN_KEY set, this origin answers only the Cloudflare
@@ -118,10 +143,15 @@ async def _only_through_the_worker(request: Request, call_next):
 _TOUCHED: dict[str, float] = {}
 
 
-def _run_clip_fn():
+def _reconstructor():
     # Looked up per-call, not cached at import time: an app redeploy (new
     # code) should be picked up without restarting this service.
-    return modal.Function.from_name(APP_NAME, "run_clip")
+    return modal.Cls.from_name(APP_NAME, "Reconstructor")()
+
+
+def _run_clip_fn():
+    """modal_app.run_clip, as it runs on a warm GPU container."""
+    return _reconstructor().run
 
 
 def _spawn_counts(clip_id: str) -> str | None:
