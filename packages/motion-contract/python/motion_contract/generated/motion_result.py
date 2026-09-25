@@ -218,6 +218,15 @@ class CountOneAlternate(BaseModel):
     )
 
 
+class CountOneSource(Enum):
+    """
+    OPTIONAL and additive, so no schema_version bump (README): absent means "detector". Who put count_one_s where it is. "owner" = the site owner checked this clip by ear and SET count 1 (services/motion-api `POST /owner/jobs/{job_id}/count-one`), snapped onto this same grid: seconds_per_count, bpm and the grid are the detector's, only the phase moved, and the detector's pick is kept in count_one_alternates; count_one_confidence, when present, is 1 (a person decided the phase). It is the canonical count 1 every new learner opens on; a learner's own authored grid still wins on their device. Nothing else in this object changes meaning.
+    """
+
+    detector = 'detector'
+    owner = 'owner'
+
+
 class ProposedCounts(BaseModel):
     """
     A MACHINE PROPOSAL for the count grid, from the clip's audio. OPTIONAL — absent means no proposal was produced (no audio track, silent clip, the beat stage failed, or it was never run), which is a normal outcome and not an error; the learner sets counts by hand, which they can always do anyway.
@@ -262,6 +271,10 @@ class ProposedCounts(BaseModel):
     count_one_confidence: confloat(ge=0.0, le=1.0) | None = Field(
         None,
         description="OPTIONAL and additive, so no schema_version bump (README): absent on documents written before it existed, and a consumer detects it by presence. How sure the producer is WHICH beat is count 1 (the bar phase), kept separate from `confidence`, which only measures the grid and stays ~0.95 when count 1 is a whole beat off. 0.5 + 0.5 x the weaker vote when the kick-accent rule and the beat model's own downbeats both back count_one_s; at most 0.4 when they disagree or only one has an opinion. Below 0.5, count 1 is a guess and a surface should say so and offer count_one_alternates. On 10 owner-labelled clips (evaluation/labels/count_one.json) the three misses scored 0.00-0.16.",
+    )
+    count_one_source: CountOneSource | None = Field(
+        None,
+        description='OPTIONAL and additive, so no schema_version bump (README): absent means "detector". Who put count_one_s where it is. "owner" = the site owner checked this clip by ear and SET count 1 (services/motion-api `POST /owner/jobs/{job_id}/count-one`), snapped onto this same grid: seconds_per_count, bpm and the grid are the detector\'s, only the phase moved, and the detector\'s pick is kept in count_one_alternates; count_one_confidence, when present, is 1 (a person decided the phase). It is the canonical count 1 every new learner opens on; a learner\'s own authored grid still wins on their device. Nothing else in this object changes meaning.',
     )
     warnings: list[str] = Field(
         ...,

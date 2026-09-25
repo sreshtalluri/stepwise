@@ -81,6 +81,7 @@ import jobstore
 import milestones
 import motion_result
 import observability
+import owner
 import ratelimit
 import retention
 import storage
@@ -1414,6 +1415,225 @@ def remove_lesson(clip_id: str, request: RemovalRequest, http: Request) -> Remov
                           relationship=request.relationship, clip_id=clip_id)
     return RemovalResponse(clip_id=clip_id, removed=outcome["deleted"],
                            already_absent=outcome["already_absent"])
+
+
+# ---------------------------------------------------------------------------
+# /owner/* -- the owner's count-1 tool (owner.py; the page is apps/web
+# /owner). Closed by default: with no STEPWISE_OWNER_KEY (Modal Secret
+# `stepwise-owner`) both endpoints are 404, and a wrong key is 403, rate
+# limited per IP.
+# ---------------------------------------------------------------------------
+
+OWNER_QUEUE_LIMIT = 50
+_LABELS_LOCK = threading.Lock()
+
+
+def _owner_only(http: Request) -> None:
+    if not owner.configured():
+        raise HTTPException(404, "Not found.")
+    ip = ratelimit.client_ip(http.headers, http.client and http.client.host)
+    if owner.locked_out(ip):
+        raise HTTPException(429, "Too many wrong keys. Try again later.",
+                            headers={"Retry-After": str(int(owner.FAIL_WINDOW_S))})
+    if not owner.key_ok(http.headers):
+        owner.record_failure(ip)
+        raise HTTPException(403, "Wrong owner key.")
+
+
+def _recent_succeeded(limit: int) -> list[tuple[str, str, Optional[float]]]:
+    """(job_id, clip_id, created unix time), newest first. Removal deletes a
+    job's row and its status document, so neither lists a removed lesson."""
+    if jobstore.postgres_enabled():
+        try:
+            with jobstore.connection() as conn:
+                rows = conn.execute(
+                    "SELECT job_id, clip_id, created_at FROM jobs WHERE state = 'succeeded' "
+                    "ORDER BY created_at DESC LIMIT %s", (limit,)).fetchall()
+            return [(j, c, t.timestamp() if t else None) for j, c, t in rows]
+        except Exception as e:  # noqa: BLE001 -- the Volume below still answers
+            print(f"[owner] jobs query fell back to the Volume: {e}")
+    # ponytail: one status read per job, newest first, until `limit` succeeded.
+    # Slow (~0.1 s a read) but only for the owner, and only without Postgres.
+    entries = sorted((e for e in results_volume.listdir("/") if e.path.endswith(".job-status.json")),
+                     key=lambda e: e.mtime, reverse=True)
+    out = []
+    for e in entries:
+        job_id = e.path.lstrip("/").removesuffix(".job-status.json")
+        status = _volume_read_json(results_volume, f"/{job_id}.job-status.json")
+        if status and status.get("state") == "succeeded":
+            out.append((job_id, _clip_id_for(job_id), e.mtime))
+            if len(out) >= limit:
+                break
+    return out
+
+
+def _owner_item(job_id: str, clip_id: str, created: Optional[float]) -> dict:
+    """One queue row from three small reads: the detector's proposal
+    (beats.json), the credit (job-meta) and the owner's labels. Never the
+    MotionResult itself, which is ~1 MB gzipped per lesson. After an owner
+    label the current pick is the label's (it is what the endpoint wrote)."""
+    beats = _volume_read_json(results_volume, f"/{clip_id}.beats.json") or {}
+    meta = _volume_read_json(results_volume, f"/{job_id}.job-meta.json") or {}
+    labels = (_volume_read_json(results_volume, owner.labels_path(clip_id)) or {}).get("labels") or []
+    last = labels[-1] if labels else None
+    detector = beats.get("count_one_s")
+    return {
+        "job_id": job_id,
+        "clip_id": clip_id,
+        "created_at": created,
+        "duration_s": last and last.get("duration_s"),
+        "bpm": beats.get("bpm"),
+        "seconds_per_count": beats.get("seconds_per_count"),
+        "count_one_s": last["count_one_s"] if last else (max(0.0, detector) if detector is not None else None),
+        "count_one_alternates": (last or {}).get("count_one_alternates", beats.get("count_one_alternates") or []),
+        "confirmed": last is not None,
+        "credit": meta.get("credit"),
+        "video_url": f"/api/jobs/{job_id}/video",
+    }
+
+
+@app.get("/owner/queue")
+def owner_queue(http: Request) -> dict:
+    _owner_only(http)
+    rows, seen = [], set()
+    for job_id, clip_id, created in _recent_succeeded(OWNER_QUEUE_LIMIT):
+        if clip_id not in seen:  # a deduplicated upload shares its lesson
+            seen.add(clip_id)
+            rows.append((job_id, clip_id, created))
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(16) as pool:
+        return {"jobs": list(pool.map(lambda r: _owner_item(*r), rows))}
+
+
+class CountOneRequest(BaseModel):
+    count_one_s: float = Field(ge=0)
+    # How the owner found it, for the evaluation labels: one of the four beats
+    # of the bar (A-D), or a tap along with the music.
+    method: Literal["option", "tap"] = "option"
+    option: Optional[Literal["A", "B", "C", "D"]] = None
+
+
+def _volume_write_bytes(path: str, data: bytes) -> None:
+    fd, tmp = tempfile.mkstemp()
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        with results_volume.batch_upload(force=True) as batch:
+            batch.put_file(tmp, path)
+    finally:
+        os.unlink(tmp)
+
+
+def _stored_doc(clip_id: str) -> dict:
+    """The lesson's stored MotionResult, parsed: the one an owner edit rewrites."""
+    stored = _r2_read(storage.motion_result_key(clip_id)) \
+        or _volume_read_bytes(results_volume, f"/{clip_id}.motion-result.json.gz")
+    if stored is None:
+        raise HTTPException(409, "This lesson has no stored MotionResult to correct.")
+    return json.loads(gzip.decompress(stored))
+
+
+def _republish_counts(clip_id: str, doc: dict, proposed_counts: dict) -> None:
+    """Put `proposed_counts` into the stored MotionResult and republish it the
+    way export does: contract-validated first, then the Volume copy, then R2's
+    versioned object and the latest pointer (`validated: <doc job_id>`,
+    storage.publish_motion_result). A removal that lands meanwhile takes back
+    what was written and answers 410. This replica's caches are cleared, so its
+    next /result serves the new version; other replicas follow within
+    _R2_VALIDATED_S. The previous version is left in R2 (removal deletes every
+    version by prefix)."""
+    doc["proposed_counts"] = proposed_counts
+    with _VALIDATING:
+        check = validate_motion_result(doc)
+    if not check.valid:
+        raise HTTPException(500, f"Corrected MotionResult failed contract validation: {check.errors[:5]}")
+    gz = gzip.compress(json.dumps(doc, separators=(",", ":")).encode(), 6)
+
+    _refuse_if_removed(clip_id)
+    _volume_write_bytes(f"/{clip_id}.motion-result.json.gz", gz)
+    written = storage.publish_motion_result(clip_id, gz, doc["job_id"]) if storage.enabled() else []
+    if retention.is_removed(results_volume, clip_id):
+        retention.remove_if_present(results_volume, f"/{clip_id}.motion-result.json.gz")
+        for key in written:
+            storage.delete(key)
+        raise HTTPException(410, "This lesson was removed and is not coming back.")
+    for k in [k for k in _R2_VALIDATED if k[1] == clip_id]:
+        _R2_VALIDATED.pop(k, None)
+    _VALID_STORED.add((clip_id, doc["job_id"], hashlib.sha256(gz).hexdigest()))
+
+
+@app.post("/owner/jobs/{job_id}/count-one")
+def owner_set_count_one(job_id: str, request: CountOneRequest, http: Request) -> dict:
+    """Set this lesson's canonical count 1 (snapped to its grid) and republish.
+    Learners who already authored their own counts keep them (apps/web
+    lib/structure.ts); every new open gets this one."""
+    _owner_only(http)
+    clip_id = _clip_id_for(job_id)
+    _refuse_if_removed(clip_id)
+    doc = _stored_doc(clip_id)
+    pc = doc.get("proposed_counts")
+    if not pc:
+        raise HTTPException(409, "This lesson has no beat grid to correct.")
+    try:
+        new_pc = owner.set_count_one(pc, request.count_one_s, float(doc["sample_times_s"][-1]))
+    except owner.OffGrid as e:
+        raise HTTPException(422, str(e)) from e
+    _republish_counts(clip_id, doc, new_pc)
+
+    beats = _volume_read_json(results_volume, f"/{clip_id}.beats.json") or {}
+    detector = beats.get("count_one_s")
+    label = {
+        "job_id": job_id, "clip_id": clip_id,
+        "count_one_s": new_pc["count_one_s"], "requested_s": request.count_one_s,
+        "seconds_per_count": new_pc["seconds_per_count"], "bpm": new_pc["bpm"],
+        "detector_count_one_s": max(0.0, detector) if detector is not None
+        else (pc["count_one_s"] if pc.get("count_one_source") != "owner" else None),
+        "previous_count_one_s": pc["count_one_s"],
+        "method": request.method, "option": request.option,
+        "count_one_alternates": new_pc.get("count_one_alternates", []),
+        "duration_s": doc["source_video"]["duration_s"],
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    # ponytail: read-modify-write under a per-replica lock; one owner clicking
+    # is the only writer. A Postgres table if labels ever come from many people.
+    with _LABELS_LOCK:
+        path = owner.labels_path(clip_id)
+        labels = (_volume_read_json(results_volume, path) or {}).get("labels") or []
+        retention.write_json(results_volume, path, {"clip_id": clip_id, "labels": labels + [label]})
+    print(f"[owner] {clip_id}: count 1 {pc['count_one_s']:.3f} -> {new_pc['count_one_s']:.3f} s")
+    return {"job_id": job_id, "clip_id": clip_id, "previous_count_one_s": pc["count_one_s"],
+            "proposed_counts": new_pc, "label": label}
+
+
+def _propose_counts_now(clip_id: str) -> dict | None:
+    """modal_app.propose_counts, waited for: the beat stage only, CPU, ~20 s.
+    It rewrites `{clip_id}.beats.json` and returns the grid, or None."""
+    return modal.Function.from_name(APP_NAME, "propose_counts").remote(clip_id=clip_id)
+
+
+@app.post("/owner/jobs/{job_id}/recount")
+def owner_recount(job_id: str, http: Request) -> dict:
+    """Re-run the beat proposal for this lesson and republish its
+    proposed_counts, for backfilling fields a newer beat stage adds (e.g.
+    count_one_confidence) without a GPU re-export. An owner-confirmed count 1
+    is kept; the fresh proposal only refreshes the grid fields and alternates
+    around it (owner.set_count_one on the fresh grid)."""
+    _owner_only(http)
+    clip_id = _clip_id_for(job_id)
+    _refuse_if_removed(clip_id)
+    doc = _stored_doc(clip_id)
+    beats = _propose_counts_now(clip_id)
+    _refuse_if_removed(clip_id)  # propose_counts sweeps a lesson removed meanwhile
+    fresh = motion_result._proposed_counts(beats, doc["sample_times_s"])
+    if fresh is None:
+        raise HTTPException(409, "The beat stage proposed nothing for this clip; the lesson is unchanged.")
+    old = doc.get("proposed_counts") or {}
+    kept = old.get("count_one_source") == "owner"
+    if kept:
+        fresh = owner.set_count_one(fresh, old["count_one_s"], float(doc["sample_times_s"][-1]))
+    _republish_counts(clip_id, doc, fresh)
+    print(f"[owner] {clip_id}: recounted" + (" (owner count 1 kept)" if kept else ""))
+    return {"job_id": job_id, "clip_id": clip_id, "kept_owner_count_one": kept, "proposed_counts": fresh}
 
 
 # ---------------------------------------------------------------------------

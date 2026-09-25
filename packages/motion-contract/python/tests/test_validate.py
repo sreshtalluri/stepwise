@@ -118,6 +118,14 @@ def test_rejects_joint_index_mismatch(good_lesson):
     assert any("must equal 3" in e for e in result.errors)
 
 
+def test_count_one_source_is_optional_and_closed(good_lesson):
+    doc = copy.deepcopy(good_lesson)
+    doc["proposed_counts"]["count_one_source"] = "owner"
+    assert validate_motion_result(doc).errors == []
+    doc["proposed_counts"]["count_one_source"] = "learner"
+    assert validate_motion_result(doc).valid is False
+
+
 def test_proposed_counts_is_optional(good_lesson):
     doc = copy.deepcopy(good_lesson)
     del doc["proposed_counts"]
