@@ -357,3 +357,10 @@ def test_unrelated_lessons_are_not_linked(lesson, monkeypatch):
     monkeypatch.setattr(lesson, "_dance_signature", {CLIP: lesson._dance_signature(CLIP), "def": other}.get)
     assert _set(lesson, 0.9)["copies"] == []
     assert len(lesson.owner_queue(_http())["jobs"]) == 2
+
+
+def test_copies_without_a_beat_grid_are_still_listed_together(lesson, monkeypatch):
+    _with_trimmed_copy(lesson, monkeypatch)
+    del lesson.results_volume.files["/def.beats.json"]
+    (row,) = lesson.owner_queue(_http())["jobs"]
+    assert [c["clip_id"] for c in row["copies"]] == ["def"]

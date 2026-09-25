@@ -1601,21 +1601,21 @@ SAME_DANCE_TEMPO_TOLERANCE = 0.03  # copies of one dance have the same beat grid
 def _same_dance_groups(items: list[dict]) -> list[list[tuple[dict, float]]]:
     """Queue rows grouped by dance: each group is [(row, shift_s)], the longest
     copy first with shift 0, and time t in it shows what t + shift_s shows in
-    that row's video. Two lessons are one dance only with the same tempo and
-    matching video (fingerprint.dance_shift_s). Groups keep the queue's order."""
+    that row's video. Two lessons are one dance only with matching video
+    (fingerprint.dance_shift_s) and, when both have a beat grid, the same
+    tempo. Groups keep the queue's order."""
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(8) as pool:
         sigs = dict(zip((i["clip_id"] for i in items),
-                        pool.map(lambda i: _dance_signature(i["clip_id"]) if i.get("seconds_per_count") else None,
-                                 items)))
+                        pool.map(lambda i: _dance_signature(i["clip_id"]), items)))
     order = {i["clip_id"]: n for n, i in enumerate(items)}
     groups: list[list[tuple[dict, float]]] = []
     for it in sorted(items, key=lambda i: -len(sigs[i["clip_id"]] or b"")):
         sig, d = sigs[it["clip_id"]], None
         for g in groups if sig else []:
             rep = g[0][0]
-            if sigs[rep["clip_id"]] and abs(rep["seconds_per_count"] - it["seconds_per_count"]) \
-                    <= SAME_DANCE_TEMPO_TOLERANCE * rep["seconds_per_count"]:
+            a, b = rep.get("seconds_per_count"), it.get("seconds_per_count")
+            if sigs[rep["clip_id"]] and (not a or not b or abs(a - b) <= SAME_DANCE_TEMPO_TOLERANCE * a):
                 d = fingerprint.dance_shift_s(sigs[rep["clip_id"]], sig)
                 if d is not None:
                     g.append((it, d))
@@ -1755,7 +1755,10 @@ def _copy_count_one(clip_id: str, count_one_s: float) -> list[dict]:
         if it["clip_id"] == clip_id:
             continue
         t = count_one_s - d_self + d  # the same moment in the copy's video
-        spc = float(it["seconds_per_count"])
+        spc = it.get("seconds_per_count")
+        if not spc:
+            out.append({"job_id": it["job_id"], "clip_id": it["clip_id"], "error": "no beat grid"})
+            continue
         for counts in (8, 4):
             want = t % (counts * spc)
             if want < spc / 2:  # would snap onto a beat before the clip starts: take the next 1
