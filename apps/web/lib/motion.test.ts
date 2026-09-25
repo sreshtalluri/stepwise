@@ -24,7 +24,14 @@ import {
   sourceProjection,
   viewLabel,
   followStep,
-  clampScreenLag,
+  smoothTrack,
+  steadyViewPath,
+  presetScreenAxes,
+  pathAt,
+  VIEW_PATH,
+  VIEW_PRESETS,
+  bodyTrack,
+  type BodyTrack,
   damp,
   deadzoneFor,
   travelExtent,
@@ -516,14 +523,79 @@ test("stageBasis levels a no-floor (moving-camera) clip to its feet, not the pho
   assert.ok(up[2] < 0 && Math.abs(up[0]) < 0.01);
 });
 
-test("follow keeps the body's centre inside the pane horizontally, and touches nothing else", () => {
-  // Side view of job_5716's walk: depth is screen-horizontal, and a 0.56 m trail on a
-  // 0.9 m half-frame put the body's edge on the pane edge.
-  const right: Vec3 = [0, 0, 1];
-  const subject: Vec3 = [0, 1, 0];
-  // Inside the limit: returned as-is.
-  const near: Vec3 = [0.2, 1.1, 0.3];
-  assert.equal(clampScreenLag(near, subject, right, 0.36), near);
-  // Beyond it: only the horizontal component is cut, to the limit, on the same side.
-  assert.deepEqual(clampScreenLag([0.2, 1.1, -0.56], subject, right, 0.36), [0.2, 1.1, -0.36]);
+test("smoothTrack: zero lag on a steady walk, ends included, even on uneven timing", () => {
+  // 15 Hz with jittered timestamps, as real sample_times_s are.
+  const times = Array.from({ length: 150 }, (_, i) => i / 15 + (i % 3 === 1 ? 0.01 : 0));
+  const ramp = times.map((t) => 0.8 * t - 2);
+  const out = smoothTrack(times, ramp, 1.0);
+  for (let i = 0; i < times.length; i++) assert.ok(Math.abs(out[i] - ramp[i]) < 1e-9, `lag ${out[i] - ramp[i]} at ${i}`);
+});
+
+test("smoothTrack: 3-8 Hz jitter is gone, a 0.1 Hz sway is kept", () => {
+  const times = Array.from({ length: 600 }, (_, i) => i / 15);
+  const sway = times.map((t) => 0.5 * Math.sin(2 * Math.PI * 0.1 * t));
+  const noise = times.map((t) => 0.1 * (Math.sin(2 * Math.PI * 3 * t) + Math.sin(2 * Math.PI * 5.3 * t + 1) + Math.sin(2 * Math.PI * 7.9 * t + 2)));
+  const rms = (xs: number[]) => Math.sqrt(xs.reduce((a, x) => a + x * x, 0) / xs.length);
+  // Interior only: the ends are a line fit, which keeps a ramp but not a curve's bend.
+  const mid = (xs: number[]) => xs.slice(75, -75);
+  const left = smoothTrack(times, noise, VIEW_PATH.sigmaFloorS);
+  assert.ok(rms(mid(left)) < 0.01 * rms(mid(noise)), `3-8 Hz left: ${rms(mid(left))} of ${rms(mid(noise))}`);
+  // The sway survives, in phase: smoothing is zero-lag, not a lagged copy.
+  const out = mid(smoothTrack(times, sway.map((s, i) => s + noise[i]), VIEW_PATH.sigmaFloorS));
+  const sin = out.reduce((a, o, i) => a + o * Math.sin(2 * Math.PI * 0.1 * times[i + 75]), 0);
+  const cos = out.reduce((a, o, i) => a + o * Math.cos(2 * Math.PI * 0.1 * times[i + 75]), 0);
+  assert.ok(Math.hypot(sin, cos) / (0.5 * out.length / 2) > 0.8, 'sway kept');
+  assert.ok(Math.abs(Math.atan2(cos, sin)) < 0.01, `phase ${Math.atan2(cos, sin)} rad`);
+});
+
+test("steadyViewPath: steady through depth noise, and the body never leaves the safe box", () => {
+  // Side view of a dancer walking 3 m in depth with job_dc32-like depth noise
+  // (0.14 m sd) and one 1 m spike, on a narrow phone pane.
+  const times = Array.from({ length: 600 }, (_, i) => i / 15);
+  let seed = 7;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 2;
+  const body: BodyTrack = {
+    centre: times.map((t, k) => [0.05 * rand(), 0.9 + 0.05 * rand(), -4 + 0.075 * t + 0.24 * rand() + (k >= 300 && k < 306 ? 1 : 0)]),
+    lo: times.map(() => [-0.45, -1.0, -0.3]),
+    hi: times.map(() => [0.45, 1.0, 0.3]),
+  };
+  const side = VIEW_PRESETS.find((p) => p.id === "side")!;
+  const tanV = Math.tan((17 * Math.PI) / 180);
+  const lens = { ...presetScreenAxes(side.azimuth, side.elevation), tanV, tanH: tanV * 0.75, margin: side.distance };
+  const { aim, dist } = steadyViewPath(times, body, lens);
+  const dot = (a: readonly number[], b: readonly number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const reach = (h: Vec3, s: Vec3) => Math.abs(s[0]) * h[0] + Math.abs(s[1]) * h[1] + Math.abs(s[2]) * h[2];
+  for (let k = 0; k < times.length; k++) {
+    const off: Vec3 = [0, 1, 2].map((a) => body.centre[k][a] - aim[k][a]) as Vec3;
+    for (const [s, tan] of [[lens.screenX, lens.tanH], [lens.screenY, lens.tanV]] as const) {
+      assert.ok(Math.abs(dot(off, s)) + reach(body.hi[k], s) <= VIEW_PATH.safe * dist[k] * tan + 1e-6, `sample ${k} leaves the pane`);
+    }
+  }
+  // Side's screen-horizontal IS depth; the camera's own step-to-step jitter along it
+  // is a small fraction of the input's.
+  const jitter = (xs: number[]) => Math.sqrt(xs.slice(2).reduce((a, x, i) => a + (x - 2 * xs[i + 1] + xs[i]) ** 2, 0) / (xs.length - 2));
+  const raw = jitter(body.centre.map((c) => c[2]));
+  const cam = jitter(aim.map((c) => c[2]));
+  assert.ok(cam < 0.02 * raw, `camera depth jitter ${cam} vs body ${raw}`);
+  // The spike is absorbed by a slow dolly, not a snap: distance changes < 3%/sample.
+  for (let k = 1; k < dist.length; k++) assert.ok(Math.abs(dist[k] / dist[k - 1] - 1) < 0.03, `zoom jump at ${k}`);
+  // pathAt lerps rows between samples.
+  const rows = aim.map((a, k) => [...a, dist[k]]);
+  const mid = pathAt(times, rows, (times[10] + times[11]) / 2);
+  rows[10].forEach((x, c) => assert.ok(Math.abs(mid[c] - (x + rows[11][c]) / 2) < 1e-12));
+});
+
+test("bodyTrack centres on the torso: a reaching arm widens the fit, never steers the aim", () => {
+  const doc = structuredClone(good);
+  const basis = stageBasis(doc);
+  const before = bodyTrack(doc, 0, basis);
+  const shoulder = doc.joint_hierarchy.joints.findIndex((j) => j.name === "left_shoulder");
+  // Swing the whole left arm out on one sample: 90 degrees about the forward axis.
+  doc.persons[0].samples[40].joints[shoulder].rotation = [0, 0, Math.SQRT1_2, Math.SQRT1_2];
+  const after = bodyTrack(doc, 0, basis);
+  for (let k = 0; k < before.centre.length; k++) {
+    before.centre[k].forEach((c, a) => assert.ok(Math.abs(after.centre[k][a] - c) < 1e-9, `centre moved at ${k}`));
+  }
+  const size = (b: BodyTrack) => Math.max(...b.hi[40].map((h, a) => h - b.lo[40][a]));
+  assert.ok(size(after) > size(before) + 0.1, "the arm is still inside the fit");
 });
