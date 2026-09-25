@@ -700,7 +700,7 @@
 /* ---------------------------------------------------- processing */
 
 .fd-proc {
-  min-height: 100dvh;
+  flex: 1; /* fills the viewport above the footer (globals.css body) */
 }
 .fd-rail {
   position: sticky;
@@ -744,7 +744,8 @@
 .fd-proc-grid {
   display: grid;
   gap: clamp(16px, 3vw, 48px);
-  padding: clamp(8px, 2vw, 24px) var(--gut) var(--s5);
+  /* The site footer sits right under this (globals.css body), so no big bottom gap. */
+  padding: clamp(8px, 2vw, 24px) var(--gut) 24px;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
 }
@@ -763,7 +764,8 @@
   background: radial-gradient(ellipse at 50% 40%, var(--stage) 55%, var(--stage-deep));
   border-radius: var(--r);
   overflow: hidden;
-  height: min(76dvh, 860px);
+  /* The viewport less the rail, the paddings and the footer: the page does not scroll. */
+  height: min(calc(100dvh - 200px), 860px);
   cursor: pointer;
 }
 @media (max-width: 899px) {
@@ -786,7 +788,7 @@
 .fd-proc-grid[data-wide] .fd-pstage {
   height: auto;
   aspect-ratio: var(--ar);
-  max-height: min(76dvh, 860px);
+  max-height: min(calc(100dvh - 200px), 860px);
 }
 @media (min-width: 900px) {
   .fd-proc-grid[data-wide] {
@@ -946,7 +948,7 @@
 /* "Quiet dancer": a small drawn figure, eight count dots, one line. */
 
 .ll {
-  min-height: 100dvh;
+  flex: 1; /* the viewport above the footer (globals.css body) */
   display: grid;
   place-items: center;
   padding: var(--gut, 16px);
@@ -985,7 +987,7 @@
 /* components/StateScreen.tsx: the loading screen's look, for every state. */
 
 .ss {
-  min-height: 100dvh;
+  flex: 1; /* the viewport above the footer (globals.css body) */
   display: grid;
   grid-template-rows: auto 1fr;
 }

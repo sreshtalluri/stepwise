@@ -120,11 +120,63 @@ export function nextLoop(loop: LoopSpan | null, len: number, total: number): Loo
 /** The single chip a loop is exactly, if it is one. */
 export const eightOf = (eights: readonly Eight[], loop: LoopSpan | null) => eights.find((e) => sameSpan(e, loop)) ?? null;
 
+// ------------------------------------------------------------------ speed
+
+/**
+ * Speed, YouTube-style: four one-tap presets, and fine steps of 0.05× from 0.25× to
+ * 1.25× in between. Every speed the page can play is on that grid — Build up's
+ * steps (0.5, 0.6 … 1) and the phone's hold-for-half-speed included — so the value
+ * shown is always exact.
+ */
+export const SPEED_PRESETS = [0.25, 0.5, 0.75, 1] as const;
+export const SPEED_MIN = 0.25;
+export const SPEED_MAX = 1.25;
+export const SPEED_STEP = 0.05;
+/** Snapped to the 0.05 grid and held in range; not a number is 1×. */
+export const clampSpeed = (s: number) =>
+  Number.isFinite(s) ? Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, s)) * 20) / 20 : 1; // 20 = 1 / SPEED_STEP
+/** One fine step slower (−1) or faster (+1), snapped to the grid. */
+export const stepSpeed = (s: number, dir: number) => clampSpeed(s + dir * SPEED_STEP);
+/** S: the next preset above this speed, round to the slowest. */
+export const nextPreset = (s: number) => SPEED_PRESETS.find((p) => p > s + 1e-9) ?? SPEED_PRESETS[0];
+/** Every speed the page can play: what a hand-off link may carry. */
+export const SPEED_GRID: readonly number[] = Array.from(
+  { length: Math.round((SPEED_MAX - SPEED_MIN) / SPEED_STEP) + 1 },
+  (_, i) => Math.round((SPEED_MIN + i * SPEED_STEP) * 100) / 100,
+);
+/** "0.65×", "1×" — exact, never rounded to a preset. */
+export const speedText = (s: number) => `${Number(s.toFixed(2))}×`;
+
 /** Build up: 0.5× on the first pass, +0.1 each pass after, held at 1×. Knobs, not physics. */
 export const BUILD_FROM = 0.5;
 export const BUILD_STEP = 0.1;
 export function buildUpSpeed(passes: number): number {
   return Math.min(1, Math.round((BUILD_FROM + BUILD_STEP * Math.max(0, passes)) * 100) / 100);
+}
+
+/**
+ * "Try another 1": the beat tracker's other candidates for count 1, each with `by`,
+ * its offset in counts from count 1 as it is NOW (after any nudge or tap), wrapped
+ * to the nearest eight the way `setCountOne` lands it (−4…3). Dropped: the current 1
+ * and ±1, which the −1 / +1 buttons already are, and repeats. The producer's first
+ * candidate stays first — it is its next best guess (packages/beat-detect
+ * propose.py `_count_one`) — and the rest follow in count order, so the row reads
+ * "−3, −2, +2" rather than the order the tracker happened to score them.
+ */
+export function oneAlternates<T extends { count_one_s: number }>(
+  alts: readonly T[],
+  grid: { countOneS: number; secondsPerCount: number },
+): (T & { by: number })[] {
+  const seen = new Set<number>();
+  const out: (T & { by: number })[] = [];
+  for (const a of alts) {
+    const k = Math.round((a.count_one_s - grid.countOneS) / grid.secondsPerCount);
+    const by = ((((k + 4) % 8) + 8) % 8) - 4;
+    if (Math.abs(by) <= 1 || seen.has(by)) continue;
+    seen.add(by);
+    out.push({ ...a, by });
+  }
+  return [...out.slice(0, 1), ...out.slice(1).sort((a, b) => a.by - b.by)];
 }
 
 /** "Counts 9–16" — the coordinate is counts, never a timestamp (DESIGN.md §12.7). */

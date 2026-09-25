@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Focus } from "./Stage3D";
-import { defaultPersonIndex, sourceAspect, SPEEDS, type MotionResult } from "../lib/motion";
+import { defaultPersonIndex, sourceAspect, type MotionResult } from "../lib/motion";
 import { load, openingStructure, save } from "../lib/structure";
 import { parseHandoff } from "../lib/flow";
 import type { Credit } from "../lib/lessons";
 import {
   buildUpSpeed,
+  clampSpeed,
   DEFAULT_LOOP_LENGTH,
   eightOf,
   eightsOf,
@@ -21,7 +22,10 @@ import {
   spanDone,
   stepLoop as stepLoopBy,
   loopLength,
+  nextPreset,
   presetCounts,
+  SPEED_GRID,
+  stepSpeed,
   type Eight,
 } from "../lib/lessonEngine";
 import { loadClickVolume, loadMusicVolume, saveClickVolume, saveMusicVolume, type ClickMode } from "../lib/metronome";
@@ -293,7 +297,8 @@ function useLesson(
   speedRef.current = speed;
   onWrapRef.current = () => {
     setPasses((p) => p + 1);
-    if (loop && speedRef.current === 1 && !spanDone(done, loop)) {
+    // 1.25× is full speed and then some: it counts.
+    if (loop && speedRef.current >= 1 && !spanDone(done, loop)) {
       const next = markDone(done, loop);
       setDone(next);
       saveDone(lessonId, next);
@@ -327,7 +332,12 @@ function useLesson(
   }, [video, structure]);
 
   useEffect(() => {
-    if (video) video.playbackRate = speed;
+    if (!video) return;
+    // Slower, not lower: the song keeps its key at 0.25× (the default, set anyway
+    // because some engines have shipped it off; Safari before 17 reads the prefixed one).
+    video.preservesPitch = true;
+    (video as { webkitPreservesPitch?: boolean }).webkitPreservesPitch = true;
+    video.playbackRate = speed;
   }, [video, speed]);
 
   const play = useCallback(() => {
@@ -427,7 +437,7 @@ function useLesson(
     opened.current = true;
     // The processing screen's hand-off (lib/flow.ts handoffHref): the learner was
     // already practising a speed and some counts, so the lesson opens on the same ones.
-    const q = parseHandoff(window.location.search, SPEEDS, total);
+    const q = parseHandoff(window.location.search, SPEED_GRID, total);
     if (q.speed !== null) setSpeed(q.speed);
     if (q.loop) setLoop(q.loop, { via: "handoff" });
   }, [restored, video, total, setLoop]);
@@ -472,12 +482,24 @@ function useLesson(
     editStructure(setCountOne(structure, s, endS));
   }, [structure, endS, editStructure, lessonId, alternates]);
 
-  const cycleSpeed = useCallback(() => {
+  // Picking a speed, a preset or a fine step, is the learner taking over from Build up.
+  const pickSpeed = useCallback((s: number) => {
     setBuildUp(false);
-    setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s as 1) + 1) % SPEEDS.length] ?? 1);
+    setSpeed(clampSpeed(s));
   }, [setBuildUp]);
+  /** S: the next preset up. */
+  const cycleSpeed = useCallback(() => pickSpeed(nextPreset(speedPick)), [pickSpeed, speedPick]);
+  /** − / + (and < / >): 0.05× slower or faster. */
+  const nudgeSpeed = useCallback((dir: number) => pickSpeed(stepSpeed(speedPick, dir)), [pickSpeed, speedPick]);
 
-  useOnChange(speedPick, (s) => track("speed_changed", { speed: s }, lessonId));
+  // `speed_changed` once the speed has settled for a second: five taps on + are one change.
+  const firstSpeed = useRef(speedPick);
+  useEffect(() => {
+    if (speedPick === firstSpeed.current) return;
+    firstSpeed.current = NaN; // from here on, every settled change counts (back to 1× too)
+    const id = window.setTimeout(() => track("speed_changed", { speed: speedPick }, lessonId), 1000);
+    return () => window.clearTimeout(id);
+  }, [speedPick, lessonId]);
   useOnChange(buildUp, (on) => track("build_up_toggled", { on }, lessonId));
   useOnChange(`${clickOn}|${clickMode}`, () => track("click_toggled", { on: clickOn, mode: clickMode }, lessonId));
 
@@ -488,7 +510,7 @@ function useLesson(
     video, setVideo, timeRef, displayTime, playing, setPlaying, play, pause, togglePlay, seek,
     structure, editStructure, authored, countsFrom, tapOne, nudgeOne, tryOne, alternates,
     eights, loop, setLoop, loopEight, here, hereCount, stepLoop, loopLen, setLoopLen, next, done, sameSpan,
-    speed, speedPick, setSpeed, cycleSpeed, buildUp, setBuildUp, passes, setHoldSlow,
+    speed, speedPick, pickSpeed, cycleSpeed, nudgeSpeed, buildUp, setBuildUp, passes, setHoldSlow,
     clickOn, setClickOn, clickMode, setClickMode, clickVol, setClickVol, musicVol, setMusicVol,
     multi, selected, chooseDancer, pickerOpen, setPickerOpen, showEveryone, setShowEveryone,
     panels, maxPanels, bumped, toggleView, mirrored, setMirrored, follow, setFollow,

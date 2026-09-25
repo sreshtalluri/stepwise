@@ -186,7 +186,12 @@ function Room({
   const [speed, setSpeed] = useState(1);
   const [mirror, setMirror] = useState(false);
   const [muted, setMuted] = useState(true);
-  const [paused, setPaused] = useState(false);
+  /**
+   * What the video is really doing: null until it has tried to start. Not assumed
+   * playing: a blocked autoplay (Low Power Mode, a browser setting) leaves it paused
+   * with no event at all, and the page said "playing now" beside "Paused".
+   */
+  const [paused, setPaused] = useState<boolean | null>(null);
   /** The clip's width / height once its metadata is in: a wide clip gets a wide stage. */
   const [aspect, setAspect] = useState(0);
 
@@ -195,13 +200,16 @@ function Room({
   }, [jobId]);
 
   useEffect(() => {
-    if (video) video.playbackRate = speed;
+    if (!video) return;
+    video.preservesPitch = true; // slower, not lower (see LessonViewer)
+    (video as { webkitPreservesPitch?: boolean }).webkitPreservesPitch = true;
+    video.playbackRate = speed;
   }, [video, speed, src]);
 
   const nextSpeed = useCallback(() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length]), []);
   const togglePlay = useCallback(() => {
     if (!video) return;
-    if (video.paused) void video.play();
+    if (video.paused) void video.play().catch(() => setPaused(true));
     else video.pause();
   }, [video]);
 
@@ -228,25 +236,26 @@ function Room({
       data-wide={aspect >= 1 ? "" : undefined}
       style={aspect ? ({ ["--ar" as string]: aspect } as React.CSSProperties) : undefined}
     >
-      <div className="fd-pstage" onClick={togglePlay} role="button" tabIndex={-1} aria-label={copy.videoLabel}>
-        <span className="fd-tag">{copy.videoLabel}</span>
+      <div className="fd-pstage" onClick={togglePlay} role="button" tabIndex={-1} aria-label={copy.videoLabelIdle}>
+        <span className="fd-tag">{paused === false ? copy.videoLabel : copy.videoLabelIdle}</span>
         <div className="fd-mirror" style={{ transform: mirror ? "scaleX(-1)" : undefined }}>
           {src && (
             <video
               ref={setVideo}
               src={src}
-              autoPlay
               muted={muted}
               playsInline
               loop
               onPlay={() => setPaused(false)}
               onPause={() => setPaused(true)}
+              // Started here rather than by `autoPlay`, so a refusal is seen and said.
+              onLoadedData={(e) => void e.currentTarget.play().catch(() => setPaused(true))}
               onLoadedMetadata={(e) => setAspect(e.currentTarget.videoWidth / (e.currentTarget.videoHeight || 1))}
             />
           )}
           <SkeletonOverlay jobId={jobId} video={video} available={dancersIn} />
         </div>
-        {paused && <span className="fd-tag fd-tag-b">{copy.paused}</span>}
+        {paused === true && <span className="fd-tag fd-tag-b">{copy.paused}</span>}
       </div>
 
       <div className="fd-panel">
@@ -283,7 +292,7 @@ function Room({
           {steps.map((s) => (
             <li key={s.key} className={`fd-step-${s.state}`}>
               <b>{s.label}</b>
-              <span>{s.note}</span>
+              <span>{s.key === "clip" && paused ? copy.steps.clipPaused : s.note}</span>
             </li>
           ))}
         </ol>

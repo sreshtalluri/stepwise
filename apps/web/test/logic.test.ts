@@ -120,3 +120,10 @@ test("parseCredit keeps an https credit and drops anything else", () => {
   assert.equal(parseCredit({ detail: "No source link for this lesson." }), null);
   assert.equal(parseCredit(null), null);
 });
+
+test("a link lesson is named for its post, with the choreographer when known", () => {
+  const c = { host: "TikTok", creator: "@kinjazofficial", choreo: null };
+  assert.equal(lessonCopy.creditTitle(c), "@kinjazofficial on TikTok");
+  assert.equal(lessonCopy.creditTitle({ ...c, choreo: "@carlodarang" }), "@kinjazofficial on TikTok · Choreo @carlodarang");
+  assert.equal(lessonCopy.creditTitle({ ...c, creator: null }), "From TikTok");
+});

@@ -931,5 +931,3 @@ export function viewLabel(view: ViewId, mirrored: boolean): string {
   const kind = view === "camera" || view === "overlay" ? "camera view" : "estimated view";
   return mirrored ? `${preset.label} · mirrored · ${kind}` : `${preset.label} · ${kind}`;
 }
-
-export const SPEEDS = [0.25, 0.5, 0.75, 1] as const;

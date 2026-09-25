@@ -308,6 +308,17 @@ def test_a_different_posts_credit_does_not_overwrite(api):
     assert api.get_job_source("job_a")["creator"] == "@original"
 
 
+def test_an_old_credit_is_served_without_tracking_params(api):
+    """Saved before clean_url (job_5716ecd3…): the stored URL keeps its junk, the answer does not."""
+    stored = {"url": TIKTOK_FULL + "?_r=1&_t=ZP-99zZiojnXfa", "host": "TikTok", "creator": "@original"}
+    api.results_volume.files["/job_old.job-meta.json"] = json.dumps({"credit": stored}).encode()
+    assert api.get_job_source("job_old") == {**stored, "url": TIKTOK_FULL}
+    assert json.loads(api.results_volume.files["/job_old.job-meta.json"])["credit"] == stored, "read-only"
+    yt = "https://www.youtube.com/watch?v=abc&si=track"
+    api.results_volume.files["/job_yt.job-meta.json"] = json.dumps({"credit": {**stored, "url": yt}}).encode()
+    assert api.get_job_source("job_yt")["url"] == "https://www.youtube.com/watch?v=abc"
+
+
 def test_youtube_bot_check_is_host_blocked_not_login():
     import ingest
     e = ingest.classify_fetch_error(
@@ -460,7 +471,7 @@ def test_every_refusal_is_a_valid_job_status_error():
         assert not any(w in message.lower() for w in ("sorry", "oops", "apolog")), message
         assert "!" not in message
     # Codes that only exist on the structured (non-string-matched) path.
-    assert codes | {"clip_too_long", "live_stream", "fetch_failed", "invite_required"}
+    assert codes | {"clip_too_long", "live_stream", "fetch_failed", "invite_required", "invite_invalid"}
 
 
 # ---------------------------------------------------------------------------
@@ -478,13 +489,15 @@ def test_invite_gate_is_closed_by_default(api, fake_ytdlp, monkeypatch):
 
 def test_wrong_or_missing_code_is_refused(api, fake_ytdlp):
     from fastapi import HTTPException
-    for code in (None, "", "nope", "let-me-in "):
-        if code == "let-me-in ":
-            continue  # whitespace is stripped, so this one is valid
+    for code, why in ((None, "invite_required"), ("", "invite_required"), ("  ", "invite_required"),
+                      ("nope", "invite_invalid")):
         with pytest.raises(HTTPException) as e:
             _paste(api, code=code)
         assert e.value.status_code == 403, code
+        assert e.value.detail["error"]["code"] == why, code
+    assert "isn't right" in e.value.detail["error"]["message"]
     assert fake_ytdlp.probes == 0
+    assert _paste(api, code="let-me-in ").job_id  # whitespace is stripped, so this one is valid
 
 
 def test_file_upload_is_not_gated(api, monkeypatch, tmp_path):

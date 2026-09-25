@@ -31,6 +31,16 @@ test("the playback rate stretches wall time, not the grid", () => {
   assert.ok(near(two[1].in, 0.7), "(0.45 - 0.1) / 0.5");
 });
 
+test("any speed on the 0.05 grid: the click interval is the count's length over the rate", () => {
+  for (const rate of [0.25, 0.65, 1, 1.25]) {
+    const cs = clicksAhead({ grid, loop: null, t: 0.2, rate, lookahead: 10, mode: "counts" });
+    const gaps = cs.slice(1).map((c, i) => c.in - cs[i].in);
+    assert.ok(gaps.length > 2 && gaps.every((g) => near(g, grid.secondsPerCount / rate)), `${rate}×: ${gaps}`);
+    const ands = clicksAhead({ grid, loop: null, t: 0.2, rate, lookahead: 10, mode: "ands" });
+    assert.ok(near(ands[1].in - ands[0].in, grid.secondsPerCount / 2 / rate), `${rate}× and`);
+  }
+});
+
 test("a loop cuts the lookahead at its end; after the wrap the loop's start clicks first", () => {
   const loop = loopTimesS(grid, { startCount: 3.5, endCount: 6 }); // 3& – 6: [1.45, 3.2)
   const before = clicksAhead({ grid, loop, t: 2.9, rate: 1, lookahead: 1, mode: "ands" });

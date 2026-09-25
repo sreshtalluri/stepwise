@@ -91,7 +91,8 @@ test("a 413 names the size problem, not the connection; service sentences pass t
   const limit = "You have started 5 lessons this hour, which is the limit. Try again in about an hour.";
   assert.deepEqual(await failureFrom(json(429, { detail: { error: { message: limit } } }), upload.errors.uploadFailed),
     { error: limit, kind: "limit" });
-  const invite = "Links are open to invited testers right now. You can still add a video file.";
+  // services/motion-api api.py: a wrong code (invite_invalid) is told apart from a missing one (invite_required).
+  const invite = "That invite code isn't right. Check it and try again.";
   assert.deepEqual(await failureFrom(json(403, { detail: { error: { message: invite } } }), upload.linkErrors.unreachable),
     { error: invite, kind: "invite" });
   assert.deepEqual(await failureFrom(json(422, { detail: { error: { message: "That video is behind a login, so we cannot open it." } } }), ""),
