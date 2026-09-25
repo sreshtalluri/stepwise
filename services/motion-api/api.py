@@ -111,20 +111,58 @@ async def _prewarm_gpu(request: Request, call_next):
 
     Runs before the body is read, so the L40S cold start and model load
     (~30 s, docs/research/pipeline-latency.md #2) overlap the upload transfer
-    or the link fetch instead of following them. `warm()` does nothing; the
-    container it starts sits idle until run() lands on it, or scales down
-    after Modal's idle window if the clip is refused or deduped (~$0.03).
-    Links only warm with a valid invite code, so a closed door costs nothing.
+    or the link fetch instead of following them. The container waits for this
+    request's job under a one-off token (modal_app Reconstructor.
+    run_when_handed); _dispatch_run hands it over. A request that ends without
+    a job (refused, deduped, failed) tells it to stop, so it scales down after
+    Modal's idle window (~$0.03). Links only pre-warm with a valid invite code,
+    so a closed door costs nothing.
     """
+    token = None
     if request.method == "POST" and (
             request.url.path == "/clips"
             or (request.url.path == "/clips/link"
                 and ingest.invite_code_ok(request.headers.get("x-invite-code")))):
         try:
-            await _reconstructor().warm.spawn.aio()
-        except Exception as e:  # noqa: BLE001 -- best-effort: run() still cold-starts one
-            print(f"[prewarm] could not warm a GPU container: {e}")
-    return await call_next(request)
+            token = uuid.uuid4().hex
+            _reconstructor().run_when_handed.spawn(token)
+            request.state.gpu_token = token
+        except Exception as e:  # noqa: BLE001 -- best-effort: dispatch spawns run() cold instead
+            print(f"[prewarm] could not pre-warm a GPU container: {e}")
+            token = None
+    try:
+        return await call_next(request)
+    finally:
+        if token and not getattr(request.state, "gpu_handed", False):
+            try:
+                if not _handoff().put(token, {"cancel": True}, skip_if_exists=True):
+                    _handoff().pop(token, None)  # it had already given up
+            except Exception as e:  # noqa: BLE001 -- it gives up by itself after HANDOFF_WAIT_S
+                print(f"[prewarm] could not release the pre-warmed container: {e}")
+
+
+def _handoff():
+    return modal.Dict.from_name("stepwise-gpu-handoff", create_if_missing=True)
+
+
+def _dispatch_run(http, **job) -> None:
+    """Start run_clip for `job`: on this request's pre-warmed container if it
+    is still waiting, otherwise as a fresh run() -- never both, never neither.
+
+    First write wins (skip_if_exists) on both sides, so a container that gave
+    up at the same instant is not a lost job: its "closed" is already there,
+    this put fails, and run() is spawned.
+    """
+    token = getattr(getattr(http, "state", None), "gpu_token", None)
+    if token:
+        try:
+            if _handoff().put(token, {"job": job}, skip_if_exists=True):
+                http.state.gpu_handed = True
+                return
+            _handoff().pop(token, None)
+        except Exception as e:  # noqa: BLE001 -- the job still runs, just cold
+            print(f"[prewarm] hand-off failed, spawning run(): {e}")
+    _run_clip_fn().spawn(**job)
 
 
 @app.middleware("http")
@@ -391,7 +429,7 @@ def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict, http: Request,
         print(f"[dispatch] {job_id} is already running -- adopting it, not spawning again")
         return DispatchResponse(clip_id=clip_id, job_id=job_id, deduplicated=True)
 
-    _run_clip_fn().spawn(clip_id=clip_id, job_id=job_id, beats_call_id=_spawn_counts(clip_id))
+    _dispatch_run(http, clip_id=clip_id, job_id=job_id, beats_call_id=_spawn_counts(clip_id))
     return DispatchResponse(clip_id=clip_id, job_id=job_id)
 
 

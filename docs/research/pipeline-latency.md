@@ -262,3 +262,144 @@ These are estimates built from the measured stage times. Nothing was re-run.
 - Modal's log API returned only ~11k lines per query window because of the
   per-frame debug prints. That is why this doc samples frame-level timings
   rather than reading all of them. Item #5 fixes it too.
+
+---
+
+## 6. Export: CPU vs GPU (measured 2026-09-24, before moving it)
+
+Branch `perf/pipeline-overhead`. The question was whether `export_clip_gltf`
+needs a GPU at all, decided on measurements rather than on reading the code.
+
+**(a) Does export use the GPU today?** No.
+- Code: nothing in the export path (`modal_app._export_clip_gltf`,
+  `motion_result`, `grounding`, `world_placement_probe`, `region_mask`,
+  `skeleton_constraints`, `hand_crops`) calls `.cuda()` or takes a device. The
+  one torch use is `torch.jit.load(mhr_model.pt, map_location="cpu")` for the
+  shape basis.
+- Runtime: on its current L40S image, `nvidia-smi` sampled every 0.25 s for the
+  whole export showed **0 % utilisation and 3–7 MB of VRAM** (no CUDA context),
+  and `torch.cuda.is_initialized()` was False afterwards.
+
+**(b) Can it run on CPU, with identical output?** Yes.
+- `pymomentum-gpu==0.1.114.post0` imports and runs on a CPU-only container.
+- `pymomentum-cpu==0.1.114.post0` (same version, CPU torch 2.8.0 from the
+  PyTorch CPU index) does too.
+- **GLB bytes are identical** (sha256) across all seven configurations below,
+  on a 1-dancer clip and on solo-07's 4 dancers.
+- **MotionResult is equal to within 1 ulp.** 64 root-position values differ
+  by at most 8.9e-16. This is host-CPU float noise: the L40S host and the CPU
+  containers agree bit for bit, and the T4 host and the CPU container running
+  the GPU wheel agree with each other, but the two pairs differ from each other.
+
+**(c) Timing and cost.** Clip 7995 (12 s, 180 frames, 1 dancer). Every
+container was cold, and the images were already built.
+
+| Export on | Image | Start (spawn → running) | Export | Peak RSS | $/export incl. 60 s idle |
+|---|---|---|---|---|---|
+| L40S (today) | pymomentum-gpu + CUDA torch | 3.1 s | 10.0 s | 4.9 GB | ~$0.040 |
+| L4 | same | 4.7 s | 13.0 s | 4.9 GB | ~$0.017 |
+| T4 | same | 8.3 s | 12.9 s | 4.9 GB | ~$0.012 |
+| CPU ×4 | same (GPU wheel) | 8.5 s | 15.6 s | 4.9 GB | <$0.001 |
+| **CPU ×2** | **pymomentum-cpu + CPU torch** | **4.1 s** | **11.0 s** | **1.2 GB** | **<$0.001** |
+| CPU ×4 | pymomentum-cpu + CPU torch | 4.1 s | 11.0 s | 1.2 GB | <$0.001 |
+| CPU ×8 | pymomentum-cpu + CPU torch | 5.4 s | 11.0 s | 1.2 GB | <$0.001 |
+
+Harder clips, run on the CPU image:
+
+| Clip | CPU ×2 | CPU ×4 | CPU ×8 | L40S | Peak RSS (CPU) |
+|---|---|---|---|---|---|
+| dc32: 45 s, 671 frames, 1 dancer | 14.8 s | – | – | – | 1.25 GB |
+| solo-07: 4 dancers | 49.1 s | 43.6 s | 57.8 s | 43.0 s | 1.33 GB |
+
+- The work is single-threaded. 2, 4 and 8 cores are within host-to-host noise
+  of each other, and of the L40S host's CPU.
+- Start times include no GPU-capacity queue. None happened in these runs; the
+  a106 job waited 286 s for one.
+
+**(d) Decision: CPU, `cpu=2.0`, `memory=3072`, on a pymomentum-cpu image.**
+- The output is identical.
+- It takes the same time as the L40S.
+- It costs about 1/40th as much.
+- It can never queue for GPU capacity.
+- The CPU image also drops 3.6 GB of resident CUDA libraries.
+
+A small GPU (T4 or L4) as fallback was not needed.
+
+Something this measurement turned up: a 4-dancer export takes ~45 s on any
+hardware, because the tracks are exported one after another on one core.
+Exporting the tracks in parallel would cut this, but it is not part of this
+change.
+
+## 7. What #1 and #2 did (measured, same clip, same day)
+
+What changed:
+- Export runs on the CPU image above, and `run_clip` spawns it rather than
+  blocking. Export writes the terminal status in the same strict order: files
+  committed, then R2 published, then `succeeded`. A failure there is a
+  retryable `export_error`.
+- The GPU stage is the `Reconstructor` class:
+  - SAM 3D Body loads in `@modal.enter`, in a background thread, so detection
+    overlaps the load.
+  - `api.py` spawns `run_when_handed(token)` as soon as an upload or link
+    request arrives, and passes the job over a `modal.Dict` once the clip is
+    stored.
+- dinov3 (pinned sha) and the RTMO onnx (sha256-checked) are baked into
+  `cv_image`.
+- The vendored per-frame debug prints are off unless `SAM3D_VERBOSE=1`.
+
+**The pre-warm design was chosen by measurement too.** The first version sent
+a separate no-op `warm()` and then `run()` once the clip was stored. When
+`run()` queued while the warm container was still booting, Modal started a
+**second** L40S, which did its own model load and then sat idle. That happened
+in 2 of 3 cold runs, and cancelling the queued `warm()` first did not prevent
+it. The hand-off sends one input per job, and the cold run then used exactly
+one GPU container.
+
+**Setup.** Upload b8223229 (14.4 s, 216 frames, 1 dancer), copied under
+throwaway clip ids. `modal run` against an ephemeral app. Status was polled
+from the Volume every second.
+- For the new path, t=0 is request arrival, with a simulated 5 s ingest before
+  the hand-off.
+- The baseline ran the pre-change code, spawned at t=0 *after* ingest, so add
+  about 5 s to its total for the same comparison.
+
+| Stage | Before (pre-change code) | After, cold (4 runs) | After, warm (3 runs) |
+|---|---|---|---|
+| GPU start → first status | 11.2 s after spawn | 9.7–18.7 s after *request arrival* (runs during ingest) | 2.3 s after hand-off |
+| Model load | 23.2 s, on the critical path | 14–16.5 s, hidden under detection | 0 (already loaded) |
+| Read + detect | 42.7 s | 21–26 s | 13–17 s |
+| Reconstruct (215 frames) | 97.5 s | 56–74 s | 57–75 s |
+| Constraints + smoothing + save | 15.0 s | 10–13 s | 7.5–10 s |
+| 0.97 → `succeeded` (export incl. its start + R2) | 26.5 s | 17–22 s | 18–20 s |
+| **Total** | **225.6 s + ingest** | **130–150 s from arrival** | **109–129 s from arrival** |
+| L40S held per job | whole job + idle | until reconstruction returns | same |
+
+- **Reconstruction and detection are noisy.** The doc already measured 0.34–0.6
+  s/frame between identical runs. The faster reconstruction here is partly the
+  print gate (~10k fewer log lines per job) and partly host luck. Only the
+  structural savings are attributable: model load off the critical path, cold
+  start under ingest, export off the GPU, and no GPU queue for export.
+- **The outputs match.**
+  - Every run: 1 person, 215/216 frames reconstructed, peak VRAM 3.69 GB.
+  - Every run: one GLB exported, region-split and rewritten to LINEAR (both
+    steps check their own output and raise on failure).
+  - Every run: the MotionResult was contract-validated and published to R2, and
+    proposed counts were present.
+  - Against the baseline, joint rotations differ by a median 0.000° (p99 0.16°)
+    and root position by a median 0.1 mm. That is the same spread as two runs
+    of the *new* code against each other (p99 0.16°), which is GPU run-to-run
+    nondeterminism.
+- **ByteTrack ids were not reset between clips.** The first warm-container run
+  numbered its dancer `track9` instead of `track1`, because the tracker's id
+  counter is class-level and survives a new tracker. Reset per clip now:
+  after the fix, both the cold and the warm run export `track1`. This was also
+  latent in the old per-job code whenever Modal reused a container.
+
+**Not done here.** The owner approved #1 and #2 only. These are untouched:
+- #4, the compile and bf16 flags
+- #7, batching
+- #8, the video-and-counts-first lesson
+
+One note for #4: models now load once per container, so its 30–60 s compile
+warm-up would be paid once per container, not once per job. That weakens the
+cost argument against it in §3.

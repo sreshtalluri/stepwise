@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import modal_app  # noqa: E402
 
-export = modal_app.export_clip_gltf.get_raw_f()
+export = modal_app._export_and_report
 
 
 @pytest.fixture()
@@ -51,5 +51,5 @@ def test_export_failure_is_a_retryable_export_error(events):
 
 
 def test_standalone_reexport_leaves_job_status_alone(events):
-    export("c1", "job_c1")
+    export("c1", "job_c1", None)
     assert events == ["files committed", "r2 published"]

@@ -532,7 +532,7 @@ Then re-request. If the behaviour changes, that was it.
 
 The GPU stage is the same trap with a longer fuse: `Reconstructor` (the class
 `run_clip` runs in) loads its models once per container and stays warm for
-Modal's idle window after every job or `warm()` ping, and the vendored
+Modal's idle window after every job or ingest pre-warm, and the vendored
 Fast-SAM-3D-Body tree is a mount. Stop any warm `Reconstructor` container too.
 
 ### 7.2 `/health` says `"assets": "volume-proxy"`

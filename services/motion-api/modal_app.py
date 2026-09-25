@@ -394,6 +394,15 @@ def verify_cv_stack():
 GPU_HOURLY_USD = {"L40S": 1.95, "A10G": 1.10, "T4": 0.59}
 
 
+# The pre-warmed GPU container's inbox, one key per ingest request (see
+# Reconstructor.run_when_handed and api.py _prewarm_gpu). Resolved by name at
+# runtime on both sides; no function declares it, so no dependency count moves.
+gpu_handoff = modal.Dict.from_name("stepwise-gpu-handoff", create_if_missing=True)
+# How long a pre-warmed container waits for its job: past the slowest link
+# fetch measured (43 s), with room for a slow upload. Missing it costs a cold
+# start, never the job -- api.py then spawns run() itself.
+HANDOFF_WAIT_S = 180
+
 SAM3D_CKPT = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/model.ckpt"
 SAM3D_MHR = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
 
@@ -405,16 +414,17 @@ SAM3D_MHR = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
     secrets=OBS_SECRETS,
     timeout=3600,
     # Scale to zero, Modal's default idle window (60 s). No standing GPU cost:
-    # a warm container only exists because a job (or a warm() ping) just ran.
+    # a warm container only exists because a job (or a pre-warm) just ran.
     min_containers=0,
 )
 class Reconstructor:
     """The GPU stage, with its models loaded once per container instead of
     once per job (docs/research/pipeline-latency.md #2: 20-25 s every job).
 
-    api.py calls `warm()` the moment an upload/link request arrives, so the
-    cold start and model load overlap ingest, then `run()` once the clip is
-    stored. `run()` is run_clip below, unchanged in contract.
+    api.py spawns `run_when_handed()` the moment an upload/link request
+    arrives, so the cold start and model load overlap ingest, and hands the
+    job over once the clip is stored. `run()` is run_clip below, unchanged in
+    contract, for everything else (retries, evaluation, a missed hand-off).
 
         modal run modal_app.py::Reconstructor.run --clip-id solo-01
     """
@@ -435,18 +445,45 @@ class Reconstructor:
         self.detector = load_detector()
 
     @modal.method()
-    def warm(self) -> bool:
-        """Nothing: its only job is to make Modal start this container now."""
-        return True
-
-    @modal.method()
     def run(self, clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1,
             job_id: str | None = None, retry_count: int = 0, beats_call_id: str | None = None):
+        return self._run(clip_id, fps, max_seconds, bbox_thr, job_id, retry_count, beats_call_id)
+
+    @modal.method()
+    def run_when_handed(self, token: str):
+        """Pre-warm, then run the job api.py hands over under `token`.
+
+        ONE input per job, on purpose. A no-op warm() spawned beside a later
+        run() was tried first and measured: whenever run() queued while the
+        warm container was still booting, Modal started a second GPU container
+        for it (2 of 3 cold runs, ~$0.04 each). Here the job reaches the
+        container that is already starting, through gpu_handoff.
+
+        Every write is first-wins (skip_if_exists), so giving up is race-free:
+        either this claims the key with "closed" and api.py's later put fails
+        (it then spawns run() itself), or api.py's job is already there.
+        """
+        import time
+
+        deadline = time.time() + HANDOFF_WAIT_S
+        while True:
+            msg = gpu_handoff.get(token)
+            if msg is None:
+                if time.time() > deadline and gpu_handoff.put(token, {"closed": True}, skip_if_exists=True):
+                    print(f"[handoff] nothing handed over in {HANDOFF_WAIT_S}s")
+                    return None
+                time.sleep(0.25)
+                continue
+            gpu_handoff.pop(token, None)
+            if "job" not in msg:
+                return None  # the request ended without a job: refused, deduped or failed
+            return self._run(**msg["job"])
+
+    def _run(self, *args, **kwargs):
         if self.model.done() and self.model.exception() is not None:
             # A failed load must not poison a warm container for every later job.
             self.model = self._pool.submit(self._load_model)
-        return run_clip(clip_id, fps, max_seconds, bbox_thr, job_id, retry_count, beats_call_id,
-                        detector=self.detector, model=self.model)
+        return run_clip(*args, **kwargs, detector=self.detector, model=self.model)
 
 
 def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1,
@@ -1510,6 +1547,12 @@ def export_clip_gltf(clip_id: str, job_id: str | None = None, retry_count: int |
 
     Without `retry_count` (a standalone re-export) job status is not touched.
     """
+    return _export_and_report(clip_id, job_id, retry_count)
+
+
+def _export_and_report(clip_id: str, job_id: str | None, retry_count: int | None):
+    """export_clip_gltf's body, a plain function so test_export_status.py can
+    run it without a container."""
     if retry_count is None:
         return _export_clip_gltf(clip_id, job_id)
     import sys
@@ -2211,4 +2254,5 @@ def main():
     print(download_weights.remote())
     print("\n=== stage 3: inspect ===")
     inspect_weights.remote()
+
 
