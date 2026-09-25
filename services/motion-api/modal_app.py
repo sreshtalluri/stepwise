@@ -784,6 +784,13 @@ gltf_image = (
     # pinned image ever does go red for a reason like this: a tiny CPU sidecar
     # function invoked with .spawn(). Not needed; recorded in DEPLOYMENT.md.
     .pip_install("boto3")
+    # The contract validator's dependencies, so export validates the
+    # MotionResult ONCE, before "succeeded", and api.py can trust the published
+    # object on any replica instead of re-validating it (20-30 s on a cold web
+    # container) on the learner's first open. Own layer, after boto3, for the
+    # same reason boto3 has one; above the mounts because Modal allows no build
+    # step after an add_local_*.
+    .pip_install("jsonschema", "pydantic")
     # Mounted at container start, same pattern as cv_image's VENDOR_DIR --
     # editing region_mask.py doesn't force a rebuild of the layers above.
     .add_local_dir(GLTF_TOOLS_DIR, remote_path="/app/motion-api-tools")
@@ -825,6 +832,15 @@ gltf_image = (
     .add_local_file(os.path.join(os.path.dirname(__file__),
                                   "vendor/fast-sam-3d-body/tools/hand_crops.py"),
                     "/app/hand_crops.py")
+    # The contract validator (its pip layer is above, with boto3's reasoning).
+    # Same repo-shaped paths as api_image, so validate.py finds ../../schema.
+    .add_local_dir(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                                "packages", "motion-contract", "python"),
+                   remote_path="/app/packages/motion-contract/python",
+                   ignore=["**/__pycache__/**", "*.pyc", ".venv/**"])
+    .add_local_dir(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                                "packages", "motion-contract", "schema"),
+                   remote_path="/app/packages/motion-contract/schema")
 )
 
 BEAT_DETECT_DIR = os.path.join(
@@ -1665,7 +1681,9 @@ def export_clip_gltf(clip_id: str, job_id: str | None = None):
     import gzip
     import sys
     sys.path.insert(0, "/app")
+    sys.path.insert(0, "/app/packages/motion-contract/python")
     import motion_result
+    from motion_contract import validate_motion_result
 
     perf_path = f"{RESULTS_DIR}/{clip_id}.performance.json"
     perf = json.load(open(perf_path)) if os.path.exists(perf_path) else None
@@ -1676,15 +1694,25 @@ def export_clip_gltf(clip_id: str, job_id: str | None = None):
             job_id or f"job_{clip_id}", clip_id,
             open(npz_path, "rb").read(), manifest, perf, beats,
         )
+        # Validated here, once, before anything is written: a document that
+        # fails is not materialised, so api.py's fallback rebuilds and refuses
+        # it (500) rather than anyone serving it. The marker rides on the R2
+        # object, same PUT as the bytes (api.py _validated_r2_url), so no web
+        # replica validates it again.
+        check = validate_motion_result(doc)
+        if not check.valid:
+            raise ValueError(f"contract validation failed: {check.errors[:5]}")
+        gz = gzip.compress(json.dumps(doc, separators=(",", ":")).encode(), 6)
         with open(f"{RESULTS_DIR}/{clip_id}.motion-result.json.gz", "wb") as f:
-            f.write(gzip.compress(json.dumps(doc, separators=(",", ":")).encode(), 6))
+            f.write(gz)
+        validated = doc["job_id"]
         materialised = True
     except Exception as e:  # noqa: BLE001
         # Not fatal: the npz is still there and api.py falls back to building
         # from it, exactly as it did before. Loud, though -- a lesson stuck on
         # the fallback path is one the sweeper will never reclaim space for.
         print(f"WARNING: could not materialise MotionResult for {clip_id}: {e}")
-        materialised = False
+        materialised, validated = False, None
 
     results.commit()
 
@@ -1703,14 +1731,17 @@ def export_clip_gltf(clip_id: str, job_id: str | None = None):
     # any object R2 does not have (no range requests on that path, but a working
     # lesson beats a failed one). Loud, though -- a lesson stuck on the fallback
     # is one whose video cannot be scrubbed.
-    published = _publish_to_r2(clip_id, list(out_paths.values()), materialised)
+    published = _publish_to_r2(clip_id, list(out_paths.values()), validated)
 
     return {"clip_id": clip_id, "glb_paths": out_paths, "n_dancers": len(confident_track_ids),
             "motion_result_materialised": materialised, "r2_published": published}
 
 
-def _publish_to_r2(clip_id: str, glb_paths: list[str], materialised: bool) -> list[str]:
-    """Upload this lesson's GLBs and MotionResult to R2. Returns the keys written."""
+def _publish_to_r2(clip_id: str, glb_paths: list[str], validated: str | None) -> list[str]:
+    """Upload this lesson's GLBs and MotionResult to R2. Returns the keys written.
+
+    `validated` is the job_id the materialised MotionResult was contract-
+    validated for, or None when there is none to publish."""
     import sys
     sys.path.insert(0, "/app")
     import storage
@@ -1725,7 +1756,7 @@ def _publish_to_r2(clip_id: str, glb_paths: list[str], materialised: bool) -> li
         for path in glb_paths:
             written.append(storage.put_file(
                 storage.glb_key(os.path.basename(path)), path, "model/gltf-binary"))
-        if materialised:
+        if validated:
             written.append(storage.put_file(
                 storage.motion_result_key(clip_id),
                 f"{RESULTS_DIR}/{clip_id}.motion-result.json.gz",
@@ -1734,6 +1765,7 @@ def _publish_to_r2(clip_id: str, glb_paths: list[str], materialised: bool) -> li
                 # (and api.py's passthrough) decompress it transparently instead
                 # of handing the caller a bag of bytes.
                 content_encoding="gzip",
+                metadata={"validated": validated},
             ))
         print(f"[r2] published {len(written)} objects for {clip_id}")
     except Exception as e:  # noqa: BLE001 -- never fail a good job on a storage blip

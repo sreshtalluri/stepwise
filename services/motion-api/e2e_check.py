@@ -22,6 +22,7 @@ What it asserts, in the order a learner would hit it:
 """
 from __future__ import annotations
 
+import gzip
 import json
 import sys
 import time
@@ -104,9 +105,13 @@ def main(base: str, clip: Path) -> int:
         return 1
 
     t0 = time.time()
-    status, _, body = _req(f"{base}/jobs/{job_id}/result")
+    status, headers, body = _req(f"{base}/jobs/{job_id}/result")
     result_s = time.time() - t0
     assert status == 200, body
+    # Stored documents are gzip (from the API or, after its 302, from R2);
+    # urllib does not decode Content-Encoding the way a browser does.
+    if headers.get("Content-Encoding") == "gzip":
+        body = gzip.decompress(body)
     result = json.loads(body)
     v = validate.validate_motion_result(result)
     assert v.valid, f"MotionResult is not contract-valid: {v.errors}"

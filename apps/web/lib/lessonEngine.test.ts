@@ -29,6 +29,13 @@ import {
   spanLabel,
   stepLoop,
   windowAt,
+  dragSnap,
+  dragEdge,
+  COUNT_SNAP,
+  HALF_SNAP,
+  FREE_SNAP,
+  loadShowAnds,
+  saveShowAnds,
 } from "./lessonEngine";
 import { loopTimesS, mergePartWithNext, nudgeCountOne, startingStructure } from "../../../packages/navigation/src/core";
 
@@ -174,16 +181,47 @@ test("done and loop length round-trip, v1 chip ticks carry over, and a broken st
   assert.equal(loadLoopLength("abc"), 8);
   saveDone("abc", new Set([1]));
   saveLoopLength("abc", 2);
+  assert.equal(loadShowAnds(), true, "a broken store shows the &");
+  saveShowAnds(false);
   delete (globalThis as any).window;
 });
 
-test("A–B loops: dragged edges snap to counts and ands, and read like a dancer counts", () => {
-  assert.deepEqual(edgeLoop(3.4, 7.1, total), span(3.5, 6), "3& – 6: from the and of 3 through 6");
-  assert.deepEqual(edgeLoop(7.1, 3.4, total), span(3.5, 6), "dragged backwards");
+test("the & on the count strip: on by default, remembered per device", () => {
+  const store = new Map<string, string>();
+  (globalThis as any).window = {
+    localStorage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) },
+  };
+  assert.equal(loadShowAnds(), true);
+  saveShowAnds(false);
+  assert.equal(loadShowAnds(), false);
+  saveShowAnds(true);
+  assert.equal(loadShowAnds(), true);
+  delete (globalThis as any).window;
+});
+
+test("A–B loops: a drag snaps to whole counts; Shift to the ands, Alt not at all", () => {
+  assert.equal(dragSnap({}), COUNT_SNAP, "touch and a plain mouse drag: whole counts");
+  assert.equal(dragSnap({ shiftKey: true }), HALF_SNAP);
+  assert.equal(dragSnap({ altKey: true, shiftKey: true }), FREE_SNAP, "Alt wins");
+  assert.deepEqual(edgeLoop(3.4, 7.1, total), span(3, 6), "a finger near the and of 3 lands on 3");
+  assert.deepEqual(edgeLoop(3.6, 6.6, total), span(4, 6), "…and past it, on 4");
+  assert.deepEqual(edgeLoop(7.1, 3.4, total), span(3, 6), "dragged backwards");
   assert.deepEqual(edgeLoop(2, 6, total), span(2, 5));
-  assert.equal(edgeLoop(3, 3.6, total), null, "under one count is not a loop");
+  assert.deepEqual(edgeLoop(3.4, 7.1, total, HALF_SNAP), span(3.5, 6), "Shift: 3& – 6, from the and of 3 through 6");
+  assert.deepEqual(edgeLoop(3.4, 7.3, total, HALF_SNAP), span(3.5, 6.5), "Shift: 3& – 6&");
+  assert.equal(edgeLoop(3, 3.4, total), null, "under one count is not a loop");
+  assert.deepEqual(edgeLoop(3, 3.6, total), span(3, 3), "one count is");
+  assert.equal(edgeLoop(3, 3.6, total, HALF_SNAP), null);
   assert.deepEqual(edgeLoop(-4, total + 9, total), span(1, total), "clamped to the dance");
-  assert.deepEqual(edgeLoop(3.27, 7.1, total, true), span(3.27, 6.1), "free, with Alt");
+  assert.deepEqual(edgeLoop(3.27, 7.1, total, FREE_SNAP), span(3.27, 6.1), "free, with Alt");
+  // The half-count path on touch: a whole-count drag, then the ½ nudge by an end.
+  assert.deepEqual(nudgeEdge(edgeLoop(3.4, 7.1, total)!, "start", 0.5, total), span(3.5, 6));
+  assert.deepEqual(nudgeEdge(span(3, 6), "end", 0.5, total), span(3, 6.5));
+  // A handle drag snaps only the edge in hand: the nudged 3& stays 3&.
+  assert.deepEqual(dragEdge(span(3.5, 6), "end", 9.3, total), span(3.5, 8));
+  assert.deepEqual(dragEdge(span(3.5, 6), "start", 1.8, total), span(2, 6));
+  assert.deepEqual(dragEdge(span(3.5, 6), "end", 9.3, total, HALF_SNAP), span(3.5, 8.5));
+  assert.deepEqual(dragEdge(span(3, 6), "start", 9.2, total), span(7, 8), "dragged past the end: the roles swap");
   assert.equal(loopName(span(3.5, 6)), "Loop 3& – 6");
   assert.equal(loopName(span(2, 5.5)), "Loop 2 – 5&");
   assert.equal(spanLabel(span(3.5, 6)), "Counts 3&–6");
