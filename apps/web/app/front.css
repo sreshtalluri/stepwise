@@ -764,31 +764,15 @@
   background: radial-gradient(ellipse at 50% 40%, var(--stage) 55%, var(--stage-deep));
   border-radius: var(--r);
   overflow: hidden;
-  /* The viewport less the rail, the paddings and the footer: the page does not scroll. */
-  height: min(calc(100dvh - 200px), 860px);
+  min-height: 0;
+  max-height: 100%;
   cursor: pointer;
-}
-@media (max-width: 899px) {
-  .fd-pstage {
-    height: 42dvh;
-  }
-}
-@media (max-width: 899px) and (max-height: 700px) {
-  .fd-pstage {
-    height: 36dvh;
-  }
-}
-@media (orientation: landscape) and (max-height: 520px) {
-  .fd-pstage {
-    height: calc(100dvh - 96px);
-  }
 }
 /* A wide (YouTube) clip: the stage takes the clip's own shape instead of a tall box
    with bars above and below, and on a desktop the stage gets the wider column. */
 .fd-proc-grid[data-wide] .fd-pstage {
-  height: auto;
+  align-self: start;
   aspect-ratio: var(--ar);
-  max-height: min(calc(100dvh - 200px), 860px);
 }
 @media (min-width: 900px) {
   .fd-proc-grid[data-wide] {
@@ -798,9 +782,6 @@
 @media (orientation: landscape) and (max-height: 520px) {
   .fd-proc-grid[data-wide] {
     grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.8fr);
-  }
-  .fd-proc-grid[data-wide] .fd-pstage {
-    max-height: calc(100dvh - 96px);
   }
 }
 .fd-mirror {
@@ -934,6 +915,99 @@
   }
 }
 
+/* ---- processing fits the screen: no page scroll at any size.
+   The page is exactly the viewport (rail, the stage and panel, a slim footer);
+   the clip takes whatever height the rail and panel leave, and on short screens
+   the secondary lines tighten rather than push the page past the fold. */
+body:has(> .fd-proc) {
+  height: 100dvh;
+}
+body:has(> .fd-proc) > footer,
+body:has(> .ss) > footer {
+  padding-block: 8px 10px !important; /* layout.tsx sets it inline */
+}
+.fd-proc {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fd-proc .fd-proc-grid {
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+  padding-bottom: 8px;
+  grid-template-rows: minmax(0, 1fr);
+}
+.fd-proc .fd-panel {
+  min-height: 0;
+  overflow-y: auto; /* a safety net only: every size below fits without it */
+  gap: clamp(8px, 2.2dvh, 24px);
+}
+.fd-proc .fd-now-n {
+  font-size: clamp(3.2rem, min(24cqi, 17dvh), 10rem);
+}
+/* One column (tablet, phone upright): the clip on top takes the height the panel
+   leaves, never less than a fifth of the screen. */
+@media (max-width: 899px) and (not ((orientation: landscape) and (max-height: 520px))) {
+  .fd-proc .fd-proc-grid {
+    grid-template-rows: minmax(20dvh, 1fr) auto;
+    gap: 12px;
+  }
+}
+/* Shorter screens: the panel's secondary lines tighten. */
+@media (max-height: 820px) {
+  .fd-proc .fd-steps li {
+    padding: 6px 0;
+  }
+  .fd-proc .fd-tool {
+    min-height: 44px;
+  }
+  .fd-proc .fd-go {
+    min-height: 52px;
+  }
+}
+@media (max-height: 520px), (max-width: 899px) and (max-height: 900px) {
+  .fd-proc .fd-sub {
+    display: none; /* the title and the steps say it */
+  }
+}
+/* A phone on its side: a slim rail, the clip left at full height, the panel right. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .fd-proc .fd-rail-row {
+    min-height: 40px;
+    padding-block: 4px;
+  }
+  .fd-proc .fd-proc-grid {
+    padding-top: 6px;
+    gap: 12px;
+  }
+  .fd-proc .fd-panel .fd-h1-app {
+    font-size: 1.5rem;
+  }
+  .fd-proc .fd-now-n {
+    font-size: 3rem;
+  }
+  .fd-proc .fd-now-meta b {
+    font-size: 1rem;
+  }
+  .fd-proc .fd-now-meta span,
+  .fd-proc .fd-note {
+    font-size: 12px;
+  }
+  .fd-proc .fd-steps li {
+    padding: 3px 0;
+    font-size: 14px;
+  }
+  .fd-proc .fd-tool {
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: 14px;
+  }
+  .fd-proc .fd-go {
+    min-height: 44px;
+  }
+}
+
 /* Reduced motion: the numerals, the figure and the pulses hold still. */
 @media (prefers-reduced-motion: reduce) {
   .fd *,
@@ -1018,6 +1092,29 @@
 }
 .ss-quiet .fd-btn {
   margin-top: 8px;
+}
+/* A phone on its side: a smaller figure and tighter padding, so the screen fits
+   without a scroll (StateFigure sizes its canvas inline, hence !important). */
+@media (max-height: 520px) {
+  .ss .fd-nav {
+    padding-block: 8px;
+  }
+  .ss-body {
+    padding: 4px var(--gut) 8px;
+  }
+  .ss-quiet {
+    gap: 8px;
+  }
+  .ss-quiet > canvas {
+    width: 72px !important;
+    height: 96px !important;
+  }
+  .ss-title {
+    margin-top: 0;
+  }
+  .ss-quiet .fd-btn {
+    margin-top: 0;
+  }
 }
 .ss-link {
   display: inline-block;

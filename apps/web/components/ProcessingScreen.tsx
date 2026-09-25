@@ -292,7 +292,8 @@ function Room({
           {steps.map((s) => (
             <li key={s.key} className={`fd-step-${s.state}`}>
               <b>{s.label}</b>
-              <span>{s.key === "clip" && paused ? copy.steps.clipPaused : s.note}</span>
+              {/* "Playing now" only once the video really plays: a clip that never loads says nothing. */}
+              <span>{s.key !== "clip" ? s.note : paused === false ? s.note : paused ? copy.steps.clipPaused : ""}</span>
             </li>
           ))}
         </ol>
