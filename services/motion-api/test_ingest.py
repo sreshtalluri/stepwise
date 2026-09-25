@@ -30,7 +30,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_retention import NO_REQUEST, FakeVolume, _removal  # noqa: E402 -- same harness, same volumes
+from test_retention import NO_REQUEST, FakeDict, FakeVolume, _removal  # noqa: E402 -- same harness, same volumes
 
 TIKTOK_SHORT = "https://www.tiktok.com/t/ZP83Enx4b/"
 TIKTOK_FULL = "https://www.tiktok.com/@jonraydybuco/video/7672198121417444628"
@@ -54,8 +54,16 @@ def api(monkeypatch):
     # each one hands back a call id for run_clip to collect.
     fake_modal.Function = types.SimpleNamespace(
         from_name=lambda app, name, **k: types.SimpleNamespace(
-            spawn=lambda **kw: spawned.append(kw) if name == "run_clip"
-            else types.SimpleNamespace(object_id=f"fc-{name}")))
+            spawn=lambda **kw: types.SimpleNamespace(object_id=f"fc-{name}")))
+    # run_clip runs as Reconstructor.run; run_when_handed is the ingest-time
+    # pre-warm, which takes its job through the `stepwise-gpu-handoff` Dict.
+    prewarmed: list[str] = []
+    handoff = FakeDict()
+    fake_modal.Dict = types.SimpleNamespace(from_name=lambda *a, **k: handoff)
+    fake_modal.Cls = types.SimpleNamespace(
+        from_name=lambda app, name, **k: lambda: types.SimpleNamespace(
+            run=types.SimpleNamespace(spawn=lambda **kw: spawned.append(kw)),
+            run_when_handed=types.SimpleNamespace(spawn=prewarmed.append)))
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
     for mod in ("api", "retention", "motion_result", "fingerprint", "ingest"):
         sys.modules.pop(mod, None)
@@ -65,6 +73,7 @@ def api(monkeypatch):
     api_mod.eval_volume = FakeVolume("eval")
     api_mod._TOUCHED.clear()
     api_mod._spawned = spawned
+    api_mod._prewarmed, api_mod._handoff_dict = prewarmed, handoff
     monkeypatch.setenv("STEPWISE_INVITE_CODES", "let-me-in")
     return api_mod
 
@@ -524,6 +533,64 @@ def test_file_upload_is_not_gated(api, monkeypatch, tmp_path):
     assert resp.clip_id and not resp.deduplicated
     assert len(api._spawned) == 1
     assert fingerprint  # silence the unused import; the real one ran above
+
+
+def test_prewarm_starts_a_gpu_only_for_real_ingest_requests(api):
+    """An upload, or a link with a valid invite code, pre-warms a GPU container
+    before its body is read; nothing else does -- a closed door costs nothing.
+    A request that ends without handing over a job tells the container so."""
+    import asyncio
+
+    def hit(method, path, **headers):
+        req = types.SimpleNamespace(method=method, url=types.SimpleNamespace(path=path),
+                                    headers=headers, state=types.SimpleNamespace())
+
+        async def call_next(_):
+            return "response"
+        before = len(api._prewarmed)
+        assert asyncio.run(api._prewarm_gpu(req, call_next)) == "response"
+        for token in api._prewarmed[before:]:
+            assert api._handoff_dict[token] == {"cancel": True}, "no job -> released"
+        return len(api._prewarmed) - before
+
+    assert hit("POST", "/clips") == 1
+    assert hit("POST", "/clips/link", **{"x-invite-code": "let-me-in"}) == 1
+    assert hit("POST", "/clips/link") == 0
+    assert hit("POST", "/clips/link", **{"x-invite-code": "wrong"}) == 0
+    assert hit("GET", "/jobs/job_x") == 0
+    assert hit("POST", "/jobs/job_x/retry") == 0
+
+
+def test_dispatch_hands_the_job_to_the_prewarmed_container_exactly_once(api):
+    """One input per job: the waiting container gets the job through the
+    hand-off and no run() is spawned beside it (that pair made Modal start a
+    second GPU container). If the container already gave up, run() is spawned
+    instead -- the job is never lost and never run twice."""
+    import asyncio
+
+    class _Upload:
+        def __init__(self, data):
+            self._data = data
+
+        async def read(self, n):
+            data, self._data = self._data, b""
+            return data
+
+    def upload(token, data):
+        http = types.SimpleNamespace(headers={}, client=None,
+                                     state=types.SimpleNamespace(gpu_token=token))
+        return http, asyncio.run(api.upload_clip(http, _Upload(data)))
+
+    http, resp = upload("t-waiting", b"first clip")
+    assert api._handoff_dict["t-waiting"]["job"]["clip_id"] == resp.clip_id
+    assert http.state.gpu_handed is True
+    assert api._spawned == [], "handed over, so no second input"
+
+    api._handoff_dict["t-gave-up"] = {"closed": True}
+    http, resp = upload("t-gave-up", b"second clip")
+    assert [kw["clip_id"] for kw in api._spawned] == [resp.clip_id]
+    assert "t-gave-up" not in api._handoff_dict
+    assert not getattr(http.state, "gpu_handed", False)
 
 
 # ---------------------------------------------------------------------------

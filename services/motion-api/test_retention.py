@@ -28,6 +28,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 NO_REQUEST = types.SimpleNamespace(headers={}, client=None)
 
 
+class FakeDict(dict):
+    """modal.Dict's first-write-wins put, over a plain dict."""
+
+    def put(self, key, value, skip_if_exists=False):
+        if skip_if_exists and key in self:
+            return False
+        self[key] = value
+        return True
+
+
 def _removal(api, relationship="i_am_in_it", reason=""):
     return api.RemovalRequest(relationship=relationship, reason=reason)
 
@@ -90,8 +100,16 @@ def api(monkeypatch):
     # each one hands back a call id for run_clip to collect.
     fake_modal.Function = types.SimpleNamespace(
         from_name=lambda app, name, **k: types.SimpleNamespace(
-            spawn=lambda **kw: spawned.append(kw) if name == "run_clip"
-            else types.SimpleNamespace(object_id=f"fc-{name}")))
+            spawn=lambda **kw: types.SimpleNamespace(object_id=f"fc-{name}")))
+    # run_clip runs as Reconstructor.run; run_when_handed is the ingest-time
+    # pre-warm, which takes its job through the `stepwise-gpu-handoff` Dict.
+    prewarmed: list[str] = []
+    handoff = FakeDict()
+    fake_modal.Dict = types.SimpleNamespace(from_name=lambda *a, **k: handoff)
+    fake_modal.Cls = types.SimpleNamespace(
+        from_name=lambda app, name, **k: lambda: types.SimpleNamespace(
+            run=types.SimpleNamespace(spawn=lambda **kw: spawned.append(kw)),
+            run_when_handed=types.SimpleNamespace(spawn=prewarmed.append)))
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
     for mod in ("api", "retention", "motion_result", "fingerprint"):
         sys.modules.pop(mod, None)
@@ -101,6 +119,7 @@ def api(monkeypatch):
     api_mod.eval_volume = FakeVolume("eval")
     api_mod._TOUCHED.clear()
     api_mod._spawned = spawned
+    api_mod._prewarmed, api_mod._handoff_dict = prewarmed, handoff
     return api_mod
 
 

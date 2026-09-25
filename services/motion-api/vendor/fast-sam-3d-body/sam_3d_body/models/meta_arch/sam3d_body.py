@@ -28,6 +28,10 @@ from ..modules.transformer import FFN, MLP
 
 from .base_model import BaseModel
 
+# stepwise: ~45 debug lines per frame are pure overhead and flood Modal's log
+# API (docs/research/pipeline-latency.md #5). SAM3D_VERBOSE=1 brings them back.
+print = print if __import__("os").environ.get("SAM3D_VERBOSE") == "1" else (lambda *a, **k: None)
+
 
 logger = get_pylogger(__name__)
 

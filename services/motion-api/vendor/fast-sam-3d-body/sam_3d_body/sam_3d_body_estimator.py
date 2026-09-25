@@ -19,6 +19,10 @@ from sam_3d_body.data.utils.prepare_batch import prepare_batch
 from sam_3d_body.utils import recursive_to
 from torchvision.transforms import ToTensor
 
+# stepwise: ~45 debug lines per frame are pure overhead and flood Modal's log
+# API (docs/research/pipeline-latency.md #5). SAM3D_VERBOSE=1 brings them back.
+print = print if __import__("os").environ.get("SAM3D_VERBOSE") == "1" else (lambda *a, **k: None)
+
 
 class SAM3DBodyEstimator:
     def __init__(
