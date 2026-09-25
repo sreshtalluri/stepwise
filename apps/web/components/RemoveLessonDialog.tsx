@@ -81,6 +81,8 @@ export default function RemoveLessonDialog({
   }
 
   const sending = state.kind === "sending";
+  // The one box that preserves and reports instead of deleting (lib/copy.ts removal).
+  const report = relationship === "illegal_sexual_content";
   return (
     <dialog
       ref={ref}
@@ -93,7 +95,7 @@ export default function RemoveLessonDialog({
         <div className={s.body} style={{ justifyItems: "center", textAlign: "center" }}>
           <StateFigure pose="wave" size="mid" />
           <h2 id={`${id}-t`} className={s.title}>{copy.doneTitle}</h2>
-          <p id={`${id}-d`} role="status">{copy.done}</p>
+          <p id={`${id}-d`} role="status">{report ? copy.doneReported : copy.done}</p>
           <form method="dialog" className={s.actions} style={{ justifyContent: "center" }}>
             <button className="btn" autoFocus>{copy.close}</button>
           </form>
@@ -118,6 +120,7 @@ export default function RemoveLessonDialog({
               </label>
             ))}
           </fieldset>
+          {report && <p role="note">{copy.reportNote}</p>}
 
           <label className={s.legend} htmlFor={`${id}-r`}>{copy.reasonLabel}</label>
           <textarea
@@ -143,7 +146,7 @@ export default function RemoveLessonDialog({
               {copy.cancel}
             </button>
             <button type="submit" className={`btn ${s.danger}`} disabled={sending} aria-busy={sending}>
-              {sending ? copy.submitting : copy.submit}
+              {sending ? copy.submitting : report ? copy.submitReport : copy.submit}
             </button>
           </div>
         </form>

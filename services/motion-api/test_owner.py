@@ -264,3 +264,53 @@ def test_recount_needs_the_key(lesson, monkeypatch):
     with pytest.raises(lesson.HTTPException) as e:
         lesson.owner_recount(JOB, _http("wrong"))
     assert e.value.status_code == 403
+
+
+# --- owner removal (POST /owner/jobs/{job_id}/remove) ------------------------
+
+def _remove(api, mode, key=KEY, note=""):
+    return api.owner_remove(JOB, api.OwnerRemovalRequest(mode=mode, note=note), _http(key))
+
+
+@pytest.mark.parametrize("key", [None, "wrong"])
+def test_owner_removal_needs_the_key_and_touches_nothing(lesson, key):
+    before = dict(lesson.results_volume.files)
+    for mode in ("delete", "quarantine"):
+        with pytest.raises(lesson.HTTPException) as e:
+            _remove(lesson, mode, key)
+        assert e.value.status_code == 403
+    assert lesson.results_volume.files == before and lesson.quarantine.files == {}
+
+
+def test_owner_removal_is_closed_without_a_configured_key(lesson, monkeypatch):
+    monkeypatch.delenv("STEPWISE_OWNER_KEY")
+    with pytest.raises(lesson.HTTPException) as e:
+        _remove(lesson, "delete")
+    assert e.value.status_code == 404
+
+
+def test_owner_delete_is_the_normal_takedown(lesson):
+    out = _remove(lesson, "delete", note="not a dance")
+    assert out["quarantined"] is False and out["removed"]
+    assert [p for p in lesson.results_volume.files if CLIP in p] == [f"/{CLIP}.removed.json"]
+    tomb = json.loads(lesson.results_volume.files[f"/{CLIP}.removed.json"])
+    assert (tomb["relationship"], tomb["reason"]) == ("owner", "not a dance")
+    assert lesson.quarantine.files == {}
+    with pytest.raises(lesson.HTTPException) as e:
+        lesson.get_job_status(JOB)
+    assert e.value.status_code == 410
+
+
+def test_owner_quarantine_preserves_and_alerts(lesson, monkeypatch):
+    sent = []
+    monkeypatch.setattr(lesson.observability, "message", lambda text, c, **kw: sent.append(kw["level"]))
+    out = _remove(lesson, "quarantine", note="looks like a minor")
+    assert out["quarantined"] is True and sent == ["fatal"]
+    assert [p for p in lesson.results_volume.files if CLIP in p] == [f"/{CLIP}.removed.json"]
+    m = json.loads(lesson.quarantine.files[f"/{CLIP}/manifest.json"])
+    assert (m["relationship"], m["reason"]) == ("owner", "looks like a minor")
+    assert any(f["source"] == f"results:/{CLIP}.motion-result.json.gz" for f in m["files"])
+    # Idempotent, and a later "delete" cannot destroy what was preserved.
+    snapshot = dict(lesson.quarantine.files)
+    assert _remove(lesson, "delete")["quarantined"] is True
+    assert lesson.quarantine.files == snapshot and sent == ["fatal"]

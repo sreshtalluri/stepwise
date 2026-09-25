@@ -354,6 +354,15 @@ def _usable(entry: dict) -> bool:
     return bool(status and status.get("state") == "succeeded")
 
 
+def _refuse_if_quarantined(fp: dict | None = None, source_key: str | None = None) -> None:
+    """A video preserved after a report of illegal sexual content never becomes
+    a lesson again, by upload or by link. The same 410 and words as any removed
+    lesson, so the refusal says nothing about why."""
+    if retention.is_blocked(fp, source_key):
+        print("[quarantine] refused a re-upload of a quarantined video")
+        raise HTTPException(410, "This lesson was removed and is not coming back.")
+
+
 def _find_existing(fp: dict) -> dict | None:
     """The canonical lesson for this *content*, if there is a usable one."""
     for entry in retention.read_index(results_volume):
@@ -512,6 +521,7 @@ async def upload_clip(http: Request, file: UploadFile = File(...)) -> DispatchRe
             # re-uploads dedupe. Never a wrong match, just fewer matches.
             print("[dedupe] no perceptual fingerprint (ffmpeg unavailable or "
                   "decode failed) -- exact-sha256 matching only for this upload")
+        _refuse_if_quarantined(fp=fp)
         existing = _find_existing(fp)
         if existing:
             print(f"[dedupe] hit: reusing {existing['clip_id']} "
@@ -616,6 +626,7 @@ def ingest_clip_link(request: LinkRequest, http: Request,
 
     key = ingest.source_key(info)
     credit = ingest.credit(info, request.url)
+    _refuse_if_quarantined(source_key=key)
 
     # Layer 1: the same link, already a lesson. Settled before any download.
     hit = _find_by_source(key)
@@ -651,6 +662,7 @@ def ingest_clip_link(request: LinkRequest, http: Request,
                 "trim it to the part you want to learn and upload that.",
                 False))
 
+        _refuse_if_quarantined(fp=fp)
         # Layer 2: the same dance, reached by a different route -- someone
         # uploaded this file yesterday, or pasted a re-upload of it under a
         # different id. Costs the download but still no GPU.
@@ -1334,7 +1346,11 @@ class RemovalRequest(BaseModel):
     # someone under 18 in the clip (legal-public-learning.md §5: asked, never
     # estimated), the rights holder, and everyone else. Required, because the
     # owner alert is only useful if it says which kind of request this was.
-    relationship: Literal["i_am_in_it", "under_18", "i_own_the_rights", "other"]
+    # `illegal_sexual_content` is the one box that does NOT delete: the lesson
+    # is taken down the same way, but its bytes are preserved in quarantine for
+    # a report to NCMEC (retention.quarantine_clip, abuse-report-runbook.md).
+    relationship: Literal["i_am_in_it", "under_18", "i_own_the_rights", "other",
+                          "illegal_sexual_content"]
     # Optional free text. Kept on the tombstone only (so whoever restores or
     # disputes a removal can read why); never sent to Sentry or the events
     # table, where it could carry a name or a handle.
@@ -1371,7 +1387,12 @@ def remove_lesson(clip_id: str, request: RemovalRequest, http: Request) -> Remov
     whichever copy happened to be found.
     """
     job_id = f"job_{clip_id}"
+    quarantine = request.relationship == retention.QUARANTINE_RELATIONSHIP
     if retention.is_removed(results_volume, clip_id):
+        if quarantine and not retention.is_quarantined(results_volume, clip_id):
+            # Deleted before this report arrived, so there is nothing left to
+            # preserve -- but the report is still one the owner must see.
+            _alert_abuse_report(clip_id, request.relationship, "reported after it was already deleted")
         # Already removed: no second charge and no second alert, but the sweep
         # runs again. It is idempotent, and it is how anything a late writer
         # put back after the first removal goes (job_6037...).
@@ -1379,13 +1400,7 @@ def remove_lesson(clip_id: str, request: RemovalRequest, http: Request) -> Remov
         return RemovalResponse(clip_id=clip_id, removed=outcome["deleted"],
                                already_absent=outcome["already_absent"])
 
-    if _volume_read_json(results_volume, f"/{job_id}.job-meta.json") is None:
-        # Older lessons (and the eval clips) used other job_id shapes; find it
-        # rather than leaving a live job-status record pointing at deleted bytes.
-        for entry in retention.read_index(results_volume):
-            if entry.get("clip_id") == clip_id and entry.get("job_id"):
-                job_id = entry["job_id"]
-                break
+    job_id = _job_id_to_remove(clip_id)
 
     # Charged only for a removal that is about to happen: an already-removed
     # lesson above costs nothing, so a repeat click is never what locks you out.
@@ -1395,26 +1410,69 @@ def remove_lesson(clip_id: str, request: RemovalRequest, http: Request) -> Remov
     except ratelimit.Limited as e:
         raise _too_many(e) from None
 
+    outcome = _take_down(clip_id, job_id, request.reason.strip(), request.relationship, quarantine)
+    return RemovalResponse(clip_id=clip_id, removed=outcome["deleted"],
+                           already_absent=outcome["already_absent"])
+
+
+def _job_id_to_remove(clip_id: str) -> str:
+    job_id = f"job_{clip_id}"
+    if _volume_read_json(results_volume, f"/{job_id}.job-meta.json") is None:
+        # Older lessons (and the eval clips) used other job_id shapes; find it
+        # rather than leaving a live job-status record pointing at deleted bytes.
+        for entry in retention.read_index(results_volume):
+            if entry.get("clip_id") == clip_id and entry.get("job_id"):
+                return entry["job_id"]
+    return job_id
+
+
+def _alert_abuse_report(clip_id: str, relationship: str, what: str) -> None:
+    """The owner's alert for a quarantine: loud (Sentry `fatal`), ids and the
+    category only, and it names the runbook, because what happens next is a
+    legal duty with a clock on it, not a routine takedown."""
+    print(f"[quarantine] ABUSE REPORT {clip_id} ({relationship}): {what}. "
+          "Follow docs/legal/abuse-report-runbook.md now.")
+    observability.message(f"abuse report: lesson {what}; follow docs/legal/abuse-report-runbook.md",
+                          "web", level="fatal", relationship=relationship, clip_id=clip_id)
+
+
+def _take_down(clip_id: str, job_id: str, reason: str, relationship: str, quarantine: bool) -> dict:
+    """The removal itself, for the public dialog and the owner alike."""
     # Tombstone first: every writer stops at its next check from this instant.
     # Then stop the work that is still running, then delete what exists.
     # (delete_clip would write the tombstone itself; doing it here puts the
-    # cancel between the two.)
-    retention.write_tombstone(results_volume, clip_id, request.reason.strip(), request.relationship)
+    # cancel between the two.) A quarantine's words go in its manifest only.
+    retention.write_tombstone(results_volume, clip_id, "" if quarantine else reason, relationship,
+                              quarantined=quarantine)
     _cancel_inflight(job_id)
-    outcome = retention.delete_clip(uploads_volume, results_volume, clip_id, job_id,
-                                    request.reason.strip(), request.relationship)
+    if quarantine:
+        # Alert before the move, so the owner hears about the report even if
+        # the move fails. A failed move leaves the files where they were --
+        # 410 everywhere behind the tombstone -- and the daily sweep's re-sweep
+        # (or a repeat request) moves them.
+        _alert_abuse_report(clip_id, relationship, "taken down and quarantined")
+        try:
+            outcome = retention.quarantine_clip(uploads_volume, results_volume, clip_id, job_id,
+                                                reason, relationship)
+        except Exception as e:  # noqa: BLE001 -- the lesson is down either way
+            observability.capture(e, "web", clip_id=clip_id, stage="quarantine")
+            print(f"[quarantine] {clip_id}: move failed, files left behind the tombstone: {e}")
+            outcome = {"deleted": [], "already_absent": []}
+    else:
+        outcome = retention.delete_clip(uploads_volume, results_volume, clip_id, job_id,
+                                        reason, relationship)
     _TOUCHED.pop(clip_id, None)
     # Belt and braces: /result checks the tombstone before these anyway.
     _SUCCEEDED.discard(job_id)
     _R2_VALIDATED.pop((job_id, clip_id), None)
     _NOT_REMOVED.pop(job_id, None)
-    print(f"[removal] {clip_id}: deleted {len(outcome['deleted'])} artifacts ({request.relationship})")
-    # The owner's alert. Ids and the category only -- the free-text reason is
-    # on the tombstone and deliberately not here.
-    observability.message("lesson removed", "web", level="warning",
-                          relationship=request.relationship, clip_id=clip_id)
-    return RemovalResponse(clip_id=clip_id, removed=outcome["deleted"],
-                           already_absent=outcome["already_absent"])
+    if not quarantine:
+        print(f"[removal] {clip_id}: deleted {len(outcome['deleted'])} artifacts ({relationship})")
+        # The owner's alert. Ids and the category only -- the free-text reason is
+        # on the tombstone and deliberately not here.
+        observability.message("lesson removed", "web", level="warning",
+                              relationship=relationship, clip_id=clip_id)
+    return outcome
 
 
 # ---------------------------------------------------------------------------
@@ -1553,9 +1611,12 @@ def _republish_counts(clip_id: str, doc: dict, proposed_counts: dict) -> None:
     _volume_write_bytes(f"/{clip_id}.motion-result.json.gz", gz)
     written = storage.publish_motion_result(clip_id, gz, doc["job_id"]) if storage.enabled() else []
     if retention.is_removed(results_volume, clip_id):
-        retention.remove_if_present(results_volume, f"/{clip_id}.motion-result.json.gz")
-        for key in written:
-            storage.delete(key)
+        if retention.is_quarantined(results_volume, clip_id):
+            retention.delete_clip(uploads_volume, results_volume, clip_id, None, "")  # moves, not deletes
+        else:
+            retention.remove_if_present(results_volume, f"/{clip_id}.motion-result.json.gz")
+            for key in written:
+                storage.delete(key)
         raise HTTPException(410, "This lesson was removed and is not coming back.")
     for k in [k for k in _R2_VALIDATED if k[1] == clip_id]:
         _R2_VALIDATED.pop(k, None)
@@ -1634,6 +1695,32 @@ def owner_recount(job_id: str, http: Request) -> dict:
     _republish_counts(clip_id, doc, fresh)
     print(f"[owner] {clip_id}: recounted" + (" (owner count 1 kept)" if kept else ""))
     return {"job_id": job_id, "clip_id": clip_id, "kept_owner_count_one": kept, "proposed_counts": fresh}
+
+
+class OwnerRemovalRequest(BaseModel):
+    # delete: the normal takedown (off-topic, not a dance, spam, anything
+    # simply unwanted). quarantine: apparent CSAM or intimate images shared
+    # without consent -- preserve and report (abuse-report-runbook.md).
+    mode: Literal["delete", "quarantine"]
+    note: str = Field("", max_length=500)
+
+
+@app.post("/owner/jobs/{job_id}/remove")
+def owner_remove(job_id: str, request: OwnerRemovalRequest, http: Request) -> dict:
+    """The owner's own takedown, from the /owner page. Same paths as the
+    public dialog (`_take_down`), without the per-IP removal limit; the note
+    is kept where the requester's words go (tombstone, or quarantine manifest).
+    An already-removed lesson is re-swept, never re-alerted."""
+    _owner_only(http)
+    clip_id = _clip_id_for(job_id)
+    quarantine = request.mode == "quarantine"
+    if retention.is_removed(results_volume, clip_id):
+        outcome = retention.delete_clip(uploads_volume, results_volume, clip_id, f"job_{clip_id}", "")
+    else:
+        outcome = _take_down(clip_id, _job_id_to_remove(clip_id), request.note.strip(), "owner", quarantine)
+    print(f"[owner] {clip_id}: removed ({request.mode})")
+    return {"job_id": job_id, "clip_id": clip_id, "removed": outcome["deleted"],
+            "quarantined": retention.is_quarantined(results_volume, clip_id)}
 
 
 # ---------------------------------------------------------------------------
