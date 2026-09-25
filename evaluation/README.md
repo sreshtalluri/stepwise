@@ -7,6 +7,7 @@
 | The **manifest** (`clips.yaml`) | **In git** | Text. Diffable, reviewable, and it records *why* each clip exists. |
 | The **videos** | **Modal Volume `stepwise-eval`** | Large binaries, and other people's work. Never in git. Every GPU run reads the same bytes without re-downloading. |
 | A **local cache** | `~/.stepwise-clips/` | Working copies. Gitignored. |
+| **Labels** (`labels/*.json`) | **In git** | Hand-labelled ground truth, including for uploaded lessons that are not in `clips.yaml` (keyed by job id). `labels/count_one.json`: the owner's count 1, scored by `packages/beat-detect/python/tests/test_count_one_labels.py`. Never the video. |
 
 The manifest is the artifact that matters. A clip is not "an interesting video" —
 it is a **hypothesis about where the pipeline breaks**, and the `why:` field

@@ -103,7 +103,7 @@ const observedProvenance = () => ({ observed: true, interpolated: false, suppres
  * `normalizeStructure` uses — computed, never hand-typed, so a fixture can never
  * ship a grid that disagrees with its own timeline.
  */
-function proposedCounts(sampleTimesS, { countOneS, bpm, confidence, warnings = [] }) {
+function proposedCounts(sampleTimesS, { countOneS, bpm, confidence, countOneConfidence, warnings = [] }) {
   const secondsPerCount = 60 / bpm;
   const endS = sampleTimesS[sampleTimesS.length - 1];
   return {
@@ -111,6 +111,7 @@ function proposedCounts(sampleTimesS, { countOneS, bpm, confidence, warnings = [
     seconds_per_count: secondsPerCount,
     count_total: Math.max(1, Math.floor((endS - countOneS) / secondsPerCount) + 1),
     confidence,
+    count_one_confidence: countOneConfidence,
     bpm,
     alternates: [
       { label: "double-time", seconds_per_count: secondsPerCount / 2, bpm: bpm * 2 },
@@ -198,7 +199,7 @@ function makeGoodLesson() {
     // Confident about the SPACING; count 1 itself is still only the first beat
     // the tracker heard, which is why the surface that renders this must offer
     // "set 1 here" rather than present it as settled.
-    proposed_counts: proposedCounts(sampleTimesS, { countOneS: 0.4, bpm: 120, confidence: 0.93 }),
+    proposed_counts: proposedCounts(sampleTimesS, { countOneS: 0.4, bpm: 120, confidence: 0.93, countOneConfidence: 0.97 }),
     joint_hierarchy: joints,
     persons: [
       {
@@ -325,6 +326,8 @@ function makeFailureLesson() {
       countOneS: 0.21,
       bpm: 196,
       confidence: 0.28,
+      // Which beat is 1 is a guess here too: kick rule and model disagreed.
+      countOneConfidence: 0.12,
       warnings: [
         "tempo 196 BPM is outside the typical 70-180 dance-practice range; half/double-time confusion is the likely explanation (see alternates)",
       ],

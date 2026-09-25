@@ -178,6 +178,14 @@ export function buildUpSpeed(passes: number): number {
 }
 
 /**
+ * `proposed_counts.count_one_confidence` below this: the tracker does not know which
+ * beat is 1 (its kick rule and its own downbeats disagree), so the lesson says so and
+ * puts the other candidates first. On the owner's 10 labelled clips every miss scored
+ * <= 0.16 and every pick at or above it was right (evaluation/labels/count_one.json).
+ */
+export const ONE_SURE = 0.5;
+
+/**
  * "Try another 1": the beat tracker's other candidates for count 1, each with `by`,
  * its offset in counts from count 1 as it is NOW (after any nudge or tap), wrapped
  * to the nearest eight the way `setCountOne` lands it (−4…3). Dropped: the current 1
@@ -185,17 +193,22 @@ export function buildUpSpeed(passes: number): number {
  * candidate stays first — it is its next best guess (packages/beat-detect
  * propose.py `_count_one`) — and the rest follow in count order, so the row reads
  * "−3, −2, +2" rather than the order the tracker happened to score them.
+ *
+ * `unsure` (count 1 is a guess, see ONE_SURE) keeps ±1 too: when the tracker misses,
+ * it is by one beat and its first candidate is the answer, so that one belongs in
+ * the row the learner is pointed at, not only behind the −1 / +1 buttons.
  */
 export function oneAlternates<T extends { count_one_s: number }>(
   alts: readonly T[],
   grid: { countOneS: number; secondsPerCount: number },
+  unsure = false,
 ): (T & { by: number })[] {
   const seen = new Set<number>();
   const out: (T & { by: number })[] = [];
   for (const a of alts) {
     const k = Math.round((a.count_one_s - grid.countOneS) / grid.secondsPerCount);
     const by = ((((k + 4) % 8) + 8) % 8) - 4;
-    if (Math.abs(by) <= 1 || seen.has(by)) continue;
+    if (Math.abs(by) <= (unsure ? 0 : 1) || seen.has(by)) continue;
     seen.add(by);
     out.push({ ...a, by });
   }

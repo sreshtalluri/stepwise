@@ -5,6 +5,7 @@ import {
   clampSpeed,
   nextPreset,
   oneAlternates,
+  ONE_SURE,
   SPEED_GRID,
   speedText,
   stepSpeed,
@@ -130,6 +131,17 @@ test("try another 1: offsets from the 1 as it is now, no repeat of -1/+1, first 
   // A candidate an eight away is the same 1; offsets wrap to the nearest eight (-4…3).
   assert.deepEqual(oneAlternates([{ count_one_s: 2.5748 + 6 * spc }], grid).map((a) => a.by), [-2]);
   assert.deepEqual(oneAlternates([], grid), []);
+});
+
+test("try another 1 when count 1 is a guess: the one-beat-off first candidate stays, first", () => {
+  // mirror b822…: 151.9 a minute, the tracker put 1 one beat early; its first
+  // candidate (+1) was the owner's 1. Sure, that is the +1 button; unsure, it leads the row.
+  const spc = 0.3951;
+  const grid = { countOneS: 1.085, secondsPerCount: spc };
+  const alts = [1, -1, 2].map((k) => ({ count_one_s: 1.085 + k * spc, shift_counts: k, confidence: 0.3 }));
+  assert.deepEqual(oneAlternates(alts, grid).map((a) => a.by), [2]);
+  assert.deepEqual(oneAlternates(alts, grid, true).map((a) => a.by), [1, -1, 2]);
+  assert.ok(ONE_SURE > 0.16 && ONE_SURE <= 0.71, "between the labelled misses and the confident hits");
 });
 
 test("labels are counts, never clock time", () => {

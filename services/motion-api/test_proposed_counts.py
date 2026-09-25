@@ -110,3 +110,19 @@ def test_count_one_alternates_survive_and_match_the_schema():
 
     schema = json.loads((_CONTRACT_PY.parent / "schema" / "motion-result.schema.json").read_text())
     jsonschema.validate(out, {"$defs": schema["$defs"], **schema["$defs"]["ProposedCounts"]})
+
+
+@pytest.mark.skipif(not _CONTRACT_PY.exists(), reason="motion-contract python package not present")
+def test_count_one_confidence_is_passed_through_and_matches_the_schema():
+    # The phase confidence (which beat is 1) rides beside the grid confidence;
+    # beats written before it existed carry none, and none is invented.
+    import json
+
+    import jsonschema
+
+    out = _proposed_counts(_grid(count_one_confidence=0.14), _timeline())
+    assert out["count_one_confidence"] == 0.14
+    assert "count_one_confidence" not in _proposed_counts(_grid(), _timeline())
+
+    schema = json.loads((_CONTRACT_PY.parent / "schema" / "motion-result.schema.json").read_text())
+    jsonschema.validate(out, {"$defs": schema["$defs"], **schema["$defs"]["ProposedCounts"]})

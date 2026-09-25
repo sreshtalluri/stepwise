@@ -122,6 +122,14 @@ test("proposed_counts is optional — a document without one is still valid", ()
   assert.equal(result.valid, true);
 });
 
+test("count_one_confidence is optional and bounded", () => {
+  const doc = clone(loadFixture("good-lesson.json"));
+  delete doc.proposed_counts.count_one_confidence; // documents from before it existed
+  assert.equal(validateMotionResult(doc).valid, true);
+  doc.proposed_counts.count_one_confidence = 1.5;
+  assert.equal(validateMotionResult(doc).valid, false);
+});
+
 test("rejects a proposed grid sized against something other than sample_times_s", () => {
   const doc = clone(loadFixture("good-lesson.json"));
   // The realistic way to get this wrong: size the grid against

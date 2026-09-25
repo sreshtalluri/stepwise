@@ -73,11 +73,13 @@ class ProposedGrid:
     count_one_s: float
     seconds_per_count: float
     count_total: int | None  # None if no clip_duration_s was supplied
-    confidence: float  # 0..1, this module's own trust in the proposal
+    confidence: float  # 0..1, trust in the GRID (tempo + beat spacing), not in which beat is 1
     bpm: float
     alternates: list[TempoAlternate] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     count_one_alternates: list[CountOneAlternate] = field(default_factory=list)
+    # 0..1, trust in WHICH beat is count 1 (the bar phase). < 0.5: a guess. See _count_one.
+    count_one_confidence: float = 0.0
 
     def to_grid(self) -> dict:
         """`{countOneS, secondsPerCount, countTotal}` — exact `CountGrid`
@@ -144,9 +146,20 @@ def _fit_grid(beats: np.ndarray) -> tuple[float, float, np.ndarray]:
     return float(spc), float(phase), idx
 
 
+def _beat_accents(y: np.ndarray, sr: int, beats: np.ndarray) -> np.ndarray:
+    """Low-band (<150 Hz, kick) onset strength at each beat, +-50 ms. Tests
+    replace this with values recorded from the real clips, like `_track_beats`."""
+    hop = 256
+    S = np.abs(librosa.stft(y, hop_length=hop))
+    low = librosa.onset.onset_strength(
+        S=librosa.amplitude_to_db(S[librosa.fft_frequencies(sr=sr) < 150]), sr=sr, hop_length=hop)
+    ft = librosa.frames_to_time(np.arange(len(low)), sr=sr, hop_length=hop)
+    return np.array([low[(ft > b - 0.05) & (ft < b + 0.05)].max(initial=0.0) for b in beats])
+
+
 def _count_one(y: np.ndarray, sr: int, beats: np.ndarray, idx: np.ndarray, downbeats: np.ndarray,
-               spc: float, phase_s: float) -> tuple[float, float, list[CountOneAlternate]]:
-    """(count_one_s, margin, alternates), on the grid `phase_s + spc * n`.
+               spc: float, phase_s: float) -> tuple[float, float, float, list[CountOneAlternate]]:
+    """(count_one_s, margin, phase_confidence, alternates), on the grid `phase_s + spc * n`.
 
     1. Kick rule: the beat-of-the-bar (idx mod 4) with the strongest low-band
        (<150 Hz) onsets at the model's beats is the bar downbeat. With Beat
@@ -162,28 +175,41 @@ def _count_one(y: np.ndarray, sr: int, beats: np.ndarray, idx: np.ndarray, downb
     `alternates` are the other three beats of that bar. When the kick rule
     and the model disagree, the pick that lost goes first (the second guess
     is usually the other one); the rest follow by accent share.
+
+    `phase_confidence` (0..1) is how sure we are WHICH beat is 1 -- separate
+    from the grid confidence, which only says the beats are evenly spaced. Two
+    independent votes: the kick rule's strength (0 at a tie, 1 when the best
+    beat of the bar is >=30% ahead of the runner-up) and the share of the
+    model's downbeats on the pick. Both back the pick: 0.5 + 0.5 * the weaker
+    vote. Otherwise one source stands alone or they contradict each other:
+    at most 0.4, scaled by how lopsided they are. So < 0.5 means "count 1 is
+    a guess". On the 10 owner-labelled clips all three misses (one beat off,
+    ~150 BPM, kick and model disagreed) scored <= 0.16; see
+    evaluation/labels/count_one.json and tests/test_count_one_labels.py.
     """
     if len(beats) < 8:
-        return float(beats[0]) if len(beats) else phase_s, 0.0, []
-    hop = 256
-    S = np.abs(librosa.stft(y, hop_length=hop))
-    low = librosa.onset.onset_strength(
-        S=librosa.amplitude_to_db(S[librosa.fft_frequencies(sr=sr) < 150]), sr=sr, hop_length=hop)
-    ft = librosa.frames_to_time(np.arange(len(low)), sr=sr, hop_length=hop)
-    accent = np.array([low[(ft > b - 0.05) & (ft < b + 0.05)].max(initial=0.0) for b in beats])
+        return float(beats[0]) if len(beats) else phase_s, 0.0, 0.0, []
+    accent = _beat_accents(y, sr, beats)
     scores = np.array([accent[idx % 4 == k].mean() for k in range(4)])
     kick = int(np.argmax(scores))
     runner_up = np.sort(scores)[-2]
     margin = float(scores[kick] / runner_up) if runner_up > 0 else 1.0
     near = [int(idx[np.argmin(np.abs(beats - d))]) % 4 for d in downbeats]
-    model = int(np.bincount(near, minlength=4).argmax()) if near else kick
+    votes = np.bincount(np.asarray(near, int), minlength=4)
+    model = int(votes.argmax()) if near else kick
     k = kick if margin >= 1.1 else model
+    strength = min(1.0, max(0.0, (margin - 1.0) / 0.3))
+    backing = votes / votes.sum() if near else np.zeros(4)
+    if near and k == kick == model:
+        phase_confidence = 0.5 + 0.5 * min(strength, float(backing[k]))
+    else:
+        phase_confidence = 0.4 * abs(strength - float(backing[model]))
     other = model if k == kick else kick
     # idx starts at 0 on the first beat heard, so count 1 is grid count k.
     share = scores / scores.sum() if scores.sum() > 0 else np.full(4, 0.25)
     rest = sorted((i for i in range(4) if i != k), key=lambda i: (i != other, -share[i]))
     alternates = [CountOneAlternate(float(phase_s + spc * i), i - k, round(float(share[i]), 3)) for i in rest]
-    return float(phase_s + spc * k), margin, alternates
+    return float(phase_s + spc * k), margin, round(phase_confidence, 3), alternates
 
 
 def _count_total(count_one_s: float, seconds_per_count: float, clip_duration_s: float) -> int:
@@ -213,9 +239,10 @@ def propose_grid(source: str | Path, *, clip_duration_s: float | None = None) ->
         seconds_per_count = float(np.median(np.diff(beat_times))) if len(beat_times) > 1 else 0.5
         count_one_s = float(beat_times[0]) if len(beat_times) else 0.0
         confidence = 0.0
+        count_one_confidence = 0.0
     else:
         seconds_per_count, phase_s, idx = _fit_grid(beat_times)
-        count_one_s, downbeat_margin, count_one_alternates = _count_one(
+        count_one_s, downbeat_margin, count_one_confidence, count_one_alternates = _count_one(
             y, sr, beat_times, idx, downbeat_times, seconds_per_count, phase_s)
         if downbeat_margin < 1.1:
             warnings.append("no beat of the bar is clearly accented; count 1 is a weak guess")
@@ -252,4 +279,5 @@ def propose_grid(source: str | Path, *, clip_duration_s: float | None = None) ->
         alternates=alternates,
         warnings=warnings,
         count_one_alternates=count_one_alternates,
+        count_one_confidence=count_one_confidence,
     )

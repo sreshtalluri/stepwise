@@ -180,6 +180,10 @@ def _proposed_counts(beats: dict | None, sample_times_s: list) -> dict | None:
         ],
         "warnings": list(beats.get("warnings", [])),
         **({"count_one_alternates": ones} if ones else {}),
+        # Absent from beats written before phase confidence existed: leave it
+        # out rather than invent one (the UI then treats count 1 as it did before).
+        **({"count_one_confidence": float(beats["count_one_confidence"])}
+           if beats.get("count_one_confidence") is not None else {}),
     }
 
 

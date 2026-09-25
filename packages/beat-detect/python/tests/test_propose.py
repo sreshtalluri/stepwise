@@ -99,7 +99,7 @@ def test_bhangra_grid_lands_on_the_beat_not_between(tmp_path, fake_model):
     audio here is synthesized the same way -- kicks on the bar downbeats,
     louder claps halfway between beats -- around Beat This!'s recorded beats
     for the real clip, whose bar downbeats all four models put on 2.57 + 2.52n."""
-    rec = RECORDED["bhangra-5716"]
+    rec = RECORDED["bhangra"]
     beats = np.array(rec["beats"])
     wav = _render(tmp_path / "bhangra.wav", 48.0, hats=beats, kicks=beats[3::4],
                   claps=(beats[:-1] + beats[1:]) / 2)
