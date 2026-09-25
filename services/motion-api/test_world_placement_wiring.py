@@ -335,3 +335,20 @@ def test_operator_only_performance_fields_stay_out_of_the_motion_result():
             "track_hygiene": [{"track": 7, "action": "dropped", "reason": "too_brief"}]}
     doc = mr.build_motion_result("job_synth", "synth", npz_bytes, manifest, perf)
     assert doc["model_report"]["measured_performance"] == {"fps": 12.5, "peak_vram_mb": 900.0, "cost_usd": 0.08}
+
+
+def test_an_orientation_repaired_sample_is_served_as_interpolated():
+    """smoothing.repair_clip_orientation replaced this sample's pose with the
+    one between its neighbours: it must not be served as `observed`."""
+    npz_bytes, manifest, _ = _synth_npz()
+    data = dict(np.load(io.BytesIO(npz_bytes), allow_pickle=True))
+    data["per_frame"][5][1]["orientation_repaired"] = True
+    buf = io.BytesIO()
+    np.savez(buf, **data)
+    doc = mr.build_motion_result("job_synth", "synth", buf.getvalue(), manifest, None)
+    samples = doc["persons"][0]["samples"]
+    assert samples[5]["joints"][1]["provenance"] == {
+        "observed": False, "interpolated": True, "suppressed": "low_confidence"}
+    assert samples[5]["joints"][1]["visibility"] == "uncertain"
+    assert doc["persons"][0]["root_trajectory"][5]["provenance"]["observed"] is False
+    assert samples[4]["joints"][1]["provenance"]["observed"] is True
