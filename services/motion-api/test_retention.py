@@ -385,3 +385,30 @@ def test_stored_result_is_served_as_is_and_validated_once(api, monkeypatch):
     with pytest.raises(HTTPException) as e:
         api.get_job_result(job_id)
     assert e.value.status_code == 500
+
+
+def test_result_validated_at_export_is_a_redirect_with_no_revalidation(api, monkeypatch):
+    """A cold replica must not re-validate what export already validated (the
+    20-30 s "second wait" after Start learning): R2 metadata `validated: <job_id>`
+    is trusted, anything else takes the validating byte path."""
+    job_id = "job_marked"
+    _seed_lesson(api, "marked", job_id)
+    api.results_volume.files[f"/{job_id}.job-status.json"] = json.dumps({
+        "schema_version": "1.0.0", "job_id": job_id, "state": "succeeded", "stage_message": "",
+        "progress": 1.0, "error": None, "retry_count": 0}).encode()
+    api._PRIMED.add(job_id)
+    metadata = {"validated": job_id}
+    monkeypatch.setattr(api.storage, "enabled", lambda: True)
+    monkeypatch.setattr(api.storage, "client", lambda: types.SimpleNamespace(
+        head_object=lambda **kw: {"Metadata": metadata}))
+    monkeypatch.setattr(api.storage, "bucket", lambda: "b")
+    monkeypatch.setattr(api.storage, "url_for", lambda key: f"https://r2.example/{key}?sig")
+    monkeypatch.setattr(api, "validate_motion_result", lambda d: pytest.fail("re-validated"))
+
+    resp = api.get_job_result(job_id)
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "https://r2.example/motion-result/marked.json.gz?sig"
+
+    # Marked for a different job (a deduplicated upload): not trusted.
+    metadata["validated"] = "job_someone_else"
+    assert api._validated_r2_url(job_id, "marked") is None

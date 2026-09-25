@@ -166,12 +166,15 @@ def put_bytes(key: str, data: bytes, content_type: str,
 
 
 def put_file(key: str, path: str, content_type: str,
-             content_encoding: Optional[str] = None) -> str:
+             content_encoding: Optional[str] = None,
+             metadata: Optional[dict] = None) -> str:
     """Streaming upload, for the objects big enough that reading them into
     memory is the thing this module exists to stop doing."""
     extra = {"ContentType": content_type, "CacheControl": CACHE_CONTROL}
     if content_encoding:
         extra["ContentEncoding"] = content_encoding
+    if metadata:
+        extra["Metadata"] = metadata
     client().upload_file(path, bucket(), key, ExtraArgs=extra)
     return key
 
