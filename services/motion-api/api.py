@@ -653,6 +653,22 @@ def _refuse_if_removed(clip_id: str) -> None:
         raise HTTPException(410, "This lesson was removed and is not coming back.")
 
 
+# job_id -> monotonic time its lesson was last confirmed NOT removed. A missing
+# tombstone costs ~0.1 s to confirm; a finished job's status is polled on every
+# open, so it is confirmed at most this often per replica. A removal on another
+# replica shows up here within this window; /result checks every time anyway.
+_NOT_REMOVED: dict[str, float] = {}
+_REMOVAL_CHECK_S = 30.0
+
+
+def _refuse_if_removed_cached(job_id: str) -> None:
+    seen = _NOT_REMOVED.get(job_id)
+    if seen is not None and time.monotonic() - seen < _REMOVAL_CHECK_S:
+        return
+    _refuse_if_removed(_clip_id_for(job_id))
+    _NOT_REMOVED[job_id] = time.monotonic()
+
+
 def _with_early_counts(doc: dict, job_id: str) -> dict:
     """Fold the beat proposal into a live job's `milestones.counts`.
 
@@ -679,9 +695,9 @@ def _with_early_counts(doc: dict, job_id: str) -> dict:
 def get_job_status(job_id: str) -> dict:
     doc = jobstore.read_status(results_volume, job_id, _clip_id_for)
     if doc is None:
-        # Removal deletes the job-status document, so a MISSING one is the only
-        # case that can be a removed lesson -- which is why the tombstone is
-        # checked here and not at the top. This endpoint is polled every second
+        # Removal deletes the job-status document, so a MISSING one is the
+        # usual removed lesson (terminal ones are caught below) -- which is why
+        # the tombstone is checked here and not at the top. This endpoint is polled every second
         # or so by the processing screen, and the common path (a job that is
         # genuinely running) must stay at exactly one Volume read, the way it
         # was before removal existed.
@@ -698,6 +714,13 @@ def get_job_status(job_id: str) -> dict:
         if _volume_read_json(results_volume, f"/{job_id}.job-meta.json") is None:
             raise HTTPException(404, "No lesson at this link.")
         doc = jobstore.queued_doc(job_id)
+    elif doc["state"] in ("succeeded", "failed"):
+        # A lesson removed WHILE its job ran: the worker writes its final status
+        # (and npz) after delete_clip, so a status document can exist for a
+        # removed lesson (job_6037..., 2026-09-25). Terminal states only -- a
+        # running job's polls stay at one Volume read -- and at most one
+        # tombstone read per job per _REMOVAL_CHECK_S per replica.
+        _refuse_if_removed_cached(job_id)
     doc = _with_early_counts(doc, job_id)
     result = validate_job_status(doc)
     if not result.valid:
@@ -734,6 +757,8 @@ def retry_job(job_id: str, http: Request) -> dict:
     doc = jobstore.read_status(results_volume, job_id, _clip_id_for)
     if doc is None:
         raise HTTPException(404, "Unknown job_id.")
+    # Never re-run the GPU on a lesson someone took down.
+    _refuse_if_removed(_clip_id_for(job_id))
     if doc["state"] != "failed":
         raise HTTPException(409, f"Job is '{doc['state']}', not 'failed' -- nothing to retry.")
     if not doc["error"] or not doc["error"]["retryable"]:
@@ -1142,6 +1167,7 @@ def remove_lesson(clip_id: str, request: RemovalRequest, http: Request) -> Remov
     # Belt and braces: /result checks the tombstone before these anyway.
     _SUCCEEDED.discard(job_id)
     _R2_VALIDATED.discard((job_id, clip_id))
+    _NOT_REMOVED.pop(job_id, None)
     print(f"[removal] {clip_id}: deleted {len(outcome['deleted'])} artifacts ({request.relationship})")
     # The owner's alert. Ids and the category only -- the free-text reason is
     # on the tombstone and deliberately not here.

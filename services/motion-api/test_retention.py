@@ -470,3 +470,39 @@ def test_result_redirect_records_the_access_after_responding(api, monkeypatch):
                          "client": ("127.0.0.1", 1), "server": ("testserver", 80)}, receive, send))
     assert seen == {"status": 302, "touched_before_response": False}
     assert touch in api.results_volume.files
+
+
+def test_removed_mid_run_status_written_after_removal_is_410_and_not_retryable(api):
+    """job_6037...: the lesson was removed while its job ran, and the worker then
+    wrote a final `failed` status after delete_clip. Status and retry must both
+    answer removed -- retry must never re-run the GPU on a taken-down lesson."""
+    from fastapi import HTTPException
+    _seed_lesson(api, "abc", "job_abc")
+    api.remove_lesson("abc", _removal(api), NO_REQUEST)
+    api.results_volume.files["/job_abc.job-meta.json"] = json.dumps({"clip_id": "abc"}).encode()
+    api.results_volume.files["/job_abc.job-status.json"] = json.dumps({
+        "schema_version": "1.0.0", "job_id": "job_abc", "state": "failed",
+        "stage_message": "", "progress": 0.5, "retry_count": 0,
+        "error": {"code": "export_error", "message": "x", "retryable": True}}).encode()
+    for call in (lambda: api.get_job_status("job_abc"),
+                 lambda: api.retry_job("job_abc", NO_REQUEST)):
+        with pytest.raises(HTTPException) as e:
+            call()
+        assert e.value.status_code == 410
+
+
+def test_finished_status_rechecks_removal_after_the_cache_window(api, monkeypatch):
+    """The not-removed verdict is cached per replica, so a finished job's polls
+    stay cheap; a removal on ANOTHER replica is seen once the window passes."""
+    import retention
+    from fastapi import HTTPException
+    _seed_lesson(api, "abc", "job_abc")
+    assert api.get_job_status("job_abc")["state"] == "succeeded"
+    retention.delete_clip(api.uploads_volume, api.results_volume, "abc", "job_abc", "", "i_am_in_it")
+    api.results_volume.files["/job_abc.job-status.json"] = json.dumps({
+        "schema_version": "1.0.0", "job_id": "job_abc", "state": "succeeded",
+        "stage_message": "", "progress": 1.0, "error": None, "retry_count": 0}).encode()
+    monkeypatch.setattr(api, "_REMOVAL_CHECK_S", 0.0)
+    with pytest.raises(HTTPException) as e:
+        api.get_job_status("job_abc")
+    assert e.value.status_code == 410
