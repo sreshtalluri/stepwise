@@ -37,13 +37,21 @@ PARTS = {
 EXTRA = ["root", "l_upleg", "r_upleg", "l_lowarm", "r_lowarm", "l_lowleg", "r_lowleg", "c_spine3"]
 
 # Tunables (the calibration knobs). Chosen by eye on the five lessons, not fitted.
-MAX_HALF = 8                      # a step is at most 4 counts
-MIN_STEP_S = 0.25                 # ...and at least this long: at 15 fps a shorter step is 4 samples of noise
-FAST_SPC = 0.45                   # faster than ~133 BPM, prefer 2-count steps instead of 1-count
-LEN_PENALTY = 0.15                # cost per octave away from PREF_HALF
-BOUNDARY_COST = 0.35              # a cut has to be at least this clear to be worth making
+# Everything below is in QUARTER-count units (q): q=0 is count 1, q=2 its "and", q=1/3 its "e"/"a".
+# Detail levels, nested: each level only re-cuts inside the level above (phrase > chunk > step > sub-step).
+LEVELS = {  # name: (finest metrical position allowed, min q, max q, preferred q, min seconds, cut quantile)
+    "beginner": (1, 4, 12, None, 0.30, 0.65),    # on counts; 1-2 counts per step (preferred set by tempo), max 3
+    "intermediate": (2, 2, 8, 4, 0.25, 0.50),    # counts and "and"s; half to 2 counts, preferring 1
+    "advanced": (3, 1, 4, 2, 0.12, 0.40),        # adds "e"/"a" ONLY where video hits + audio onsets agree
+}
+# A cut must beat this dance's own evidence at that level: the cost of a cut is the given quantile of the
+# scores of that level's candidate points. Absolute thresholds did not transfer: every clip has "some" stop
+# near most counts, so a fixed cost cut on every count at every level.
+LEN_PENALTY = 0.25                # cost per octave away from the preferred length
+ACCENT_W = 0.3                    # an audio accent strengthens a cut the motion already supports, never makes one
 CHUNK_COUNTS = 4                  # chunks aim for 4 counts (half an eight)
 TRAVEL_M, TURN_DEG, LEVEL_M = 0.20, 45.0, 0.10
+IDLE_INSIDE = 4                   # a not-dancing run inside the dance must last this many counts (else it's a hold)
 
 
 # ---------------------------------------------------------------- kinematics
@@ -106,7 +114,8 @@ def smooth(x, k=3):
 
 # ---------------------------------------------------------------- analysis
 
-def analyse(doc):
+def kinematics(doc):
+    """Dancer-frame kinematics at the MotionResult's sample rate. Shared by every research script."""
     person = doc["persons"][0]  # ponytail: first dancer only; group lessons need a dancer picker
     t = np.array(doc["sample_times_s"], float)
     names = list(PARTS.values()) + EXTRA
@@ -142,99 +151,276 @@ def analyse(doc):
     energy = speed[:, part_cols].sum(1) + 2 * root_v
     energy = np.where(ok, energy, np.nan)
     energy_s = smooth(np.nan_to_num(energy, nan=np.nanmedian(energy)), 1)
+    return dict(t=t, body=body, root=root, yaw=yaw, up=up, right=right, fwd=fwd, vel=vel, speed=speed,
+                root_v=root_v, part_cols=part_cols, ok=ok, energy=energy_s, vis=vis, ix=ix, root_ok=root_ok)
 
-    pc = doc["proposed_counts"]
-    one, spc = pc["count_one_s"], pc["seconds_per_count"]
-    half = spc / 2
-    # half-beat grid over the span where the dancer is in frame
-    active = np.where(ok)[0]
-    t0, t1 = t[active[0]], t[active[-1]]
-    k0 = math.ceil((t0 - one) / half)
-    k1 = math.floor((t1 - one) / half)
-    grid_k = np.arange(k0, k1 + 1)
-    grid_t = one + grid_k * half
 
-    # Candidate cut points, per sample, from two cues viewers use to split dance (Di Nota et al. 2020):
-    # (a) the body nearly stops: a local minimum of energy ("kinematic beat", AIST++), scored by prominence;
-    # (b) a leading limb changes direction: 1 - cos between velocity just before and just after.
-    n, w = len(t), max(2, int(round(half / np.median(np.diff(t)))))
+def idle_counts(k, one, spc, audio=None):
+    """Per-count dancing / not-dancing, from signals relative to THIS dance:
+    limb  = body-relative limb speed / the dance's 75th percentile;  root = pelvis speed (m/s);
+    lock  = share of limb-energy variance at the beat or half-beat frequency over +-2 counts (reported only:
+            it separates walking from dancing on bhangra but not reliably on the others);
+    music = audio RMS / its median;  seen = share of samples with every limb tip in frame."""
+    t, ok = k["t"], k["ok"]
+    limb = k["speed"][:, k["part_cols"]].sum(1)
+    lvl = np.percentile(limb[ok], 75) + 1e-9
+    rms = rt = None
+    if audio:
+        rms = np.array(audio["rms"])
+        rt = np.arange(len(rms)) * audio["rms_hop_s"]
+        rms = rms / (np.median(rms[rms > 0]) + 1e-9)
+    out = []
+    for c in range(math.floor((t[0] - one) / spc), math.floor((t[-1] - one) / spc) + 1):
+        a, b = one + c * spc, one + (c + 1) * spc
+        m = (t >= a) & (t < b)
+        if not m.any():
+            continue
+        w = (t >= a - 2 * spc) & (t < b + 2 * spc) & ok
+        x = limb[w] - limb[w].mean()
+        lock = 0.0
+        if w.sum() > 8 and x.std() > 0:
+            ph = 2 * np.pi * (t[w] - one) / spc
+            p = sum(abs(np.sum(x * np.exp(-1j * f * ph))) ** 2 for f in (1, 2)) * 2 / (len(x) * np.sum(x ** 2))
+            lock = float(min(1.0, p))
+        row = {"c": c, "t0": round(a, 3), "t1": round(b, 3), "seen": float(ok[m].mean()),
+               "limb": round(float(limb[m].mean() / lvl), 2), "root": round(float(k["root_v"][m].mean()), 2),
+               "lock": round(lock, 2), "music": float(np.interp((a + b) / 2, rt, rms)) if rms is not None else 1.0}
+        why = None
+        if row["seen"] < 0.5:
+            why = "not in frame"
+        elif row["music"] < 0.2:
+            why = "no music"
+        elif row["limb"] < 0.5 and row["root"] > 0.6:
+            why = "walking"
+        elif row["limb"] < 0.35 and row["root"] < 0.6:
+            why = "still"
+        row["why"] = why
+        out.append(row)
+    return out
+
+
+def idle_spans(counts):
+    """Lead-in, outro, and long pauses. The dance starts at the first TWO dancing counts in a row (one
+    lively count mid-walk is not a start). Inside the dance only runs of >= IDLE_INSIDE idle counts
+    count: a shorter stillness is a hold, and holds are choreography."""
+    idle = [r["why"] is not None for r in counts]
+    n = len(counts)
+    lead = next((i for i in range(n - 1) if not idle[i] and not idle[i + 1]), n)
+    tail = next((j + 1 for j in range(n - 1, lead, -1) if not idle[j] and not idle[j - 1]), lead)
+    # A single walking/still count at an edge is more often a travelling first step than a walk-in
+    # (b822 opens with a side step): trim on motion alone only with 2+ such counts.
+    motion_only = lambda rs: sum(r["why"] in ("walking", "still") for r in rs) < 2 and all(  # noqa: E731
+        r["why"] in ("walking", "still", None) for r in rs)
+    if lead < n and motion_only(counts[:lead]):
+        lead = 0
+    if tail > lead and motion_only(counts[tail:]):
+        tail = n
+    why = lambda rs: sorted({r["why"] or "one lively count" for r in rs})  # noqa: E731
+    spans = []
+    if lead:
+        spans.append({"t0": counts[0]["t0"], "t1": counts[lead - 1]["t1"], "kind": "lead-in", "why": why(counts[:lead])})
+    i = lead
+    while i < tail:
+        j = i
+        while j < tail and idle[j]:
+            j += 1
+        if j - i >= IDLE_INSIDE:
+            spans.append({"t0": counts[i]["t0"], "t1": counts[j - 1]["t1"], "kind": "pause", "why": why(counts[i:j])})
+        i = j + 1 if j == i else j
+    if tail < n:
+        spans.append({"t0": counts[tail]["t0"], "t1": counts[-1]["t1"], "kind": "outro", "why": why(counts[tail:])})
+    start = counts[lead]["t0"] if lead < n else counts[0]["t0"]
+    end = counts[tail - 1]["t1"] if tail > lead else counts[-1]["t1"]
+    return spans, start, end
+
+
+def metrical(q):
+    """0 = count 1 or 5, 1 = other counts, 2 = "and", 3 = "e"/"a"."""
+    return 0 if q % 16 == 0 else 1 if q % 4 == 0 else 2 if q % 2 == 0 else 3
+
+
+def count_label(q):
+    """Quarter index q (0 = count 1) -> '1', '1e', '1&', '1a', '2', ... cycling through an eight."""
+    return f"{(q // 4) % 8 + 1}{['', 'e', '&', 'a'][q % 4]}"
+
+
+def cut_cues(k, spc):
+    """Per-sample cut evidence from two cues viewers use to split dance (Di Nota et al. 2020):
+    (a) the body nearly stops: a local energy minimum ("kinematic beat", AIST++), scored by prominence;
+    (b) the whole-body velocity pattern changes direction (all five tips as one 15-d vector)."""
+    t, ok, e, vel = k["t"], k["ok"], k["energy"], k["vel"]
+    n, w = len(t), max(2, int(round(spc / 2 / np.median(np.diff(t)))))
     stop = np.zeros(n)
     for i in range(1, n - 1):
-        if ok[i] and energy_s[i] <= energy_s[max(0, i - 2):i + 3].min():
-            ref = min(energy_s[max(0, i - w):i].max(initial=0), energy_s[i + 1:i + 1 + w].max(initial=0))
-            stop[i] = max(0.0, (ref - energy_s[i]) / (ref + 1e-6))
-    # whole-body velocity pattern (all five tips as one 15-d vector): a new move changes the pattern,
-    # one limb reversing inside a move does not.
-    vel_s = smooth(vel[:, part_cols], 1).reshape(n, -1)
-    norms = np.linalg.norm(vel_s, axis=1)
-    med = np.median(norms[ok]) + 1e-6
-    turn_sig = np.zeros(n)
+        if ok[i] and e[i] <= e[max(0, i - 2):i + 3].min():
+            ref = min(e[max(0, i - w):i].max(initial=0), e[i + 1:i + 1 + w].max(initial=0))
+            stop[i] = max(0.0, (ref - e[i]) / (ref + 1e-6))
+    vs = smooth(vel[:, k["part_cols"]], 1).reshape(n, -1)
+    med = np.median(np.linalg.norm(vs, axis=1)[ok]) + 1e-6
+    turn = np.zeros(n)
     for i in range(3, n - 3):
-        a, b = vel_s[i - 3:i].mean(0), vel_s[i + 1:i + 4].mean(0)
+        a, b = vs[i - 3:i].mean(0), vs[i + 1:i + 4].mean(0)
         na, nb = np.linalg.norm(a), np.linalg.norm(b)
-        cos = a @ b / (na * nb + 1e-9)
-        turn_sig[i] = (1 - cos) / 2 * min(1.0, min(na, nb) / med) if ok[i] else 0.0
-    cue = np.maximum(stop, turn_sig)
-
-    # Score each half-beat by the best cue within +-1/4 count (timing slop), and remember the offset.
-    score, offset = np.zeros(len(grid_t)), np.zeros(len(grid_t))
-    for gi, tt in enumerate(grid_t):
-        m = np.where(np.abs(t - tt) <= half / 2)[0]
-        if len(m):
-            j = m[np.argmax(cue[m])]
-            score[gi], offset[gi] = cue[j], t[j] - tt
-
-    # Diagnostic: do the body's own clear stops land on counts or on "and"s?
-    clear = np.where(stop > 0.4)[0]
-    phase = ((t[clear] - one) / spc) % 1.0                        # 0 = on the count, 0.5 = on the "and"
-    align = {"clear_stops": int(len(clear)),
-             "near_count": int(np.sum((phase < 0.2) | (phase > 0.8))),
-             "near_and": int(np.sum((phase > 0.3) & (phase < 0.7)))}
-    # Energy folded onto one count (8 bins, bin 0 = on the count, bin 4 = on the "and"), as % of the mean.
-    # The bin where the body is stillest is where this dance "lands" relative to the proposed grid.
-    ph = (((t - one) / spc) % 1.0 * 8).astype(int)[ok]
-    fold = np.array([energy_s[ok][ph == b].mean() for b in range(8)])
-    align["fold_pct"] = [int(round(100 * x / fold.mean())) for x in fold]
-    align["stillest_phase"] = f"{np.argmin(fold) / 8:.3f} of a count after the count"
-
-    steps = dp_steps(score, max(1, math.ceil(MIN_STEP_S / half)), 4 if spc < FAST_SPC else 2)
-    rows = []
-    for a, b in zip(steps[:-1], steps[1:]):
-        rows.append(step_features(t, grid_t[a], grid_t[b], grid_k[a], grid_k[b], body, root, yaw, up, right, fwd, speed,
-                                  energy_s, vis, part_cols, ix, score[b], offset[b], root_ok))
-    label_quality(rows)
-    chunks = make_chunks(rows)
-    return {"t_range": [float(t0), float(t1)], "count_one_s": one, "seconds_per_count": spc, "bpm": pc["bpm"],
-            "steps": rows, "chunks": chunks, "alignment": align,
-            "grid": [[round(float(a), 3), round(float(b), 2)] for a, b in zip(grid_t, score)],
-            "energy": [[round(float(a), 3), round(float(b), 3)] for a, b in zip(t, energy_s)]}
+        turn[i] = (1 - a @ b / (na * nb + 1e-9)) / 2 * min(1.0, min(na, nb) / med) if ok[i] else 0.0
+    return np.maximum(stop, turn), stop
 
 
-def dp_steps(score, min_half=1, pref_half=2):
-    """Pick boundary indices into the half-beat grid: maximise summed boundary score, penalise odd step lengths."""
-    n = len(score)
+def fast_evidence(audio, video2d, one, spc):
+    """Sub-beat support, from the two sources that see faster than the 15 fps 3D: visible hits in
+    native-fps frame differences (video2d) and percussive onsets (audio).
+    Returns (hit times, onset times, {q: True} for each "e"/"a" quarter where BOTH land within 1/8 count)."""
+    if not audio or not video2d:
+        return np.array([]), np.array([]), {}
+    from sync import hits_2d  # local import: sync imports this module
+    hits = np.array([h[0] for h in hits_2d(video2d)[3]])
+    ons = np.array([o[0] for o in audio["onsets"] if o[1] > 0.25])
+    fast = {}
+    for c in fast_counts(hits, ons, one, spc):
+        fast[4 * c + 1] = fast[4 * c + 3] = True
+    return hits, ons, fast
+
+
+def fast_counts(hits, ons, one, spc, tol_frac=1 / 16, need=3):
+    """Counts with a 16th-note passage: at least `need` of the count's four 16th positions have a visible
+    hit within tol, AND at least `need` have an audio onset within tol, with at least one e/a hit.
+    One stray hit near an "e" proves nothing: onsets are dense in busy music (5+/s on bhangra), so a
+    single coincidence happens at chance rate. Returns count indices (0 = count 1)."""
+    if not len(hits) or not len(ons):
+        return []
+    tol = spc * tol_frac
+    out = []
+    for c in range(int((hits.min() - one) / spc) - 1, int((hits.max() - one) / spc) + 1):
+        ts = one + (c + np.arange(4) / 4) * spc
+        h = [bool(np.any(np.abs(hits - x) <= tol)) for x in ts]
+        o = [bool(np.any(np.abs(ons - x) <= tol)) for x in ts]
+        if sum(h) >= need and sum(o) >= need and (h[1] or h[3]):
+            out.append(c)
+    return out
+
+
+def dp_cut(qs, score, minq, maxq, prefq, min_s, spc, cost=0.35):
+    """Choose cuts among candidate quarters `qs` (first and last are forced): maximise summed score,
+    minus a cost per cut and a penalty for straying from the preferred length."""
+    n = len(qs)
     best = np.full(n, -np.inf)
     prev = np.full(n, -1)
     best[0] = 0
     for j in range(1, n):
-        for L in range(min_half, MAX_HALF + 1):
-            i = j - L
-            if i < 0:
+        for i in range(j - 1, -1, -1):
+            L = qs[j] - qs[i]
+            if L > maxq:
                 break
-            v = best[i] + score[j] - BOUNDARY_COST - LEN_PENALTY * abs(math.log2(L / pref_half))
+            if L < minq or L * spc / 4 < min_s - 1e-6:
+                continue
+            gain = (score[j] - cost) if j < n - 1 else 0.0
+            v = best[i] + gain - LEN_PENALTY * abs(math.log2(L / prefq))
             if v > best[j]:
                 best[j], prev[j] = v, i
+    if not np.isfinite(best[-1]):
+        return [qs[0], qs[-1]]  # nothing fits: keep the parent whole
     out, j = [], n - 1
     while j >= 0:
-        out.append(j)
+        out.append(qs[j])
         j = prev[j]
     return out[::-1]
 
 
-def count_label(k):
-    """Half-beat index k (0 = count 1) -> '1', '1&', ... cycling through an eight."""
-    c = (k // 2) % 8 + 1
-    return f"{c}&" if k % 2 else f"{c}"
+def analyse(doc, audio=None, video2d=None):
+    k = kinematics(doc)
+    t, body, root, yaw, up, right, fwd = k["t"], k["body"], k["root"], k["yaw"], k["up"], k["right"], k["fwd"]
+    speed, part_cols, energy_s, vis, ix, root_ok = (k[x] for x in (
+        "speed", "part_cols", "energy", "vis", "ix", "root_ok"))
+    pc = doc["proposed_counts"]
+    one, spc, bpm = pc["count_one_s"], pc["seconds_per_count"], pc["bpm"]
+    qs_ = spc / 4
+
+    # 1. where the dance is
+    counts = idle_counts(k, one, spc, audio)
+    idle, d0, d1 = idle_spans(counts)
+    q_start, q_end = round((d0 - one) / qs_), round((d1 - one) / qs_)
+
+    # 2. evidence at every quarter of the dance
+    cue, _ = cut_cues(k, spc)
+    hits, ons, fast_q = fast_evidence(audio, video2d, one, spc)
+    env = env_t = None
+    if audio:
+        env = np.array(audio["env"])
+        env_t = np.arange(len(env)) * audio["env_hop_s"]
+    score, offset = {}, {}
+    for q in range(q_start, q_end + 1):
+        tq = one + q * qs_
+        m = np.where(np.abs(t - tq) <= (qs_ if metrical(q) < 3 else qs_ / 2))[0]
+        if not len(m):
+            score[q] = 0.0
+            continue
+        j = m[np.argmax(cue[m])]
+        sc = float(cue[j])
+        if env is not None:
+            acc = float(np.clip(env[(env_t >= tq - 0.04) & (env_t <= tq + 0.04)].max(initial=0), 0, 1))
+            sc = min(1.0, sc * (1 + ACCENT_W * acc))
+        if metrical(q) == 3:  # too fast for the 3D alone: needs a visible hit AND an onset
+            sc = 0.9 if fast_q.get(q) else 0.0
+        score[q], offset[q] = sc, float(t[j] - tq)
+
+    # 3. nested cuts, coarse to fine
+    pref_beg = 8 if bpm >= 110 else 4  # beginner: 2 counts at dance tempo, 1 count when the song is slow
+    levels, parents = {}, [(q_start, q_end)]
+    for name, (finest, minq, maxq, prefq, min_s, quant) in LEVELS.items():
+        prefq = prefq or pref_beg
+        pool = [v for q, v in score.items() if metrical(q) <= finest and (metrical(q) < 3 or fast_q.get(q))]
+        cost = float(np.quantile(pool, quant)) if pool else 0.35
+        cuts = []
+        for a, b in parents:
+            cand = [q for q in range(a, b + 1)
+                    if q in (a, b) or (metrical(q) <= finest and (metrical(q) < 3 or fast_q.get(q)))]
+            c = dp_cut(cand, [score.get(q, 0.0) for q in cand], min(minq, b - a), maxq, prefq,
+                       min(min_s, (b - a) * qs_), spc, cost)
+            cuts.extend(c if not cuts else c[1:])
+        rows = []
+        for a, b in zip(cuts[:-1], cuts[1:]):
+            ta, tb = one + a * qs_, one + b * qs_
+            r = step_features(t, ta, tb, a, b, body, root, yaw, up, right, fwd, speed, energy_s, vis, part_cols, ix,
+                              score.get(b, 0.0), offset.get(b, 0.0), root_ok)
+            r["parent"] = None if name == "beginner" else next(i for i, (pa, pb) in enumerate(parents) if pa <= a < pb)
+            r["sub_beat"] = metrical(a) == 3 or metrical(b) == 3
+            if tb - ta < 3 * np.median(np.diff(t)):
+                r["moves"], r["lead"] = [], []
+                r["note"] = "too fast for the 3D to describe; follow the video"
+            rows.append(r)
+        label_quality(rows)
+        levels[name] = rows
+        parents = list(zip(cuts[:-1], cuts[1:]))
+
+    chunks = make_chunks(levels["beginner"])
+    of = {si: ci for ci, c in enumerate(chunks) for si in c["steps"]}
+    for s_i, s in enumerate(levels["beginner"]):
+        s["chunk"] = of[s_i]
+    for up_name, name in (("beginner", "intermediate"), ("intermediate", "advanced")):
+        for s in levels[name]:
+            s["chunk"] = levels[up_name][s["parent"]]["chunk"]
+    return {"t_range": [float(t[0]), float(t[-1])], "count_one_s": one, "seconds_per_count": spc, "bpm": bpm,
+            "dance_span": [d0, d1], "idle": idle,
+            "counts_idle": [{x: r[x] for x in ("t0", "why", "limb", "root", "lock")} for r in counts],
+            "levels": levels, "steps": levels["beginner"], "chunks": chunks,
+            "fast_quarters": sorted(fast_q), "hits_2d": [round(float(x), 3) for x in hits],
+            "onsets": [round(float(x), 3) for x in ons],
+            "energy": [[round(float(a), 3), round(float(b), 3)] for a, b in zip(t, energy_s)]}
+
+
+def make_chunks(steps):
+    """Group beginner steps into ~CHUNK_COUNTS-count chunks: close at a cut on count 1 or 5 (or the "and"
+    after) once the chunk has 3+ counts, or anyway past 6 counts."""
+    chunks, cur = [], []
+    for s in steps:
+        cur.append(s)
+        span = (cur[-1]["k"][1] - cur[0]["k"][0]) / 4
+        if (span >= CHUNK_COUNTS - 1 and cur[-1]["k"][1] % 16 in (0, 2)) or span >= CHUNK_COUNTS + 2:
+            chunks.append(cur)
+            cur = []
+    if cur:
+        chunks.append(cur)
+    return [{"steps": [steps.index(s) for s in c], "start_s": c[0]["start_s"], "end_s": c[-1]["end_s"],
+             "counts": f"{c[0]['counts'].split('–')[0]}–{c[-1]['counts'].split('–')[1]}"} for c in chunks]
 
 
 def step_features(t, ta, tb, ka, kb, body, root, yaw, up, right, fwd, speed, energy, vis, part_cols, ix,
@@ -270,7 +456,7 @@ def step_features(t, ta, tb, ka, kb, body, root, yaw, up, right, fwd, speed, ene
     seen = vis[idx][:, part_cols]
     unsure = [p for i, p in enumerate(parts) if p in lead and (seen[:, i] < 2).mean() > 0.5]
     return {"start_s": round(float(ta), 3), "end_s": round(float(tb), 3),
-            "counts": f"{count_label(ka)}–{count_label(kb)}", "half_beats": int(kb - ka),
+            "counts": f"{count_label(ka)}–{count_label(kb)}", "quarters": int(kb - ka),
             "lead": lead, "moves": moves, "whole_body": whole,
             "mean_energy": round(float(e.mean()), 2), "peakiness": round(float(e.max() / (e.mean() + 1e-6)), 2),
             "end_cue": round(float(end_score), 2), "end_offset_s": round(float(end_off), 3),
@@ -303,48 +489,68 @@ def direction(d, floor=0.12):
     return " & ".join(words) or "in place"
 
 
-def make_chunks(steps):
-    """Group steps into ~CHUNK_COUNTS-count chunks: cut at a step boundary within half a count of a half-eight
-    (count 1 or 5, or the "and" after, since some dances land on the "and"), else once it passes 6 counts."""
-    chunks, cur = [], []
-    for s in steps:
-        cur.append(s)
-        span = (cur[-1]["k"][1] - cur[0]["k"][0]) / 2
-        near_half_eight = cur[-1]["k"][1] % 8 in (0, 1)
-        if (span >= CHUNK_COUNTS - 1 and near_half_eight) or span >= CHUNK_COUNTS + 2:
-            chunks.append(cur)
-            cur = []
-    if cur:
-        chunks.append(cur)
-    return [{"steps": [steps.index(s) for s in c], "start_s": c[0]["start_s"], "end_s": c[-1]["end_s"],
-             "counts": f"{c[0]['counts'].split('–')[0]}–{c[-1]['counts'].split('–')[1]}"} for c in chunks]
-
-
 # ---------------------------------------------------------------- output
 
+TARGET = {"beginner": (1, 2), "intermediate": (0.5, 1), "advanced": (0.25, 1)}  # counts per step a teacher uses
+
+
+def level_stats(r):
+    """Per level: step count, median counts/step, share inside the teacher range, where cuts land."""
+    out = {}
+    for name, rows in r["levels"].items():
+        L = np.array([s["quarters"] / 4 for s in rows])
+        lo, hi = TARGET[name]
+        ends = [s["k"][1] % 4 for s in rows[:-1]]
+        out[name] = {"steps": len(rows), "median_counts": float(np.median(L)),
+                     "in_range_pct": int(round(100 * np.mean((L >= lo) & (L <= hi)))),
+                     "cuts_on_count": sum(e == 0 for e in ends), "cuts_on_and": sum(e == 2 for e in ends),
+                     "cuts_on_e_a": sum(e in (1, 3) for e in ends)}
+    return out
+
+
 def table(job, name, r):
+    ls = level_stats(r)
+    idle = "; ".join(f"{s['kind']} {s['t0']:.1f}–{s['t1']:.1f} s ({', '.join(s['why'])})" for s in r["idle"]) or "none"
     lines = [f"## {name} (`{job}`)", "",
              f"{r['bpm']:.1f} BPM, {r['seconds_per_count']:.3f} s/count, count 1 at {r['count_one_s']:.2f} s. "
-             f"{len(r['steps'])} steps in {len(r['chunks'])} chunks over {r['t_range'][0]:.1f}–{r['t_range'][1]:.1f} s.", "",
-             "| chunk | step | time (s) | counts | leads | direction (dancer's frame) | whole body | quality | cut clarity | unsure |",
-             "|---|---|---|---|---|---|---|---|---|---|"]
+             f"Dance {r['dance_span'][0]:.2f}–{r['dance_span'][1]:.2f} s. Not dancing: {idle}.", "",
+             "| level | steps | median counts/step | in teacher range | cuts on count / & / e,a |", "|---|---|---|---|---|"]
+    for lv, s in ls.items():
+        lines.append(f"| {lv} | {s['steps']} | {s['median_counts']:g} | {s['in_range_pct']}% | "
+                     f"{s['cuts_on_count']} / {s['cuts_on_and']} / {s['cuts_on_e_a']} |")
+    lines += ["", "Beginner steps, with the intermediate and advanced cuts nested inside each:", "",
+              "| chunk | step | time (s) | counts | intermediate | advanced | leads / direction (dancer's frame) | whole body | quality | cut clarity | unsure |",
+              "|---|---|---|---|---|---|---|---|---|---|---|"]
+    inter, adv = r["levels"]["intermediate"], r["levels"]["advanced"]
     for ci, c in enumerate(r["chunks"], 1):
         for n, si in enumerate(c["steps"]):
             s = r["steps"][si]
-            lines.append(f"| {ci if n == 0 else ''} | {si + 1} | {s['start_s']:.2f}–{s['end_s']:.2f} | {s['counts']} | "
-                         f"{', '.join(s['lead']) or '—'} | {'; '.join(s['moves']) or '—'} | {', '.join(s['whole_body']) or '—'} | "
+            kids = [i for i, x in enumerate(inter) if x["parent"] == si]
+            mid = " · ".join(inter[i]["counts"] for i in kids) if len(kids) > 1 else "—"
+            sub = [x for x in adv if x["parent"] in kids]
+            fine = " · ".join(x["counts"] + ("*" if x["sub_beat"] else "") for x in sub) if len(sub) > len(kids) else "—"
+            lines.append(f"| {ci if n == 0 else ''} | {si + 1} | {s['start_s']:.2f}–{s['end_s']:.2f} | {s['counts']} | {mid} | {fine} | "
+                         f"{'; '.join(s['moves']) or '—'} | {', '.join(s['whole_body']) or '—'} | "
                          f"{s['quality']} | {s['end_cue']:.2f} | {', '.join(s['uncertain_parts']) or ''} |")
     return "\n".join(lines) + "\n"
 
 
 def check():
-    """Synthetic: score peaks every count -> DP must put a boundary on every count."""
-    score = np.tile([1.0, 0.0], 16)
-    b = dp_steps(score)
-    assert all(k % 2 == 0 for k in b[:-1]), b  # last index is the forced clip end
-    assert all(2 <= y - x <= 2 for x, y in zip(b[:-2], b[1:-1])), b
-    assert count_label(0) == "1" and count_label(3) == "2&" and count_label(16) == "1"
+    """Synthetic: evidence on every count and nothing between -> cuts on counts, lengths as preferred."""
+    qs = list(range(0, 33))
+    score = [1.0 if q % 4 == 0 else 0.0 for q in qs]
+    cand = [q for q in qs if metrical(q) <= 2]
+    cuts = dp_cut(cand, [score[q] for q in cand], 2, 8, 4, 0.1, 0.5)
+    assert all(q % 4 == 0 for q in cuts), cuts
+    assert all(b - a == 4 for a, b in zip(cuts[:-1], cuts[1:])), cuts
+    assert dp_cut([0, 1], [0, 0], 4, 16, 8, 0.3, 0.5) == [0, 1]  # too short to cut: parent kept whole
+    assert count_label(0) == "1" and count_label(2) == "1&" and count_label(7) == "2a" and count_label(32) == "1"
+    assert [metrical(q) for q in (0, 4, 2, 1, 16)] == [0, 1, 2, 3, 0]
     assert direction(np.array([0.3, 0, 0])) == "to their right"
+    counts = [{"t0": i, "t1": i + 1, "why": w} for i, w in enumerate(["walking", "walking", None, "walking", None, None,
+                                                                          None, "still", "still", None, None, "no music"])]
+    spans, a, b = idle_spans(counts)
+    assert (a, b) == (4, 11) and [s["kind"] for s in spans] == ["lead-in", "outro"], (a, b, spans)
     print("ok")
 
 
@@ -359,13 +565,19 @@ def main():
         if not os.path.exists(path):
             print(f"skip {job}: run fetch.sh first")
             continue
-        r = analyse(json.load(open(path)))
+        side = {}
+        for kind in ("audio", "video2d"):  # optional: from audio.py and video2d.py
+            p = os.path.join(HERE, ".cache", f"{job}.{kind}.json")
+            side[kind] = json.load(open(p)) if os.path.exists(p) else None
+        r = analyse(json.load(open(path)), **side)
         r["job_id"], r["name"] = job, name
+        r["stats"] = level_stats(r)
         data[name] = r
         summary.append(table(job, name, r))
     open(os.path.join(out, "steps.md"), "w").write(
-        "# Proposed steps per lesson\n\nGenerated by `segment.py`. Counts are on each lesson's machine-proposed grid, "
-        "not authored counts. Left/right are the DANCER's. \"cut clarity\" is the boundary cue at the step's end (0–1).\n\n"
+        "# Proposed steps per lesson\n\nGenerated by `segment.py`. Counts are on each lesson's machine-proposed grid "
+        "(Beat This!), not authored counts. Left/right are the DANCER's. \"cut clarity\" is the cut evidence at the "
+        "step's end (0–1). `*` marks a sub-beat (e/a) cut, made only where a visible hit and an audio onset agree.\n\n"
         + "\n".join(summary))
     json.dump(data, open(os.path.join(out, "steps.json"), "w"))
     page = open(os.path.join(HERE, "viewer.html")).read().replace("/*DATA*/null", json.dumps(data))

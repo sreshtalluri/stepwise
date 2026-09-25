@@ -1,0 +1,33 @@
+| lesson | live count 1 | Beat This! count 1 | 3D-vs-video lag | hits-vs-onsets lag (corr / median) |
+|---|---|---|---|---|
+| bhangra | 2.575 | 2.575 | -25 ms (r=0.27) | -255 ms (0.07 / -0.01) |
+| choreo | 1.293 | 1.293 | -45 ms (r=0.51) | +0 ms (0.12 / -0.00) |
+| b822 | 1.085 | 1.085 | -20 ms (r=0.43) | +135 ms (0.14 / 0.03) |
+| a106 | 2.073 | 2.073 | -50 ms (r=0.33) | -265 ms (0.17 / -0.01) |
+| 7995 | 1.172 | 1.172 | -30 ms (r=0.56) | +125 ms (0.16 / 0.05) |
+
+where visible hits land inside a count (8 bins; bin 0 = on the count, bin 4 = on the 'and'):
+  bhangra  n=120   30  20  13  13  17  16   1  10   on-count(bins 7,0,1)=60  on-and(bins 3,4,5)=46   median offset from nearest half-beat +28 ms (n=70)
+  choreo   n= 89   24   6  11  12  15   5   5  11   on-count(bins 7,0,1)=41  on-and(bins 3,4,5)=32   median offset from nearest half-beat +15 ms (n=62)
+  b822     n= 35    3   4   6   6   5   4   5   2   on-count(bins 7,0,1)=9  on-and(bins 3,4,5)=15   median offset from nearest half-beat +7 ms (n=16)
+  a106     n= 74   14  10   8   4  15   5   6  12   on-count(bins 7,0,1)=36  on-and(bins 3,4,5)=24   median offset from nearest half-beat +13 ms (n=45)
+  7995     n= 30    1   4   5   7   4   2   5   2   on-count(bins 7,0,1)=7  on-and(bins 3,4,5)=13   median offset from nearest half-beat -16 ms (n=14)
+
+groove phase (ms from the nearest count; strength 0..1 of the beat-frequency component):
+  bhangra  pelvis lowest +149 ms (strength 0.2)   2D stillest -274 ms (strength 0.15)
+  choreo   pelvis lowest +103 ms (strength 0.1)   2D stillest -281 ms (strength 0.07)
+  b822     pelvis lowest -162 ms (strength 0.02)   2D stillest -113 ms (strength 0.09)
+  a106     pelvis lowest  +38 ms (strength 0.07)   2D stillest +137 ms (strength 0.08)
+  7995     pelvis lowest +169 ms (strength 0.03)   2D stillest -107 ms (strength 0.09)
+
+fast counts (>=3 of 4 sixteenth positions with a visible hit AND >=3 with an onset; chance = hits shifted off-grid):
+  bhangra  1/71 counts (chance mean 0.9, 95th pct 3): [8.89]
+  choreo   0/59 counts (chance mean 0.1, 95th pct 1): []
+  b822     0/33 counts (chance mean 0.0, 95th pct 0): []
+  a106     0/20 counts (chance mean 0.0, 95th pct 0): []
+  7995     0/27 counts (chance mean 0.0, 95th pct 0): []
+bhangra  contacts   2  matched   2  median   -40 ms  IQR -44..-35 ms
+choreo   contacts   4  matched   4  median   +14 ms  IQR -40..+38 ms
+b822     contacts   1  matched   1  median  -100 ms  IQR -100..-100 ms
+a106     contacts   1  matched 0
+7995     contacts   1  matched   1  median  -107 ms  IQR -107..-107 ms

@@ -1,6 +1,21 @@
 # Guided step-by-step learning: research, prototype, design (2026-09-24)
 
-**Short answer:** build it. v0 needs no model and no pipeline change. Cut each selected
+> **Round 2 (same day)** adds §6–§11 below: the UI plan with click-through mockups, the
+> not-dancing trim, detail levels, the grid and A/V sync check, sub-beat steps, and an
+> updated plan. Its short answer:
+> - **UI:** follow §6. The mockups are in `tools/research/step_segments/mockups/`.
+> - **Not dancing:** trim the lead-in and outro by default (bhangra's walk-in ends at
+>   4.47 s), and let the learner override it.
+> - **Detail levels:** use Beginner, Intermediate and Advanced, cut as a nested tree. Default
+>   to Beginner, which gives 1–2 counts per step at 62–86% on four lessons.
+> - **The "and" worry is resolved.** The grid is right and the clips are in sync to
+>   within about one video frame.
+> - **Sub-beat:** none of these 5 clips has a 16th-note passage that can be found above
+>   chance. Ship half-beat detail in v0. Add quarter-beat later from audio plus
+>   native-fps video. Only raise the 3D fps (a ×2 cost) if a labelled fast clip set shows
+>   it is needed.
+
+**Short answer (round 1):** build it. v0 needs no model and no pipeline change. Cut each selected
 loop into steps at half-beats where the 3D body stops or changes direction. Group the
 steps into chunks of about 4 counts. Then walk the learner through
 *step → add the next → put it together → loop the chunk → Build up → next chunk*,
@@ -153,15 +168,12 @@ makes merge and split one tap each.
 
 **Findings that matter beyond this feature**
 
-- **Motion can check the count grid.** Of the step ends in each lesson, 54/103
-  (bhangra), 45/72 (choreo), 13/24 (b822) and 9/19 (7995) land on an "and". Energy folded
-  onto one count is stillest at about half a count after the count in choreo, 7995 and
-  b822. The swing is small, only 5–13%. On bhangra this matches the known grid error.
-  On choreo the grid was believed right. So either the style lands on the "and", or
-  `sample_times_s` and the audio are offset. **Worth checking A/V sync on one clip
-  before trusting any beat-aligned motion feature.** These documents were produced by
-  the old librosa grid (`model_report`: `librosa.beat_track`). Re-run them after the Beat
-  This! upgrade. If they still disagree, the body can vote on "try another 1".
+- ~~**Motion can check the count grid.**~~ Of the step ends in each lesson, 54/103
+  (bhangra), 45/72 (choreo), 13/24 (b822) and 9/19 (7995) land on an "and".
+  **Superseded in round 2 (§9).** The grid in these documents is already Beat This!
+  (only the `model_report` label is stale). With hits timed properly, the visible hits
+  sit on the counts *and* the "and"s, 7–28 ms after the grid. So a half-beat cut is
+  normal for these dances. It is not a grid error and not an A/V offset.
 - **15 fps limits resolution below one count.** At 152 BPM, half a count is 0.2 s, which
   is 3 samples. Steps shorter than about 0.25 s are noise at our sample rate. Half-count
   steps are only trustworthy below about 120 BPM unless the pipeline samples at 30 fps.
@@ -323,12 +335,382 @@ webcam pose is weaker than our reference, and back-facing moves (DESIGN §7h cas
 be scored from a front camera. Those steps should say "can't check this one from the
 front".
 
+---
+
+# Round 2
+
+## 6. UI plan
+
+**Principles** (the owner asked for guided mode not to feel crowded; every layout below
+was scored against these):
+
+1. **Progressive disclosure.** Show only the current step and one primary action.
+   Editing (split, merge, rename, nudge, detail level) and step details sit behind one
+   secondary control. They are never on screen by default.
+2. **One primary action per state.** "Got it · next", "Put it together", "Speed up",
+   "Next chunk": each state has exactly one filled button.
+3. **The dancer is the hero.** Video and 3D keep their space. Guided mode takes the
+   least space that works, and mostly *replaces* free-practice controls rather than
+   adding to them.
+4. **No more controls on screen than free practice has today.** The counts are in the
+   table below.
+5. **Generous spacing and touch targets of 44px or more on phone.** The site's larger
+   targets stay where they already are.
+6. **Same look.** Use the `front.css` / `lesson.css` tokens and the existing tiles, count
+   band and speed panel. No new colours, and the accent is still the only accent.
+7. **Hide rather than shrink** when space is short, especially at 844×390.
+
+**Mockups.** Serve `tools/research/step_segments/` (`python3 -m http.server`) and open
+`mockups/index.html` for the layout comparison and density table, then
+`mockups/guided.html` (layout A) at 1440×900, 390×844 and 844×390.
+`guided.html?layout=b` and `?layout=c` are the alternatives. The dashed "Mockup state"
+menu jumps to any of the 20 states. It is review chrome, not part of the design. The
+mockups use real bhangra data from `out/steps.json`: steps at all three levels, the
+lead-in and outro, and a low-confidence cut. The cue text is hand-tidied in the v1
+style.
+
+**Three layouts, scored on density.** The table shows visible controls / text lines in
+the step-card state, counted by `window.density()` in `guided.html`. It was run on the
+live page as well as the mockups.
+
+| | desktop 1440×900 | phone 390×844 | phone 844×390 | covers dancer |
+|---|---|---|---|---|
+| Live free practice today | 37 / 25 | 32 / 19 | 30 / 18 | — |
+| Mockup free practice (baseline) | 28 / 28 | 22 / 18 | 19 / 18 | — |
+| **A. Step card docked under the stages** | **22 / 37 (−6 / +9)** | **16 / 24 (−6 / +6)** | **13 / 23 (−6 / +5)** | no |
+| B. Step list is the guided UI | 33 / 58 (+5 / +30) | 22 / 33 (0 / +15) | 16 / 24 | no, but the stages lose 400 px of width or 130 px of height |
+| C. Steps on the band, floating card | 22 / 35 | 16 / 26 | 13 / 22 | yes: 12% on desktop, 31–48% on phone |
+
+**Pick: A.** It is the calmest layout that still makes the flow obvious. It has the
+fewest controls (tied with C) and never covers the dancer. Its single button says what
+happens next ("Got it · put 1–2 together"). Applied to the live page, guided A has
+fewer controls than free practice today at every size: about 31, 26 and 24. It adds
+5–9 short text lines: the chunk and step, the counts, the cue, and "Suggested from the
+3D". It fits the no-scroll rule in all 20 states at all three sizes. The phone's primary
+button is 88 px or taller.
+
+**How it fits the page:**
+- **Stages.** Unchanged grid. On desktop they are 555 px tall in guided mode (694 in
+  free practice). A phone on its side is unchanged.
+- **Count band.** Follows the current chunk, with a thin step bar underneath: the
+  current step filled, and an unclear cut drawn as a ring. While guided it is a readout,
+  not 8 loop buttons, because the guide sets the loop. That is where most of the −6
+  controls come from.
+- **Step card (the dock).**
+  - Desktop: above the transport, with the chunk, a dot path, the counts, the cue,
+    Steps, Exit and one button.
+  - Phone upright: above the transport, with an 88 px button.
+  - Phone on its side: in the right rail, with the text on the left and the button on
+    the right.
+- **Speed panel and Build up.** The same pills. Steps and "put it together" play at
+  0.5×. "At speed" turns Build up on (0.5× → 1×), shows its meter, and offers Click (the
+  metronome).
+- **Timeline.** Adds a chunk band under the track (current chunk in ink, done ones
+  grey), ticks for the current chunk's steps, and hatched **not-dancing** regions.
+- **More menu.** A new first group: "Learn it in steps", or Resume / Start over.
+
+**Flow.** Step → *Got it · next step* → put 1–2 together → step 3 → put 1–3 together →
+… → chunk at speed with Build up → next chunk → join the chunks. "Put it together"
+loops 4 times, then waits ("Press play to go again"). Nothing is locked.
+
+**Entry and discoverability:**
+- A quiet link in the timeline hint on first visit: "…or learn it in steps".
+- "Learn this loop in steps" when a loop is selected.
+- "Learn it in steps" in More.
+- No pop-up and no auto-start.
+
+**Editing and details (progressive disclosure).** One **Steps** button opens a panel on
+desktop or a sheet on phone. It holds:
+- rename (the learner's words replace the suggested cue)
+- split at the playhead (snaps to a half-beat)
+- merge with next
+- nudge a cut by ± half a count
+- skip
+- the detail level (Beginner / Intermediate / Advanced)
+- the full step list
+- "Include this" for a not-dancing region
+
+Changing the level re-cuts only the steps the learner hasn't edited.
+
+**Progress, resume and exit.** "Exit" returns to free practice, with the current loop set
+to the step or chunk you were on. The More menu and the lesson then offer "Resume at step
+4 of chunk 2". Progress is per browser, next to the authored counts.
+
+**Empty and uncertain states:**
+- *Low-confidence cut:* "This split is a guess — the move doesn't stop here."
+- *Uncertain body part:* uses the §4 uncertainty language, and the cue skips that part.
+- *No cue:* shows the counts only, plus "Name this step".
+- *Not dancing:* a hatched region, "Dance starts at 0:04.5", and "Include this".
+- *No steps in this loop:* "No clear steps here. Try the whole loop, or a longer one."
+- *Advanced with no fast evidence:* "No quarter-count hits found in this chunk."
+
+**Not verified:** real playback, real touch on devices, and the performance of the
+extra timeline layers. The mockup stages are drawn placeholders.
+
+## 7. Dancing vs not dancing
+
+**What it catches.** People walk back from the phone, stand, and set up before the music
+starts (bhangra's first 4.5 s). They walk off at the end, or the clip runs past the
+music. Guided mode must not make "walk to your spot" step 1. Free-practice loops
+shouldn't default to it either.
+
+**Signals, per count** (`idle_counts()` in `segment.py`). Every signal is relative to
+*this* dance's own level, because a fixed threshold didn't transfer between clips:
+
+| signal | measured as | used? |
+|---|---|---|
+| limb motion | body-relative speed of the wrists, feet and head, divided by the dance's 75th percentile | yes |
+| travel | pelvis speed, m/s | yes. Walking is limb < 0.5 with pelvis > 0.6 m/s |
+| stillness | limb < 0.35 with pelvis < 0.6 m/s | yes |
+| music present | audio RMS divided by its median, < 0.2 means no music | yes |
+| in frame | share of samples with every limb tip not `absent` | yes, < 0.5 means not in frame |
+| beat lock | share of limb-energy variance at the beat or half-beat frequency, over ±2 counts | **measured, not used.** It separates walking from dancing on bhangra (median 0.26 dancing vs 0.08 idle) but not on the others (7995: 0.11 vs 0.26) |
+
+**Rules.**
+- The dance starts at the first **two** dancing counts in a row, and ends at the last two.
+- An edge is trimmed on motion alone (walking or still) only when there are 2 or more
+  such counts. b822 opens with a travelling side step that one count of "walking"
+  would have cut.
+- "No music" and "not in frame" trim on their own.
+- Inside the dance, only a run of 4 or more idle counts is a *pause*. Anything shorter
+  is a hold, and holds are choreography.
+
+**Results** (checked against frames in the viewer):
+
+| lesson | detected | verdict |
+|---|---|---|
+| bhangra | lead-in 0–4.47 s (not in frame, walking, still), outro 46.8–48.0 s (walking, no music) | **Right.** He walks back from the phone until about 3.8 s and starts on the next count. We cut at most one count late. The outro is the walk-off. |
+| choreo | outro 34.18–35.9 s (still, no music) | **Right to within a count.** The final pose is held from about 33.6 s, and the last "step" is hitting it. |
+| b822 | none (after the 2-count guard) | **Right.** Before the guard, 0–0.69 s was a false "walking" trim. |
+| a106 | outro 12.67–13.2 s (no music) | right |
+| 7995 | none | right. The mid-dance "walking" counts at 5.5–5.9 s are a travelling move and are correctly kept |
+
+There were no mid-dance pauses in these clips. The 2-count stillness at bhangra 18.4–19.0 s
+is correctly treated as a hold.
+
+**How it's shown** (mockups in §6):
+- The timeline greys the idle region, labelled "Not dancing".
+- The lesson says "Dance starts at 0:04.5" once, in the count band's caption.
+- Default loops, guided mode and "play all" start at the dance start.
+- Override: tapping the grey region offers **"Include this"**, which is stored like an
+  authored count edit and wins from then on. There is also a "Start the dance here" at
+  the playhead.
+- We never delete or hide the video. We only change where the default loops start.
+
+## 8. Step length: detail levels
+
+**Round 1's weakness:** one fixed granularity, with 72 steps on choreo and 36% of them
+half a count. That is too fine for a beginner and too coarse for someone who wants
+the hits.
+
+**What changed** (`analyse()` in `segment.py`):
+1. **Candidates are quarter-beats.** Each quarter-beat's metrical position is recorded:
+   count 1 or 5, other counts, "and", or "e"/"a". Its evidence is the best stop or
+   direction-change cue within ±¼ count, and an audio percussive accent within ±40 ms
+   multiplies it by up to ×1.3. The accent strengthens a cut the motion already supports.
+   It never makes a cut on its own.
+2. **Cuts are nested, coarse to fine.**
+   - Beginner cuts first, on counts only.
+   - Intermediate re-cuts only *inside* beginner steps, on counts and "and"s.
+   - Advanced re-cuts inside intermediate steps and may add "e"/"a", but only where
+     §10's fast test passes.
+
+   So the tree is phrase → chunk → step → sub-step, and switching the detail level
+   never moves a coarser cut.
+3. **The cost of a cut is set by the dance itself.** It is a quantile of that level's
+   candidate scores: 0.65 for beginner, 0.50 for intermediate, 0.40 for advanced. With a
+   fixed cost, every count scored "some stop", and every level cut on every count.
+4. **Length targets:**
+   - Beginner: 1–3 counts. It prefers 2 counts at 110 BPM and above, and 1 count below.
+   - Intermediate: ½–2 counts, preferring 1.
+   - Advanced: ¼–1 count, preferring ½.
+   - Minimum lengths are 0.30, 0.25 and 0.12 s.
+5. **One continuous gesture stays one step.** If nothing inside a parent step beats the
+   cost, the parent is kept whole at the finer level. On choreo, 34 of 43 beginner steps
+   stay whole at intermediate. On bhangra it's 39 of 48.
+
+**Measured.** This is not ground truth, which would need a teacher-labelled set. "In
+range" is the share of steps inside the teacher range for that level: 1–2 counts for
+beginner, ½–1 for intermediate, ¼–1 for advanced.
+
+| lesson (BPM) | beginner: steps · median · in range | intermediate | advanced | round 1 (one level) |
+|---|---|---|---|---|
+| bhangra (95) | 48 · 1 count · 83% | 57 · 1 · 75% | 123 · ½ · 100% | 103 steps, 64% half-count |
+| choreo (104) | 43 · 1 · 86% | 58 · 1 · 83% | 110 · ½ · 100% | 72 steps, 36% half-count |
+| b822 (152) | 16 · 2 · 62% | 32 · 1 · 81% | 68 · ½ · 100% | 24 |
+| a106 (113) | 9 · 3 · 33% | 20 · 1 · 70% | 44 · ½ · 100% | 33 |
+| 7995 (152) | 13 · 2 · 62% | 26 · 1 · 69% | 59 · ½ · 100% | 19 |
+
+Beginner is now a sensible default on four of five lessons. a106 is the outlier: it has
+constant motion with few clear stops on counts, so beginner steps are mostly 3 counts.
+There the learner should step down to Intermediate, and the UI offers that when a step
+is longer than 2 counts. Advanced is always "in range" because its limits force it.
+Whether its half-count cuts are *good* cuts still needs the teacher-labelled set (§11).
+The full nested tables are in `out/steps.md`, and the viewer has a level picker.
+
+**Recommended defaults:**
+- Beginner for everyone the first time.
+- Remember the level the learner picks, per browser.
+- Offer "More detail" on any step longer than 2 counts, and "Fewer steps" when a chunk
+  has more than 6 steps.
+
+## 9. Count grid and A/V sync (re-check of the "cuts land on the and" finding)
+
+- **The grid was already Beat This!** I ran the production `propose_grid`
+  (`packages/beat-detect`, `audio.py`) on each video. Count 1 and tempo match the live
+  documents to the millisecond on all five. Only the `model_report` still says
+  `librosa.beat_track`. That label is stale and worth fixing separately. So the round-1
+  finding was already on the new grid.
+- **The hit detector was late, not the grid.** At native fps (`video2d.py`, 30 or 60 fps),
+  frame differences inside the dancer's box are strongly periodic. Round 2 first timed
+  a "hit" at the energy minimum *after* braking, and that sat a steady ⅛ count late on
+  every clip. The body is already still by then. Timed at the moment of hardest
+  braking, the hits line up with the grid:
+
+| lesson | hits near a count / near an "and" | median offset from nearest half-beat | 3D vs video frames |
+|---|---|---|---|
+| bhangra | 60 / 46 | +28 ms | −25 ms |
+| choreo | 41 / 32 | +15 ms | −45 ms |
+| b822 | 9 / 15 | +7 ms | −20 ms |
+| a106 | 36 / 24 | +13 ms | −50 ms |
+| 7995 | 7 / 13 | −16 ms | −30 ms |
+
+- **Reading it:**
+  - Visible hits sit on the counts and the "and"s within one video frame (33 ms).
+    The median lag of +7 to +28 ms includes the dancer's own timing, so **there is no
+    A/V offset worth correcting.**
+  - These are half-beat dances, so about half of all cuts landing on an "and" is
+    correct. It is not an error.
+  - The 3D timeline leads the video frames by 20–50 ms on all five clips (the
+    correlation of the two energies peaks there). That is less than one 15 fps sample,
+    but the sign is consistent. It could be a real one-frame offset in
+    `sample_times_s`, or an artefact of comparing a central difference with a frame
+    difference. **Low-priority check:** it doesn't move any cut, which snaps to a
+    half-beat with ±¼ count slop.
+- **What didn't work:**
+  - Correlating the whole audio onset envelope with visible hits gives weak,
+    inconsistent lags (r ≤ 0.17), because onsets are far denser than hits.
+  - Hand contacts (claps) gave only 1–4 events per clip.
+  - A beat-frequency "groove phase" of the pelvis height was too weak to use
+    (strength ≤ 0.2).
+
+  For a real sync check, film one clip with a slate clap.
+
+## 10. Sub-beat steps (fast, pro choreography)
+
+**How teachers do it.**
+- **16ths are counted "1-e-&-a"** ([Songtive](https://www.songtive.com/blog/how-do-you-count-rhythms-using-1-e-a-2-e-a/),
+  [LibreTexts](https://human.libretexts.org/Courses/Sierra_College/Equipping_the_Musical_Ear/07%3A_Beat_Divisions/7.02%3A_Simple_Meter_Beat_Divisions/7.2.02%3A_Sixteenth_Notes)).
+  Round 1 found the same advice for detailed choreography
+  ([CLI Studios](https://www.clistudios.com/dance-blog/training/how-to-pick-up-choreography/)).
+  For a syncopated passage, dancers either keep "1-e-&-a" running and do only the hits,
+  or say only the syllables that have a sound.
+- **Hit the drum part, one body part at a time.** In popping and animation, teachers
+  map the drum kit to the body: kicks to chest hits, snares to arm ticks, hi-hats to
+  finger twitches ([MyGrooveGuide](https://www.mygrooveguide.com/dance-info/popping/what-is-popping)).
+  The learning order is: on the beat first, then specific sounds
+  ([SF Conservatory](https://sfconservatoryofdance.org/blog/how-to-learn-hip-hop-dance/)).
+  Tutting doesn't always follow the beat, but hits land on accents
+  ([About World](https://www.aboutworld.us/what-is-tutting-dance/)).
+- **What this means for the product:**
+  - A sub-beat step is taught as *a rhythm first*: say "1-e-&-a", tap it, then add the
+    body part.
+  - Keep the speed at 0.5× or below. At 1×, four hits in one count go past too fast
+    to see.
+  - The step card shows the *rhythm* ("hits on 1, e, &, a") and the body part leading
+    it. Our 3D can't describe the shapes at this speed, and the card must say so.
+
+**What it takes technically:**
+
+| source | resolution | cost | what it gives |
+|---|---|---|---|
+| 3D at 15 fps (today) | 67 ms per sample. A 16th at 150 BPM is 100 ms, about 1.5 samples | none | a sub-beat move is 1–2 samples. Timing below ½ count is unreliable and there are no shapes |
+| **3D at 30 fps** | 33 ms | about **×2** GPU time and cost | see below |
+| 3D at 60 fps | 17 ms | about ×4 | overkill for most clips |
+| 3D only in the fast windows | 33 or 17 ms where needed | about +10% if 10% of the clip is fast | the GLB exporter derives fps from uniform `sample_times_s` spacing (`modal_app.py`), so non-uniform samples need a sidecar or a contract change |
+| **2D frame differences at native fps** (`video2d.py`) | 33 ms (30 fps clips) or 17 ms (a106 is 60 fps) | CPU, seconds, no model | *when* a hit happens, not *which* limb. Noisy in the dark (a106) |
+| 2D keypoints (RTMO) at native fps | 17–33 ms | RTMO is small next to SAM 3D Body, but not profiled | when a hit happens *and* which limb. The best next step |
+| Audio percussive onsets (`audio.py`, librosa on the percussive part, 5.8 ms hop) | about 6 ms | CPU, free | where the music has 16ths. Onsets are dense (3–6 per second), so an onset alone proves nothing |
+
+The 3D fps is set by `run_clip(fps=15.0)` in `services/motion-api/modal_app.py` on an
+L40S at $1.95/h. From the five lessons' `measured_performance`: cost is about
+$0.02 + $0.000235 per sample. That is $0.07–0.19 per lesson and 1.2–4 minutes of GPU
+at 15 fps. **At 30 fps** that becomes about $0.12–0.36 and 2.5–8 minutes, and the
+MotionResult and GLBs double in size (choreo would go from 13 MB to about 26 MB).
+
+**The fused test** (`fast_counts()`, reported by `sync.py`). A count is "fast" when at
+least 3 of its four 16th positions have a visible hit within ±1/16 count *and* at least
+3 have an audio onset, with at least one hit on an "e" or "a". The chance level comes
+from re-running the test with the hits shifted off the grid (200 shuffles):
+
+| lesson | fast counts | chance (mean / 95th pct) | verdict |
+|---|---|---|---|
+| bhangra | 1 / 71 | 0.9 / 3 | at chance |
+| choreo | 0 / 59 | 0.1 / 1 | none |
+| b822 | 0 / 33 | 0 / 0 | none |
+| a106 | 0 / 20 | 0 / 0 | none. But its 6.3–7.4 s passage *looks* like a quick arm sequence with a new pose each 16th in the frame sheet. The dark footage makes the frame differences too noisy to confirm it |
+| 7995 | 0 / 27 | 0 / 0 | none |
+
+A first, looser test counted a single hit plus a single onset near an "e" or "a". It
+"found" 41 sub-beat points on bhangra. That was exactly chance: 33% of e/a positions
+have a hit and 56% have an onset, and 0.33 × 0.56 = the 18% observed. So the strict
+test is the one to keep.
+
+**Honest conclusion:** these five clips are half-beat choreography. The owner's case
+(four hits in one count) isn't in our test set, so the fused method is **unvalidated,
+not disproven**. Before building it, collect 5–10 fast clips (popping, tutting,
+animation, footwork) and label their hits by hand at 0.25× speed.
+
+**Recommendation:**
+- **Adaptive resolution.**
+  - Half-beat detail everywhere the 3D supports it (v0).
+  - Quarter-beat only in counts that pass the fused test, cut at the 2D hit times and
+    labelled "fast — follow the video" (§8's `note`).
+  - The 3D never describes a sub-beat shape.
+- **Upgrade the hit source before raising fps.** RTMO keypoints at native fps give
+  hit timing *and* the limb. It is cheap compared with the 3D pass and needs no contract
+  change: it could be a sidecar like `detections.json`.
+- **Raise the 3D to 30 fps only if** the labelled fast set shows learners need 3D
+  *shapes* at sub-beat speed, not just timing. Even then, prefer a per-lesson opt-in
+  ("Rebuild in more detail", about ×2 cost and wait) or fast windows over a global
+  change.
+
+## 11. Updated phased plan
+
+| phase | scope | effort | sub-beat |
+|---|---|---|---|
+| **v0** | Guided mode UI per §6. Segmenter in TS (FK + cues + nested DP + chunks), about 450 lines plus a self-check. Not-dancing trim with override. Beginner/Intermediate/Advanced detail. Edits (split/merge/rename/nudge/level), progress and resume, analytics. All client-side on the existing MotionResult. The audio accent weight needs the onset envelope: either compute it client-side with the Web Audio API or skip it in v0 (it moves few cuts). | **≈ 3–3.5 weeks.** Algorithm 4–5 days; UI 8–10 days (step card, list, nested timeline, count band, three layouts); editing and storage 3 days; not-dancing 1–2 days; QA on 5 lessons, fixtures and three viewports 2–3 days | half-beat everywhere. Advanced = ½ count |
+| **v0.1** | A teacher-labelled set: 10 clips, including 5 fast ones, cut at all three levels by a dance teacher. Tune the quantiles and length targets against it. Fix the stale `model_report` label. Check the 3D↔video 20–50 ms lead. | 1 week, plus the teacher's time | produces the data v1 needs |
+| **v1** | Claude cues (round 1 §3). Pipeline sidecar with audio onsets and native-fps hits (RTMO keypoints at native fps if profiling says it's cheap; else frame differences). Quarter-beat sub-steps where the fused test passes, shown as rhythm-first cards. | **≈ 2–2.5 weeks** | quarter-beat via audio + 2D, timing only |
+| **v1.x (conditional)** | Only if v0.1's fast set shows the 3D shapes are needed: a 30 fps reconstruction as a per-lesson opt-in or for detected fast windows. Needs the GLB exporter or contract to accept windows. | 1–2 weeks, plus about ×2 GPU per opted-in lesson | 3D shapes at sub-beat |
+| **v2** | Webcam pose feedback, on-device only (round 1 §5) | 4–6 weeks | — |
+
+**Risks:**
+- **Default granularity is judged by eye, not labels.** v0.1's teacher set is the fix.
+  Until then, the level control and one-tap merge/split carry it.
+- **Direction text is noisy.** Keep it secondary on the step card (the mockups show the
+  counts and the video first), and let cues arrive only in v1 with the grounding
+  validator.
+- **Not-dancing false trims** (b822 before the guard). A trim only changes where default
+  loops start, never hides video, and "Include this" is one tap.
+- **Dark or low-contrast clips** (a106) break frame-difference hits. RTMO keypoints are
+  more robust.
+- **UI weight.** Guided mode adds a list, a card and a nested timeline to a page that
+  must never scroll. §6's layout keeps it inside the existing regions. It needs a
+  real-device pass on 390×844 and 844×390 before build.
+- **Scope creep into sub-beat** before the labelled fast set exists. Hold v1's
+  quarter-beat until v0.1 data says it works.
+
 ## Files
 
-- `tools/research/step_segments/segment.py`: the segmenter (`--check` runs the self-check)
-- `tools/research/step_segments/fetch.sh`: downloads the 5 public MotionResults into `.cache/` (ignored)
-- `tools/research/step_segments/out/steps.md`: the per-lesson tables (step, time, counts, leads, direction, whole body, quality, cut clarity, unsure)
+- `tools/research/step_segments/segment.py`: the segmenter: kinematics, not-dancing, nested detail levels, chunks (`--check` runs the self-check)
+- `tools/research/step_segments/fetch.sh`: downloads the 5 public MotionResults (and the videos, with `--video`) into `.cache/` (ignored)
+- `tools/research/step_segments/audio.py`: the production Beat This! grid plus percussive onsets, run with `uv run --project ../../../packages/beat-detect/python python audio.py`
+- `tools/research/step_segments/video2d.py`: native-fps frame-difference energy in the dancer's box (ffmpeg + numpy)
+- `tools/research/step_segments/sync.py`: the grid, sync and fast-passage measurements in §9–§10. `claps.py` is the hand-contact attempt
+- `tools/research/step_segments/out/steps.md`: per-lesson tables: level stats, then beginner steps with the intermediate and advanced cuts nested
 - `tools/research/step_segments/out/steps.json`: the same data, used by the viewer and the cue prompt
-- `tools/research/step_segments/out/viewer.html`: video, timeline and half-beat frame sheet for checking cuts (serve `out/` over http, since the video comes from the live API)
+- `tools/research/step_segments/out/viewer.html`: video, timeline (not-dancing, chunks, cuts, onsets, hits), a level picker, and frame sheets down to 16ths. Serve the `step_segments/` folder and open `out/viewer.html`, which uses `.cache/` videos
+- `tools/research/step_segments/mockups/`: round-2 high-fidelity guided-mode mockups (§6)
 - `tools/research/step_segments/cue_prompt.py` and `out/cue_request.json`: the v1 prompt, schema, grounding validator, and the request we would send
 - `tools/research/step_segments/mockup.html`: wireframes for the guided mode

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Guided steps mockups</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&display=swap">
+<link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=switzer@400,500,600,700&display=swap">
+<style>
+:root{--paper:#f2efe9;--sunk:#e7e1d6;--line:#d8d0c3;--stage:#1c1917;--ink:#221e1c;--mut:#6b635c;--faint:#9a9188;--acc:#F2891D}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 "Switzer",system-ui,sans-serif;font-feature-settings:"tnum" 1}
+main{max-width:980px;margin:0 auto;padding:32px 16px 64px}
+h1{font:800 clamp(1.8rem,4vw,2.6rem)/1.05 "Bricolage Grotesque",sans-serif;letter-spacing:-.02em;margin:0 0 8px}
+h2{font:700 1.4rem/1.2 "Bricolage Grotesque",sans-serif;letter-spacing:-.01em;margin:40px 0 10px}
+h3{font-size:1.05rem;margin:0 0 6px}
+p,li{max-width:68ch}
+.mut{color:var(--mut)}
+a{color:var(--ink);text-underline-offset:3px}
+.links{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.links a{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:999px;background:var(--sunk);font-weight:600;text-decoration:none}
+.links a.pri{background:var(--acc);color:var(--stage)}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.opt{border:1px solid var(--line);border-radius:14px;padding:14px;background:#f7f5f1}
+.opt.pick{border:2px solid var(--ink)}
+.wf{display:grid;gap:3px;height:150px;margin-bottom:10px;padding:6px;border-radius:10px;background:var(--paper);border:1px solid var(--line)}
+.wf i{display:block;border-radius:4px;background:var(--sunk)}
+.wf .s{background:var(--stage)}
+.wf .c{background:var(--acc);opacity:.85}
+.wf .t{background:var(--line)}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.9375rem}
+td,th{text-align:left;vertical-align:top;padding:6px 8px;border-bottom:1px solid var(--line)}
+th{font-weight:600;color:var(--mut)}
+td.n{white-space:nowrap}
+code{font-size:.875em;background:var(--sunk);padding:1px 5px;border-radius:5px}
+.states{columns:2 260px;gap:24px;padding-left:18px}
+.states li{break-inside:avoid;margin-bottom:4px}
+</style>
+</head>
+<body>
+<main>
+<h1>Learn it in steps: UI mockups</h1>
+<p class="mut">Research only, 2026-09-24. Round 2 of <code>docs/research/step-by-step-learning.md</code>. It uses real step data from lesson <code>bhangra</code> (job_5716…): chunks 1–3 at all three detail levels, the lead-in and the outro, from <code>../out/steps.json</code>. The lesson page's own CSS and tokens are copied in. The stages are placeholders (a drawn figure), not playback.</p>
+
+<div class="links">
+  <a class="pri" href="guided.html#free">Open the mockup (A)</a>
+  <a href="guided.html#step">Step card</a>
+  <a href="guided.html#comb">Put it together</a>
+  <a href="guided.html#speed">At speed</a>
+  <a href="guided.html#steps">Steps panel</a>
+  <a href="guided.html?layout=b#step">Variant B</a>
+  <a href="guided.html?layout=c#step">Variant C</a>
+</div>
+<p class="mut">It is one responsive file. View it at 1440×900 (desktop), 390×844 (phone upright) and 844×390 (phone on its side). The dashed "Mockup state" menu jumps to any of the 20 states. It is review chrome, not part of the design. Everything else is clickable. Space plays. On desktop, N goes to the next step and Shift N goes back.</p>
+
+<h2>Principles (owner note, applied)</h2>
+<ol>
+  <li><b>Progressive disclosure.</b> The page shows the current step and one action. Rename, split, merge, the ½-count nudge, skip, the detail level and "Include this" all live behind one <b>Steps</b> button (a panel on desktop, the sheet on a phone).</li>
+  <li><b>One primary action per state:</b> "Got it · …". There is no second button. Watch again is the Play button, because the loop is exactly this step. Put it together waits after 4 loops and says "Press play to go again".</li>
+  <li><b>The dancer is the hero.</b> Nothing is drawn over the stages except the count band, which is already there. The guided card is the smallest dock that works.</li>
+  <li><b>No more controls than free practice.</b> While guided, the count band is a readout rather than 8 loop buttons, because the guide sets the loop. With the empty timeline readout and the single action, guided A shows 6 fewer controls than free practice at every size (table below).</li>
+  <li><b>Generous spacing and big targets.</b> On a phone the one action is 88px tall. Every other control in the card is at least 44px, and the existing transport keeps its sizes.</li>
+  <li><b>Tokens from lesson.css.</b> The mockup uses the same tokens (paper, paper-sunk, line, stage, ink, one accent), Bricolage and Switzer, and the same pills, chips and panels.</li>
+  <li><b>Hide rather than shrink.</b> At 844×390 the path is reduced to dots, the suggestion's second sentence and the exit label are hidden, and the clock goes. Type sizes stay the same.</li>
+</ol>
+
+<h2>Three layouts, scored on density</h2>
+<div class="opts">
+  <div class="opt pick">
+    <div class="wf" style="grid-template-rows:10px 1fr 12px 26px 10px 14px"><i class="t"></i><div style="display:grid;grid-template-columns:1fr 1fr;gap:3px"><i class="s"></i><i class="s"></i></div><i class="t" style="width:50%;justify-self:center"></i><i class="c" style="opacity:.35"></i><i class="t"></i><i class="t"></i></div>
+    <h3>A. A step card docked under the stages (picked)</h3>
+    <p>One slim dock sits between the count band and the transport. It holds the chunk, a dot path, the counts, the cue and one button. On a phone upright it sits above the transport. On a phone on its side it fills the empty part of the right-hand rail.</p>
+  </div>
+  <div class="opt">
+    <div class="wf" style="grid-template-rows:10px 1fr 10px 14px"><i class="t"></i><div style="display:grid;grid-template-columns:1fr 1fr 34%;gap:3px"><i class="s"></i><i class="s"></i><i class="c" style="opacity:.35"></i></div><i class="t"></i><i class="t"></i></div>
+    <h3>B. The step list is the guided UI</h3>
+    <p>A rail on desktop, or half the screen on a phone, with the list always open. Every step is visible, which suits editing. It is the busiest option: +11 controls and +21 lines over A on desktop. The stages lose 400px of width on desktop and 130px of height on a phone.</p>
+  </div>
+  <div class="opt">
+    <div class="wf" style="grid-template-rows:10px 1fr 16px 10px 14px"><i class="t"></i><div style="position:relative;display:grid;grid-template-columns:1fr 1fr;gap:3px"><i class="s"></i><i class="s"></i><i class="c" style="position:absolute;left:30%;bottom:6px;width:40%;height:30px;opacity:.6"></i></div><i class="c" style="opacity:.3"></i><i class="t"></i><i class="t"></i></div>
+    <h3>C. Steps on the band, with a floating card</h3>
+    <p>It has the same controls as A and the stages stay full size. But the card sits on the dancer. It covers 12% of the stages on desktop, 31–36% on a phone on its side and 34–48% on a phone upright, usually over the feet and legs.</p>
+  </div>
+</div>
+
+<h3 style="margin-top:18px">Density: visible controls / text lines, step card state</h3>
+<p class="mut">The counting script is <code>window.density()</code> in guided.html. It counts visible button, link, input, select, <code>role=button</code> and <code>role=slider</code> elements, plus distinct text line boxes. The live row ran the same script on stepwise.sreshta-talluri.workers.dev (lesson job_345b…, default state, no loop). The live page has about 9–11 more controls than the mockup's copy of free practice, mostly the timeline's section-start buttons and the credit link. So compare the change within the mockup rows, then apply it to the live row.</p>
+<div class="tw"><table>
+  <tr><th></th><th>Desktop 1440×900</th><th>Phone upright 390×844</th><th>Phone on its side 844×390</th></tr>
+  <tr><td>Live free practice</td><td class="n">37 / 25</td><td class="n">32 / 19</td><td class="n">30 / 18</td></tr>
+  <tr><td>Mockup free practice</td><td class="n">28 / 28</td><td class="n">22 / 18</td><td class="n">19 / 18</td></tr>
+  <tr><td><b>A, docked card</b></td><td class="n"><b>22 / 37</b> (−6 / +9)</td><td class="n"><b>16 / 24</b> (−6 / +6)</td><td class="n"><b>13 / 23</b> (−6 / +5)</td></tr>
+  <tr><td>B, list as the UI</td><td class="n">33 / 58 (+5 / +30)</td><td class="n">22 / 33 (0 / +15)</td><td class="n">16 / 24 (−3 / +6)</td></tr>
+  <tr><td>C, floating card</td><td class="n">22 / 35, covers 12%</td><td class="n">16 / 26, covers 37%</td><td class="n">13 / 22, covers 31%</td></tr>
+  <tr><td>Stage size (A / B / C)</td><td>1440×555 / 1040×694 / 1440×694</td><td>390×436 / 390×305 / 390×686</td><td>540×390 for all three</td></tr>
+</table></div>
+<p>A applied to the live page: about <b>31 / 34</b>, <b>26 / 25</b> and <b>24 / 23</b>. That is fewer controls than today at every size. It adds 5–9 lines of text: the chunk and step, the counts, the cue, and "Suggested from the 3D". Other states are similar. On desktop, A has 22 controls in every state and 36–38 lines. At speed adds the Build up meter, and a low-confidence step adds one sentence.</p>
+
+<h3>Why A</h3>
+<ul>
+  <li><b>The calmest option that still makes the flow obvious.</b> It has the fewest controls, tied with C, and never covers the dancer. It shows one button that says what happens next ("Got it · put 1–2 together").</li>
+  <li><b>It fits the no-scroll rule at every size.</b> A JS check across all 20 states at all three sizes found <code>scrollHeight ≤ innerHeight</code>, <code>scrollWidth ≤ innerWidth</code>, no dock content clipped, and the phone's primary button 88px or taller.</li>
+  <li><b>B and C still add something.</b> B's list is the Steps panel, one tap away. C's nesting is on the count band (a step bar under the counts) and the timeline (a chunk band and step ticks).</li>
+</ul>
+
+<h2>How it fits the page</h2>
+<div class="tw"><table>
+  <tr><th></th><th>Desktop</th><th>Phone upright</th><th>Phone on its side</th></tr>
+  <tr><td>Stages</td><td>The same grid, 555px tall (694px in free practice)</td><td>Video with the 3D inset, about 400–450px tall</td><td>Unchanged, 540×390</td></tr>
+  <tr><td>Count band</td><td>Follows the current chunk. A step bar underneath shows the current step filled and an unclear cut as a ring. It is a readout while guided</td><td>Same, over the foot of the stage</td><td>Same</td></tr>
+  <tr><td>Step card</td><td>A dock above the transport: chunk and path, counts, cue, Steps, Exit, one button</td><td>Docked above the transport, with an 88px button</td><td>In the rail: dots, Steps and ×, text on the left, one 88px button on the right</td></tr>
+  <tr><td>Speed and Build up</td><td>The same pills. Steps and put-together play at 0.5×. At speed turns Build up on (0.5× to 1×) and shows the meter</td><td>Same</td><td>Same, without the clock</td></tr>
+  <tr><td>Timeline</td><td>Adds a chunk band under the track (current in ink, done in grey), step ticks for the current chunk, and hatched not-dancing regions. The readout row is empty</td><td>Same layers. The readout row is hidden</td><td>Same</td></tr>
+  <tr><td>More</td><td>A new first group: "Learn it in steps", or Resume and Start over</td><td>Same, in the sheet</td><td>Same</td></tr>
+</table></div>
+
+<h2>States</h2>
+<ol class="states">
+  <li><a href="guided.html#free">Free practice, first visit: a quiet nudge in the timeline hint</a></li>
+  <li><a href="guided.html#loop">A loop selected: "Learn this loop in steps"</a></li>
+  <li><a href="guided.html#more">Entry from More</a></li>
+  <li><a href="guided.html#intro">Entry card</a></li>
+  <li><a href="guided.html#step">Step card</a></li>
+  <li><a href="guided.html#comb">Put it together</a></li>
+  <li><a href="guided.html#speed">Chunk at speed: Build up and Click</a></li>
+  <li><a href="guided.html#next">The next chunk</a></li>
+  <li><a href="guided.html#uncertain">An unsure body part</a></li>
+  <li><a href="guided.html#nocue">No cue</a></li>
+  <li><a href="guided.html#join">Join chunks 1–2</a></li>
+  <li><a href="guided.html#low">A low-confidence cut</a></li>
+  <li><a href="guided.html#steps">Steps panel: change this step, detail, list</a></li>
+  <li><a href="guided.html#level">Intermediate re-cut, with edits kept</a></li>
+  <li><a href="guided.html#advanced">Advanced</a></li>
+  <li><a href="guided.html#idle">The lead-in included</a></li>
+  <li><a href="guided.html#empty">Empty: no steps in this loop</a></li>
+  <li><a href="guided.html#resume">After exit: Resume</a></li>
+  <li><a href="guided.html#resume-more">Resume from More</a></li>
+  <li><a href="guided.html#finished">Whole loop learned</a></li>
+</ol>
+
+<h2>Data: what is real, what is assumed</h2>
+<ul>
+  <li><b>Real</b> (<code>steps.json</code>, bhangra): step times and counts at all three <code>levels</code>, with chunks 1–3 having 4/4/5 steps at Beginner (the default), 5/5/6 at Intermediate and 10/12/14 at Advanced. Also real: <code>end_cue</code> (chunk 3, step 5 is 0.41, so its cut is shown as a guess), <code>dance_span</code> and <code>idle</code> (a lead-in to 0:04.5 because the dancer is "not in frame, still, walking", and an outro from 0:46.8), and <code>fast_quarters</code> (counts 41 and 43, so Advanced says there are no quarter-count hits in these chunks).</li>
+  <li><b>Written for the mockup:</b> the cue text. It is taken from each step's <code>moves</code> in the v1 style (8 words at most, the dancer's side). Beginner cues were tidied by hand. The auto text at the other levels is rougher.</li>
+  <li><b>Invented to show a state:</b> an unsure <code>left arm</code> (chunk 2, step 2) and a cue the grounding check dropped (chunk 2, step 4). These chunks have neither.</li>
+</ul>
+</main>
+</body>
+</html>
