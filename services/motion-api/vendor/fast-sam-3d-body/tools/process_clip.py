@@ -324,7 +324,20 @@ def process_clip(
     # Moved here at integration. It does not modify `per_frame`: the raw
     # estimates stay in the npz next to the smoothed ones, because a smoothed
     # value with honest flags is only checkable against the thing it smoothed.
-    from tools.smoothing import smooth_clip_result
+    from tools.smoothing import repair_clip_orientation, smooth_clip_result
+
+    # Front/back flips that last a frame or two (tools/smoothing.py,
+    # "Orientation detours"). The one temporal fix that edits `per_frame`
+    # itself, because the GLB export and the MotionResult both read the raw
+    # skel_state from there; the estimate survives as `skel_state_raw`.
+    flips = repair_clip_orientation({
+        "per_frame": per_frame,
+        "sample_times_s": np.array(sample_times_s, dtype=np.float64),
+        "confident_track_ids": sorted(confident_track_ids),
+    })
+    for tid, idx in flips.items():
+        if idx:
+            print(f"  orientation flips, track {tid}: repaired samples {idx}")
 
     smoothed = smooth_clip_result({
         "per_frame": per_frame,

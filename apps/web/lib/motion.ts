@@ -3,7 +3,7 @@
  * is unit-testable and is tested in motion.test.ts.
  */
 import type { CropRect, MotionResult, Visibility } from "../../../packages/motion-contract/src/ts/generated/motion-result";
-import { jointWorldPosition } from "./footContact";
+import { jointWorldPosition, qmul, qrot } from "./footContact";
 import { FOOT_JOINTS, REGIONS, lookupJoint } from "./regions";
 
 export type { CropRect, MotionResult, Visibility };
@@ -476,27 +476,267 @@ export function followStep(
   return [subject[0] + trail[0] * c, subject[1] + trail[1] * c, subject[2] + trail[2] * c];
 }
 
-/**
- * How far off-centre, as a fraction of the pane's horizontal half-frame, the follow
- * lets the body's centre sit. `maxLagFactor` is in metres of deadzone, blind to the
- * pane: on a narrow one (Side in a tile, the phone inset) its 0.56 m put the body's
- * edge at the pane edge — job_5716's walk back toward the camera at ~4.8 s in Side,
- * where depth is screen-horizontal. 0.4 is at least the deadzone on any pane wider
- * than ~0.9 m, so ordinary following looks exactly as before; only a sprint's
- * trail on a narrow pane is cut, and a ~0.4 m half-width dancer stays inside.
- */
-export const MAX_SCREEN_OFFSET = 0.4;
+/* ------------------------------------------------------- steady view path */
 
 /**
- * Clamp the aim's trail along the screen's horizontal (`right`, unit length) to
- * `maxOffset` metres. Only that one component moves, so the other axes of the
- * follow — and anything already inside the limit — are untouched.
+ * The 3D views' camera path, planned once for the whole clip. The motion is known in
+ * advance, so the camera does not have to REACT to the dancer: it is planned with
+ * zero-lag (non-causal) smoothing, the way replays and offline virtual cinematography
+ * steady a follow shot, instead of a deadzone + damper guessing from the past.
+ *
+ * Why the reactive follow shook (job_dc32a0f0, a 44.7 s TikTok, on a phone): the root's
+ * depth is monocular and noisy — 0.14 m sd around its own 1 s trend — and in Side,
+ * depth is screen-horizontal. The deadzone passed that noise through every time it
+ * crossed 0.35 m, the screen-lag clamp snapped the aim on and off at the pane limit,
+ * and the framing distance breathed with every arm raise. Each is a per-frame reaction.
+ *
+ * Here instead, once per clip, pane and view:
+ *  - aim = the torso (`bodyTrack`: limbs never steer), smoothed zero-phase (`smoothTrack`): `sigmaFloorS` along the
+ *    floor and a much longer `sigmaUpS` up it, so jumps and squats do not bob the camera;
+ *  - one framing distance for the clip, sized so the `sizeQuantile` body, centred,
+ *    reaches `fill` of the pane — room for the steady aim to be a little off. Only
+ *    where the body could not fit even centred (lying down along Side's screen, arms
+ *    wide) does it pull back, and then slowly: the need is max-filtered over
+ *    ±`sigmaZoomS` and smoothed by the same, so the zoom starts before it is needed;
+ *  - a soft constraint: wherever the body's edge would pass `safe` of the pane, a
+ *    correction is added and itself smoothed (`sigmaFixS`), iterated until it holds —
+ *    the path reaches further only where it has to, and stays smooth doing it.
+ * The rig only translates, so the viewing angle never changes frame to frame.
  */
-export function clampScreenLag(aim: Vec3, subject: Vec3, right: Vec3, maxOffset: number): Vec3 {
-  const h = (aim[0] - subject[0]) * right[0] + (aim[1] - subject[1]) * right[1] + (aim[2] - subject[2]) * right[2];
-  if (Math.abs(h) <= maxOffset) return aim;
-  const cut = h - Math.sign(h) * maxOffset;
-  return [aim[0] - right[0] * cut, aim[1] - right[1] * cut, aim[2] - right[2] * cut];
+export const VIEW_PATH = {
+  sigmaFloorS: 1.0,
+  sigmaUpS: 2.5,
+  sigmaFixS: 0.4,
+  sigmaZoomS: 1.5,
+  /** The `sizeQuantile` body, centred, reaches this fraction of the half-pane. */
+  fill: 0.8,
+  sizeQuantile: 0.9,
+  /** Fraction of the half-pane the body's edge may reach at worst. */
+  safe: 0.95,
+  /** The drawn surface stands off the bones by this much (as Stage3D's focus box). */
+  pad: 0.14,
+};
+
+/**
+ * Zero-phase smoothing: at each sample, the value at that time of a Gaussian-weighted
+ * (sigma seconds) least-squares LINE through its neighbours. In the interior of an
+ * evenly sampled track that is exactly a centred Gaussian average; at the clip's ends
+ * and across uneven timing it still returns a straight line unchanged — no lag, no droop.
+ */
+export function smoothTrack(times: readonly number[], xs: readonly number[], sigmaS: number): number[] {
+  if (!(sigmaS > 0)) return xs.slice();
+  const n = xs.length;
+  const out = new Array<number>(n);
+  let lo = 0, hi = 0;
+  for (let i = 0; i < n; i++) {
+    while (times[i] - times[lo] > 3 * sigmaS) lo++;
+    while (hi + 1 < n && times[hi + 1] - times[i] <= 3 * sigmaS) hi++;
+    let s0 = 0, s1 = 0, s2 = 0, x0 = 0, x1 = 0;
+    for (let j = lo; j <= hi; j++) {
+      const d = times[j] - times[i];
+      const w = Math.exp(-0.5 * (d / sigmaS) ** 2);
+      s0 += w; s1 += w * d; s2 += w * d * d; x0 += w * xs[j]; x1 += w * d * xs[j];
+    }
+    const det = s0 * s2 - s1 * s1;
+    out[i] = det > 1e-9 * s0 * s0 ? (s2 * x0 - s1 * x1) / det : x0 / s0;
+  }
+  return out;
+}
+
+export interface BodyTrack {
+  /** The point the camera plans around, per sample, in `stageBasis` coordinates [right, up, back]. */
+  centre: Vec3[];
+  /** The padded whole body's box per sample, as offsets from `centre` (lo <= 0 <= hi, usually). */
+  lo: Vec3[];
+  hi: Vec3[];
+}
+
+/** The core the camera follows: arms, legs and head never move it (see `bodyTrack`). */
+const TORSO_JOINTS = ["spine2", "neck", "left_collar", "right_collar", "left_shoulder", "right_shoulder", "left_hip", "right_hip"];
+
+/**
+ * What the camera plans around, per sample, by the document's own forward kinematics
+ * (`jointWorldPosition`'s convention, one pass per sample), in the stage basis.
+ * `mirrored` flips the body about its root in world x, as Stage3D draws it.
+ *
+ * The centre is the TORSO (root, spine, neck, collars, shoulders, hips — no hands,
+ * forearms, feet or head), not the whole body's box: on job_dc32a0f0 the box centre
+ * sits 0.11-0.14 m sd off the torso's, purely from arms and legs, so centring the box
+ * panned the camera with every reach and kick. It is shifted by the clip's median
+ * box-minus-torso offset so the whole body, not the chest, sits mid-pane. `lo`/`hi`
+ * are still the WHOLE padded body's reach from that centre, so limbs are what zoom and fit
+ * the view — they just never steer it.
+ */
+export function bodyTrack(doc: MotionResult, personIndex: number, basis: StageBasis, mirrored = false): BodyTrack {
+  const joints = doc.joint_hierarchy.joints;
+  const rootIdx = doc.joint_hierarchy.root_joint_index;
+  const person = doc.persons[personIndex];
+  const axes = [basis.right, basis.up, basis.back];
+  const byName = new Map(joints.map((j) => [j.name, j.index]));
+  const torso = new Set([rootIdx, ...TORSO_JOINTS.flatMap((n) => lookupJoint(byName, n) ?? [])]);
+  const pos: Vec3[] = new Array(joints.length);
+  const rot: (readonly number[])[] = new Array(joints.length);
+  const core: number[][] = [], lows: number[][] = [], highs: number[][] = [];
+  person.samples.forEach((sample, k) => {
+    const root = person.root_trajectory[k];
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], sum = [0, 0, 0];
+    const done = new Uint8Array(joints.length);
+    const solve = (j: number): void => {
+      if (done[j]) return;
+      done[j] = 1;
+      const parent = joints[j].parent_index;
+      if (j === rootIdx || parent < 0) {
+        pos[j] = [0, 0, 0];
+        rot[j] = root.rotation;
+        return;
+      }
+      solve(parent);
+      const d = qrot(rot[parent], joints[j].rest_translation);
+      pos[j] = [pos[parent][0] + d[0], pos[parent][1] + d[1], pos[parent][2] + d[2]];
+      rot[j] = qmul(rot[parent], qmul(joints[j].rest_rotation, sample.joints[j].rotation));
+    };
+    for (let j = 0; j < joints.length; j++) {
+      solve(j);
+      const p = pos[j];
+      const w: Vec3 = [root.position[0] + (mirrored ? -p[0] : p[0]), root.position[1] + p[1], root.position[2] + p[2]];
+      for (let a = 0; a < 3; a++) {
+        const c = dot(w, axes[a]);
+        lo[a] = Math.min(lo[a], c);
+        hi[a] = Math.max(hi[a], c);
+        if (torso.has(j)) sum[a] += c;
+      }
+    }
+    core.push(sum.map((s) => s / torso.size));
+    lows.push(lo);
+    highs.push(hi);
+  });
+  const shift = [0, 1, 2].map((a) => {
+    const off = core.map((c, k) => (lows[k][a] + highs[k][a]) / 2 - c[a]).sort((x, y) => x - y);
+    return off[off.length >> 1] ?? 0;
+  });
+  const centre = core.map((c) => [c[0] + shift[0], c[1] + shift[1], c[2] + shift[2]] as Vec3);
+  const lo = centre.map((c, k) => [0, 1, 2].map((a) => lows[k][a] - c[a] - VIEW_PATH.pad) as Vec3);
+  const hi = centre.map((c, k) => [0, 1, 2].map((a) => highs[k][a] - c[a] + VIEW_PATH.pad) as Vec3);
+  return { centre, lo, hi };
+}
+
+export interface ViewLens {
+  /** Unit screen-right, screen-up and toward-the-camera of the preset, in basis coordinates (`presetScreenAxes`). */
+  screenX: Vec3;
+  screenY: Vec3;
+  toward: Vec3;
+  /** Tangents of the pane's horizontal and vertical half-angles. */
+  tanH: number;
+  tanV: number;
+  /** The preset's distance factor (`ViewPreset.distance`). */
+  margin: number;
+}
+
+/** A preset's screen axes in basis coordinates: what `lookAt` with `up = basis.up` gives from `orbitPosition`. */
+export function presetScreenAxes(azimuth: number, elevation: number): { screenX: Vec3; screenY: Vec3; toward: Vec3 } {
+  const o: Vec3 = [Math.sin(azimuth) * Math.cos(elevation), Math.sin(elevation), Math.cos(azimuth) * Math.cos(elevation)];
+  const screenX = norm([o[2], 0, -o[0]]); // up × o
+  return { screenX, screenY: cross(o, screenX), toward: o };
+}
+
+/** One row per sample: the aim point (basis coordinates) and the framing distance. */
+export interface ViewPath {
+  aim: Vec3[];
+  dist: number[];
+}
+
+/**
+ * The steady camera plan for one view, one row per sample — see `VIEW_PATH`. Wherever
+ * the body fits the pane at all, its padded box stays within `safe` of the half-pane
+ * on both screen axes, perspective included (the part nearest the camera is drawn
+ * biggest, so it is fitted at its own distance, not the aim's).
+ */
+export function steadyViewPath(times: readonly number[], body: BodyTrack, lens: ViewLens, tuning = VIEW_PATH): ViewPath {
+  const n = times.length;
+  const axes = [[lens.screenX, lens.tanH], [lens.screenY, lens.tanV]] as const;
+  // The padded body's extent along a direction, from its centre: [min, max] (box support).
+  const span = (k: number, s: Vec3): [number, number] => {
+    let mn = 0, mx = 0;
+    for (let a = 0; a < 3; a++) {
+      const p = s[a] * body.lo[k][a], q = s[a] * body.hi[k][a];
+      mn += Math.min(p, q);
+      mx += Math.max(p, q);
+    }
+    return [mn, mx];
+  };
+
+  const sigma = [tuning.sigmaFloorS, tuning.sigmaUpS, tuning.sigmaFloorS];
+  const base = [0, 1, 2].map((a) => smoothTrack(times, body.centre.map((c) => c[a]), sigma[a]));
+
+  // How much nearer the camera than the aim the body's nearest part is: perspective
+  // draws it bigger, so an extent x there needs distance x / tan + that, not x / tan.
+  const near = (k: number) => span(k, lens.toward)[1] + Math.max(0, dot(body.centre[k].map((c, a) => c - base[a][k]) as Vec3, lens.toward));
+
+  // Distance. Per sample, the larger of: the body, centred, reaching `fill` of the
+  // pane; and the body, where it really is relative to the smooth aim, reaching `safe`.
+  const need = times.map((_, k) => {
+    const d = [0, 1, 2].map((a) => body.centre[k][a] - base[a][k]) as Vec3;
+    const centred = Math.max(...axes.map(([s, tan]) => {
+      const [mn, mx] = span(k, s);
+      return ((mx - mn) / 2) * lens.margin / (tuning.fill * tan);
+    }));
+    const actual = Math.max(...axes.map(([s, tan]) => {
+      const [mn, mx] = span(k, s), h = dot(d, s);
+      return Math.max(h + mx, -(h + mn)) / (tuning.safe * tan);
+    })) + near(k);
+    return Math.max(centred, actual);
+  });
+  // One distance for the `sizeQuantile` of the clip; past that it pulls back — a
+  // depth spike or a reach is absorbed by a slow dolly, not a pan. Early: max over
+  // ±sigma, then smoothed.
+  const steady = need.slice().sort((a, b) => a - b)[Math.floor(tuning.sizeQuantile * (n - 1))] ?? 0;
+  const w = tuning.sigmaZoomS;
+  const held = times.map((t, k) => {
+    let m = steady;
+    for (let j = k; j >= 0 && t - times[j] <= w; j--) m = Math.max(m, need[j]);
+    for (let j = k + 1; j < n && times[j] - t <= w; j++) m = Math.max(m, need[j]);
+    return m;
+  });
+  const dist = smoothTrack(times, held, w).map((d) => Math.max(d, steady));
+
+  let fix = [0, 1, 2].map(() => new Array<number>(n).fill(0));
+  // How far past the safe box the body's edge is at sample k, as a vector to move the aim by.
+  const excess = (k: number): Vec3 => {
+    const d: Vec3 = [0, 1, 2].map((a) => body.centre[k][a] - base[a][k] - fix[a][k]) as Vec3;
+    const e: Vec3 = [0, 0, 0];
+    for (const [s, tan] of axes) {
+      const edge = tuning.safe * (dist[k] - near(k)) * tan;
+      const [mn, mx] = span(k, s), h = dot(d, s);
+      const high = h + mx - edge, low = -edge - (h + mn);
+      // Past both edges (wider than the pane): centre it. Else move just off the one it passes.
+      const over = high > 0 && low > 0 ? h + (mx + mn) / 2 : Math.max(0, high) - Math.max(0, low);
+      for (let a = 0; a < 3; a++) e[a] += s[a] * over;
+    }
+    return e;
+  };
+  for (let iter = 0; iter < 80; iter++) {
+    const e = times.map((_, k) => excess(k));
+    if (!e.some((v) => Math.hypot(...v) > 1e-3)) break;
+    // Over-step (1.5x): the smoothing spreads each correction, so the peak it was for
+    // gets back only part of it; this converges in a handful of passes, not dozens.
+    fix = fix.map((f, a) => smoothTrack(times, f.map((x, k) => x + 1.5 * e[k][a]), tuning.sigmaFixS));
+  }
+  // Close the last millimetre exactly, so the guarantee is a guarantee.
+  const aim = times.map((_, k) => {
+    const e = excess(k);
+    return [0, 1, 2].map((a) => base[a][k] + fix[a][k] + e[a]) as Vec3;
+  });
+  return { aim, dist };
+}
+
+/** Per-sample rows at time `t`, linearly interpolated (as `rootPositionAt`), held at the ends. */
+export function pathAt(times: readonly number[], rows: readonly (readonly number[])[], t: number): number[] {
+  const i = sampleIndexAt(times, t);
+  const a = rows[i], b = rows[i + 1];
+  const span = b ? times[i + 1] - times[i] : 0;
+  if (!b || span <= 0) return a.slice();
+  const u = Math.min(Math.max((t - times[i]) / span, 0), 1);
+  return a.map((x, c) => x + (b[c] - x) * u);
 }
 
 /* ------------------------------------------------------- world placement */
