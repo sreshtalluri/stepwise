@@ -18,7 +18,7 @@ The "everything worked" case: 14.0s at 15fps (210 samples), one dancer, a plausi
 - `accent_color.source: "sampled"`.
 - Hands and feet crop rectangles present on every sample.
 - `proposed_counts`: a **strong** beat proposal — steady 120 BPM, confidence
-  0.93, no warnings. The case where the machine guess is worth opening the
+  0.93, count-1 confidence 0.97, no warnings. The case where the machine guess is worth opening the
   authoring surface on.
 
 ## `failure-lesson.json`
@@ -51,7 +51,8 @@ three real-world failure modes at once:
 field (sampling can fail on a harder clip — OPEN-DECISIONS.md E4).
 
 4. **A weak beat proposal that says so.** `proposed_counts` is 196 BPM at
-   confidence 0.28, with a warning naming the likely cause. 196 is outside the
+   confidence 0.28 (count-1 confidence 0.12: which beat is 1 is a guess too),
+   with a warning naming the likely cause. 196 is outside the
    70–180 dance-practice band, which is the signature of a double-time lock; the
    correct reading is the `half-time` alternate, which travels with the guess
    instead of being thrown away. This is the branch that matters for DESIGN.md

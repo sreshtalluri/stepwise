@@ -61,6 +61,11 @@
   font-size: 0.8125rem;
   color: var(--ink-muted);
 }
+/* Count 1 is a guess: said plainly, in the body ink, not as an alarm. */
+.ls-unsure {
+  font-size: 0.875rem;
+  color: var(--ink);
+}
 
 /* ------------------------------------------------------------------ controls */
 

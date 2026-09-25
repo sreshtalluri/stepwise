@@ -126,6 +126,14 @@ def test_proposed_counts_is_optional(good_lesson):
     assert result.valid is True
 
 
+def test_count_one_confidence_is_optional_and_bounded(good_lesson):
+    doc = copy.deepcopy(good_lesson)
+    del doc["proposed_counts"]["count_one_confidence"]  # documents from before it existed
+    assert validate_motion_result(doc).valid is True
+    doc["proposed_counts"]["count_one_confidence"] = 1.5
+    assert validate_motion_result(doc).valid is False
+
+
 def test_rejects_proposed_grid_sized_against_the_wrong_timeline(good_lesson):
     doc = copy.deepcopy(good_lesson)
     # The realistic way to get this wrong: size the grid against

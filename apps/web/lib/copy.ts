@@ -342,6 +342,9 @@ export const lesson = {
   counts: {
     proposed: (perMinute: number) =>
       `Counts proposed from the music, at ${perMinute} a minute. Count 1 is a guess — set it under Counts and parts.`,
+    /** The tempo is solid but which beat is 1 is not (count_one_confidence < ONE_SURE). */
+    unsureOne: (perMinute: number) =>
+      `Counts proposed from the music, at ${perMinute} a minute. We're not sure where 1 is — try the other options under Count 1.`,
     weak: (perMinute: number) =>
       `Counts are a weak guess from the music, at ${perMinute} a minute, and the tempo may be double or half that. Set them under Counts and parts.`,
     placeholder: (perMinute: number) =>
@@ -491,6 +494,8 @@ export const lesson = {
     guess: "is a guess",
     heading: "Count 1",
     tryAnother: "Try another 1:",
+    /** When the tracker cannot tell which beat is 1 (count_one_confidence < ONE_SURE). */
+    unsure: "Not sure where 1 is — try the other options.",
     altLabel: (shift: number) => `Count 1 ${Math.abs(shift)} ${Math.abs(shift) === 1 ? "count" : "counts"} ${shift > 0 ? "later" : "earlier"}`,
     now: (n: number) => (n ? `Count ${n}` : "Before count 1"),
   },

@@ -903,13 +903,34 @@ export function SpeedTools({ l }: { l: Lesson }) {
  * them are `setCountOne` in packages/navigation.
  */
 export function CountOneTools({ l }: { l: Lesson }) {
-  const alts = oneAlternates(l.alternates, l.structure.grid);
+  const alts = oneAlternates(l.alternates, l.structure.grid, l.oneUnsure);
+  // Unsure which beat is 1: say so, and the other candidates come first with the
+  // tracker's best one filled. Sure: the row stays as quiet as it always was.
+  const unsure = l.oneUnsure && alts.length > 0;
+  const altRow = alts.length > 0 && (
+    <div className="ls-group-row">
+      <span className="ls-hint">{copy.countOne.tryAnother}</span>
+      {alts.map((a, i) => (
+        <button
+          key={a.count_one_s}
+          type="button"
+          className={unsure && i === 0 ? "ls-chip ls-strong" : "ls-chip"}
+          onClick={() => l.tryOne(a.count_one_s)}
+          aria-label={copy.countOne.altLabel(a.by)}
+        >
+          {a.by > 0 ? `+${a.by}` : `−${-a.by}`}
+        </button>
+      ))}
+    </div>
+  );
   return (
     <div className="ls-group" role="group" aria-labelledby="ls-one-h">
       <span className="ls-group-label" id="ls-one-h">
         {copy.countOne.heading}
         {l.countsFrom !== "hand" && <small> {copy.countOne.guess}</small>}
       </span>
+      {unsure && <span className="ls-unsure">{copy.countOne.unsure}</span>}
+      {unsure && altRow}
       <div className="ls-group-row">
         <button type="button" className="ls-chip ls-strong" onClick={l.tapOne} title={copy.countOne.tapHint}>
           {copy.countOne.tap}
@@ -921,16 +942,7 @@ export function CountOneTools({ l }: { l: Lesson }) {
           {copy.countOne.later}
         </button>
       </div>
-      {alts.length > 0 && (
-        <div className="ls-group-row">
-          <span className="ls-hint">{copy.countOne.tryAnother}</span>
-          {alts.map((a) => (
-            <button key={a.count_one_s} type="button" className="ls-chip" onClick={() => l.tryOne(a.count_one_s)} aria-label={copy.countOne.altLabel(a.by)}>
-              {a.by > 0 ? `+${a.by}` : `−${-a.by}`}
-            </button>
-          ))}
-        </div>
-      )}
+      {!unsure && altRow}
       <span className="ls-hint">{copy.countOne.tapHint}</span>
     </div>
   );
@@ -1113,7 +1125,9 @@ export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }
   const perMinute = Math.round(60 / l.structure.grid.secondsPerCount);
   const counts =
     l.countsFrom === "music"
-      ? copy.counts.proposed(perMinute)
+      ? l.oneUnsure
+        ? copy.counts.unsureOne(perMinute)
+        : copy.counts.proposed(perMinute)
       : l.countsFrom === "weak"
         ? copy.counts.weak(perMinute)
         : l.countsFrom === "none"

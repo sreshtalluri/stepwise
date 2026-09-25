@@ -257,6 +257,10 @@ export interface ProposedCounts {
     | [CountOneAlternate, CountOneAlternate]
     | [CountOneAlternate, CountOneAlternate, CountOneAlternate];
   /**
+   * OPTIONAL and additive, so no schema_version bump (README): absent on documents written before it existed, and a consumer detects it by presence. How sure the producer is WHICH beat is count 1 (the bar phase), kept separate from `confidence`, which only measures the grid and stays ~0.95 when count 1 is a whole beat off. 0.5 + 0.5 x the weaker vote when the kick-accent rule and the beat model's own downbeats both back count_one_s; at most 0.4 when they disagree or only one has an opinion. Below 0.5, count 1 is a guess and a surface should say so and offer count_one_alternates. On 10 owner-labelled clips (evaluation/labels/count_one.json) the three misses scored 0.00-0.16.
+   */
+  count_one_confidence?: number;
+  /**
    * Plain-language reasons this proposal may be wrong, from the producer. Meant to be shown, not logged.
    */
   warnings: string[];

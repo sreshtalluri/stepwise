@@ -40,7 +40,8 @@ from beat_detect import propose_grid
 result = propose_grid("clip.mp4", clip_duration_s=19.7)
 result.to_grid()  # -> {"countOneS": 0.09, "secondsPerCount": 0.418, "countTotal": 47}
 
-result.confidence   # 0..1 — this module's own trust in the proposal
+result.confidence   # 0..1 — trust in the GRID (tempo, beat spacing); ~0.95 even when count 1 is a beat off
+result.count_one_confidence  # 0..1 — trust in WHICH beat is 1; < 0.5 means count 1 is a guess
 result.bpm          # informational
 result.alternates   # [TempoAlternate("double-time", ...), TempoAlternate("half-time", ...)]
 result.warnings     # e.g. tempo outside the plausible dance-practice band
@@ -91,12 +92,47 @@ counts 1, press "Set count 1 here". The structure is saved in
 `localStorage["stepwise.lesson-structure.v1.<lessonId>"]`; copy
 `grid.countOneS` per lesson from the browser console.
 
+## Count-1 confidence and the ten labelled clips (2026-09-25)
+
+`confidence` measures the grid, and the grid is right on every labelled clip,
+so it cannot say when count 1 is wrong. `count_one_confidence` does: two
+votes, the kick rule's strength (0 at a tie, 1 when the best beat of the bar
+is >= 30% ahead of the runner-up) and the share of Beat This!'s downbeats on
+the pick. Both back the pick: `0.5 + 0.5 * min(votes)`. Otherwise (they
+disagree, or only one has an opinion): at most 0.4, `0.4 * |kick strength -
+model share on its own phase|`. Below 0.5, count 1 is a guess.
+
+Owner labels in `evaluation/labels/count_one.json`, scored by
+`tests/test_count_one_labels.py` (hit = same bar phase, within 70 ms), offline
+from recorded beats, downbeats and kick accents; the live model gives the same
+result (`uv run python tests/test_count_one_labels.py DIR` with `DIR/<clip>.mp4`):
+
+| clip | BPM | count 1 | kick / model phase | kick margin | count-1 conf |
+|---|---|---|---|---|---|
+| solo-01 | 141.0 | hit | agree | 1.13 | 0.72 |
+| solo-02 | 115.1 | hit | agree | 1.42 | 1.00 |
+| group-synced-01 | 120.0 | hit | agree | 1.12 | 0.71 |
+| solo-07 | 126.8 | hit | disagree (kick right) | 1.16 | 0.11 |
+| bhangra | 95.0 | hit | agree | 1.49 | 0.97 |
+| choreo-kinjaz | 104.0 | hit | agree | 1.71 | 1.00 |
+| hoodie-followcam | 113.3 | hit | kick tie, model decides | 1.02 | 0.38 |
+| mirror | 151.9 | **miss, 1 beat early** | disagree (model right) | 1.31 | 0.00 |
+| mirror-cut-12s | 151.9 | **miss, 1 beat early** | disagree (model right) | 1.20 | 0.14 |
+| tiktok-44s | 150.1 | **miss, 1 beat late** | disagree (model right) | 1.15 | 0.16 |
+
+7/10. Every pick at or above 0.5 was right; all three misses are below 0.2,
+and in each the first `count_one_alternates` entry (the model's pick) is the
+owner's 1. Two right picks also read low (solo-07, hoodie): the honest cost of
+"the evidence disagrees". The misses are xfail(strict) in the test, so a fix
+that gets them right fails the run until the marks come off.
+
 ## Layout
 
 ```
 python/beat_detect/propose.py                 propose_grid(), ProposedGrid, TempoAlternate
 python/tests/test_propose.py                  unit tests on recorded/synthesized model output
-python/tests/fixtures/beat-this-recorded.json Beat This! beats for bhangra-5716 and solo-07 (times only)
+python/tests/test_count_one_labels.py        count 1 vs evaluation/labels/count_one.json (and a live scorer)
+python/tests/fixtures/beat-this-recorded.json Beat This! beats, downbeats and kick accents for the 10 labelled clips (no audio)
 ```
 
 ## Running

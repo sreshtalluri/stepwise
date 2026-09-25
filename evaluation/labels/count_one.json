@@ -1,0 +1,115 @@
+{
+ "_about": "Owner-labelled count 1 (the bar downbeat the dancer counts from), seconds on the clip timeline. count_one_s is the label snapped to the nearest beat of the grid propose_grid fits through Beat This!'s beats; raw is what was recorded: a tap (carries 25-70 ms of human latency) or an option picked from the labelling page's four candidates. bpm/spc are that grid's. job_id is the lesson job for uploaded lessons, null for evaluation/clips.yaml clips. No video is stored. Scored by packages/beat-detect/python/tests/test_count_one_labels.py: a hit is the same bar phase, within 70 ms.",
+ "labels": [
+  {
+   "clip": "solo-01",
+   "job_id": null,
+   "count_one_s": 1.268,
+   "raw": 1.292,
+   "method": "option",
+   "bpm": 141.0,
+   "spc": 0.42554,
+   "labelled_at": "2026-09-23T20:36:43",
+   "source": "owner"
+  },
+  {
+   "clip": "solo-02",
+   "job_id": null,
+   "count_one_s": 1.888,
+   "raw": 1.905,
+   "method": "option",
+   "bpm": 115.07,
+   "spc": 0.5214,
+   "labelled_at": "2026-09-23T20:39:04",
+   "source": "owner"
+  },
+  {
+   "clip": "group-synced-01",
+   "job_id": null,
+   "count_one_s": 1.101,
+   "raw": 1.12,
+   "method": "option",
+   "bpm": 120.01,
+   "spc": 0.49995,
+   "labelled_at": "2026-09-23T20:38:37",
+   "source": "owner"
+  },
+  {
+   "clip": "solo-07",
+   "job_id": null,
+   "count_one_s": 1.052,
+   "raw": 1.03,
+   "method": "tap",
+   "bpm": 126.83,
+   "spc": 0.47307,
+   "labelled_at": "2026-09-23T20:38:14",
+   "source": "owner"
+  },
+  {
+   "clip": "bhangra",
+   "job_id": "5716ecd319064b329b53df005b736757",
+   "count_one_s": 0.048,
+   "raw": 0.048,
+   "method": "option",
+   "bpm": 95.0,
+   "spc": 0.6316,
+   "labelled_at": "2026-09-25T01:34:28",
+   "source": "owner"
+  },
+  {
+   "clip": "choreo-kinjaz",
+   "job_id": "345b747b1edb406a90e8f0d847b9c518",
+   "count_one_s": 1.293,
+   "raw": 1.293,
+   "method": "option",
+   "bpm": 104.0,
+   "spc": 0.57693,
+   "labelled_at": "2026-09-25T01:34:45",
+   "source": "owner"
+  },
+  {
+   "clip": "hoodie-followcam",
+   "job_id": "a10682e744734f0fb4034149fb4c0569",
+   "count_one_s": 4.191,
+   "raw": 4.243,
+   "method": "tap",
+   "bpm": 113.27,
+   "spc": 0.5297,
+   "labelled_at": "2026-09-25T01:36:38",
+   "source": "owner"
+  },
+  {
+   "clip": "mirror",
+   "job_id": "b8223229f23240d39305493bbe628d7d",
+   "count_one_s": 3.06,
+   "raw": 3.083,
+   "method": "tap",
+   "bpm": 151.85,
+   "spc": 0.39512,
+   "labelled_at": "2026-09-25T01:35:59",
+   "source": "owner"
+  },
+  {
+   "clip": "mirror-cut-12s",
+   "job_id": "7995c97829a942aba13301fcd14704dd",
+   "count_one_s": 1.567,
+   "raw": 1.567,
+   "method": "option",
+   "bpm": 151.94,
+   "spc": 0.39489,
+   "labelled_at": "2026-09-25T01:39:13",
+   "source": "owner"
+  },
+  {
+   "clip": "tiktok-44s",
+   "job_id": "dc32a0f0dcf617e115a4fb7b424c2b03",
+   "count_one_s": 1.04,
+   "raw": 1.109,
+   "method": "tap",
+   "bpm": 150.12,
+   "spc": 0.39969,
+   "labelled_at": "2026-09-25T01:38:51",
+   "source": "owner"
+  }
+ ]
+}
