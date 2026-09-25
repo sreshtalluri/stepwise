@@ -14,6 +14,8 @@ import {
   eightsOf,
   loadDone,
   loadLoopLength,
+  loadShowAnds,
+  saveShowAnds,
   markDone,
   nextLoop,
   sameSpan,
@@ -465,6 +467,11 @@ function useLesson(
   }, [video, musicVol]);
   useMetronome(video, loopRef, structure.grid, clickOn, clickMode, clickVol);
 
+  // ---- the "&" between the counts on screen: per device, and apart from the click's own "and"s
+  const [showAnds, setShowAndsState] = useState(true);
+  useEffect(() => setShowAndsState(loadShowAnds()), []);
+  const setShowAnds = useCallback((on: boolean) => (setShowAndsState(on), saveShowAnds(on)), []);
+
   // ---- count 1: one tap, a nudge, or one of the tracker's other candidates
   // Each is also a `count_one_*` event: how often count 1 needs correcting.
   const alternates = doc.proposed_counts?.count_one_alternates ?? [];
@@ -511,7 +518,7 @@ function useLesson(
     structure, editStructure, authored, countsFrom, tapOne, nudgeOne, tryOne, alternates,
     eights, loop, setLoop, loopEight, here, hereCount, stepLoop, loopLen, setLoopLen, next, done, sameSpan,
     speed, speedPick, pickSpeed, cycleSpeed, nudgeSpeed, buildUp, setBuildUp, passes, setHoldSlow,
-    clickOn, setClickOn, clickMode, setClickMode, clickVol, setClickVol, musicVol, setMusicVol,
+    clickOn, setClickOn, clickMode, setClickMode, clickVol, setClickVol, musicVol, setMusicVol, showAnds, setShowAnds,
     multi, selected, chooseDancer, pickerOpen, setPickerOpen, showEveryone, setShowEveryone,
     panels, maxPanels, bumped, toggleView, mirrored, setMirrored, follow, setFollow,
     absent, setAbsent, focusRef, crop,
