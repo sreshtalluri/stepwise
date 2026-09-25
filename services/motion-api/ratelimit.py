@@ -96,9 +96,14 @@ def client_ip(headers, client_host: str | None) -> str:
     return client_host or "unknown"
 
 
-def _ip_hash(ip: str, today: dt.date) -> bytes:
-    secret = os.environ.get("STEPWISE_IP_SALT") or os.environ.get("DATABASE_URL", "")
-    return hmac.new(secret.encode(), f"{today.isoformat()}|{ip}".encode(), hashlib.sha256).digest()
+def _ip_hash(conn, ip: str, today: dt.date) -> bytes:
+    """HMAC under today's RANDOM salt (analytics_salts: one per UTC day, older ones
+    deleted), so a past day's hash cannot be recomputed by anyone, us included --
+    which is what /privacy promises. It used a fixed secret (falling back to
+    DATABASE_URL) before 2026-09-25."""
+    import analytics  # here, not at the top: analytics imports this module
+    return hmac.new(analytics._salt_for(conn, today), f"{today.isoformat()}|{ip}".encode(),
+                    hashlib.sha256).digest()
 
 
 def _loosely(seconds: int) -> str:
@@ -151,7 +156,6 @@ def _guarded(fn) -> None:
 
 def _charge(ip: str, job_id: str, clip_id: str) -> None:
     now = dt.datetime.now(dt.timezone.utc)
-    ip_hash = _ip_hash(ip, now.date())
     midnight = dt.datetime.combine(now.date() + dt.timedelta(days=1), dt.time(), dt.timezone.utc)
     ip_hour, ip_day, global_day = (_limit("STEPWISE_LIMIT_IP_HOUR", 5),
                                    _limit("STEPWISE_LIMIT_IP_DAY", 20),
@@ -159,6 +163,7 @@ def _charge(ip: str, job_id: str, clip_id: str) -> None:
 
     with jobstore.connection() as conn, conn.transaction():
         conn.execute("SELECT pg_advisory_xact_lock(%s)", (_LOCK_KEY,))
+        ip_hash = _ip_hash(conn, ip, now.date())
 
         def window(hours: int, by_ip: bool):
             sql = ("SELECT count(*), min(occurred_at) FROM events "
@@ -203,11 +208,11 @@ def _charge(ip: str, job_id: str, clip_id: str) -> None:
 
 def _charge_removal(ip: str, clip_id: str, relationship: str) -> None:
     now = dt.datetime.now(dt.timezone.utc)
-    ip_hash = _ip_hash(ip, now.date())
     midnight = dt.datetime.combine(now.date() + dt.timedelta(days=1), dt.time(), dt.timezone.utc)
     cap = _limit("STEPWISE_LIMIT_REMOVALS_IP_DAY", 5)
     with jobstore.connection() as conn, conn.transaction():
         conn.execute("SELECT pg_advisory_xact_lock(%s)", (_LOCK_KEY,))
+        ip_hash = _ip_hash(conn, ip, now.date())
         n = conn.execute("SELECT count(*) FROM events WHERE name = 'removal' AND day_hash = %s "
                          "AND occurred_at > now() - interval '24 hours'", (ip_hash,)).fetchone()[0]
         if n >= cap:
