@@ -74,14 +74,14 @@ export const marketing = {
       { label: "Lesson", body: "Loop any part, at any length. Your speed carries over." },
     ],
     // In the lesson today: the On video view, the 3D view's orbit (estimated
-    // off the camera axis), loop handles under Counts and parts, the 0.5x to
-    // 1x transport, Build up, Mirror, and the dancer picker.
+    // off the camera axis), loop handles under Counts and parts, the 0.25x to
+    // 1.25x speed (presets and 0.05x steps), Build up, Mirror, and the dancer picker.
     featuresLabel: "While you learn",
     features: [
       ["3D body on your video", ""],
       ["Turn to any angle", "estimated"],
       ["Loop one part, a run of parts, or all of it", ""],
-      ["0.5× to 1×", ""],
+      ["0.25× to 1.25×", ""],
       ["Build up", "faster each loop"],
       ["Mirror", ""],
       ["Switch dancers", ""],
@@ -429,7 +429,11 @@ export const lesson = {
     play: "Play",
     pause: "Pause",
     speedLabel: "Speed",
-    speedNext: (s: number) => `Speed ${s}×. Tap for the next speed`,
+    speedOpen: (s: string) => `Speed ${s}. Change the speed`,
+    slower: "Slower, by 0.05×",
+    faster: "Faster, by 0.05×",
+    speedKeys: "Keys: S the next preset, < and > by 0.05×.",
+    speedBuilding: "Build up is setting the speed. Pick one to turn it off.",
     build: "Build up",
     buildHint: "Starts the loop at 0.5× and adds 0.1× each time round, up to 1×",
     more: "More",
@@ -495,7 +499,7 @@ export const lesson = {
     noFloor: "No floor: feet not visible in this clip.",
     clipped: "The dancer is at the edge of the shot, so the crop stops there.",
     estimated: "Angles other than the camera's are estimated from the tracked body.",
-    keys: "Keys: space play, arrows a count, shift and arrows the next or previous counts, L loop, S speed, B build up, M mirror, T tap on 1.",
+    keys: "Keys: space play, arrows a count, shift and arrows the next or previous counts, L loop, S speed, < and > slower or faster, B build up, M mirror, T tap on 1.",
   },
 
   phone: {

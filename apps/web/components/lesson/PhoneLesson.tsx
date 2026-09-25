@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { Lesson } from "../LessonViewer";
 import { lesson as copy } from "../../lib/copy";
-import { spanLabel } from "../../lib/lessonEngine";
+import { spanLabel, speedText } from "../../lib/lessonEngine";
 import {
   BottomBar,
   CountBar,
@@ -188,7 +188,7 @@ export default function PhoneLesson({ l }: { l: Lesson }) {
                 <Icon name="x" size={28} />
               </button>
               <span className="ls-prop-speed">
-                {l.speed}×<small>{loopLabel}</small>
+                {speedText(l.speed)}<small>{loopLabel}</small>
               </span>
             </div>
             <div className="ls-prop-opts">

@@ -47,6 +47,10 @@ import {
   sameSpan,
   spanDone,
   spanLabel,
+  SPEED_MAX,
+  SPEED_MIN,
+  SPEED_PRESETS,
+  speedText,
 } from "../../lib/lessonEngine";
 import { lesson as copy } from "../../lib/copy";
 import { prefersReducedMotion } from "../../lib/reveal";
@@ -79,6 +83,7 @@ const P = {
   cube: "M223.68,66.15,135.68,18a15.88,15.88,0,0,0-15.36,0l-88,48.17a16,16,0,0,0-8.32,14v95.64a16,16,0,0,0,8.32,14l88,48.17a15.88,15.88,0,0,0,15.36,0l88-48.17a16,16,0,0,0,8.32-14V80.18A16,16,0,0,0,223.68,66.15ZM128,32l80.34,44L128,120,47.66,76ZM40,90l80,43.78v85.79L40,175.82Zm96,129.57V133.82L216,90v85.78Z",
   stack: "M230.91,172A8,8,0,0,1,228,182.91l-96,56a8,8,0,0,1-8.06,0l-96-56A8,8,0,0,1,36,169.09l92,53.65,92-53.65A8,8,0,0,1,230.91,172ZM220,121.09l-92,53.65L36,121.09A8,8,0,0,0,28,134.91l96,56a8,8,0,0,0,8.06,0l96-56A8,8,0,1,0,220,121.09ZM24,80a8,8,0,0,1,4-6.91l96-56a8,8,0,0,1,8.06,0l96,56a8,8,0,0,1,0,13.82l-96,56a8,8,0,0,1-8.06,0l-96-56A8,8,0,0,1,24,80Zm23.88,0L128,126.74,208.12,80,128,33.26Z",
   dots: "M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128Zm56-12a12,12,0,1,0,12,12A12,12,0,0,0,196,116ZM60,116a12,12,0,1,0,12,12A12,12,0,0,0,60,116Z",
+  minus: "M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128Z",
   plus: "M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z",
   trend: "M240,56v64a8,8,0,0,1-16,0V75.31l-82.34,82.35a8,8,0,0,1-11.32,0L96,123.31,29.66,189.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L136,140.69,212.69,64H168a8,8,0,0,1,0-16h64A8,8,0,0,1,240,56Z",
 };
@@ -772,8 +777,8 @@ export function Panels({
 const clock = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
 
 /**
- * The one thin bar under the panels: play, the time, the speed pill (tap for the
- * next speed), Build up, the click (its settings in a small popover), More — and
+ * The one thin bar under the panels: play, the time, the speed pill (its presets
+ * and fine steps in a small popover), Build up, the click (its settings in a small popover), More — and
  * under it the full-width timeline.
  */
 export function BottomBar({ l, more }: { l: Lesson; more: React.ReactNode }) {
@@ -789,13 +794,16 @@ export function BottomBar({ l, more }: { l: Lesson; more: React.ReactNode }) {
         </span>
         <button
           type="button"
-          className="ls-pill"
-          onClick={l.cycleSpeed}
-          aria-label={copy.transport.speedNext(l.speed)}
-          title={copy.transport.speedNext(l.speed)}
+          className="ls-pill ls-speed"
+          popoverTarget="ls-speed"
+          aria-label={copy.transport.speedOpen(speedText(l.speed))}
+          title={copy.transport.speedOpen(speedText(l.speed))}
         >
-          {l.speed}×
+          {speedText(l.speed)}
         </button>
+        <div id="ls-speed" popover="auto" className="ls-panel ls-panel-sm ls-speed-panel">
+          <SpeedTools l={l} />
+        </div>
         <button
           type="button"
           className={`ls-pill${l.buildUp ? " ls-on" : ""}`}
@@ -830,6 +838,45 @@ export function BottomBar({ l, more }: { l: Lesson; more: React.ReactNode }) {
         {more}
       </div>
       <Timeline l={l} />
+    </div>
+  );
+}
+
+/**
+ * Speed, YouTube-style: the four presets in one tap, and − / + for 0.05× steps from
+ * 0.25× to 1.25×, the exact value between them. The same panel on a desktop (a small
+ * popover) and a phone (the bottom sheet, 44 px targets).
+ */
+export function SpeedTools({ l }: { l: Lesson }) {
+  const on = (s: number) => Math.abs(l.speed - s) < 1e-9;
+  return (
+    <div className="ls-group" role="group" aria-labelledby="ls-speed-h">
+      <span className="ls-group-label" id="ls-speed-h">
+        {copy.transport.speedLabel}
+      </span>
+      <div className="ls-speed-fine">
+        <button type="button" className="ls-chip" onClick={() => l.nudgeSpeed(-1)} disabled={l.speed <= SPEED_MIN} aria-label={copy.transport.slower}>
+          <Icon name="minus" size={18} />
+        </button>
+        <output className="ls-speed-now" aria-live="polite">
+          {speedText(l.speed)}
+        </output>
+        <button type="button" className="ls-chip" onClick={() => l.nudgeSpeed(1)} disabled={l.speed >= SPEED_MAX} aria-label={copy.transport.faster}>
+          <Icon name="plus" size={18} />
+        </button>
+      </div>
+      <div className="ls-seg ls-speed-presets">
+        {SPEED_PRESETS.map((s) => (
+          <button key={s} type="button" aria-pressed={!l.buildUp && on(s)} onClick={() => l.pickSpeed(s)}>
+            {speedText(s)}
+          </button>
+        ))}
+      </div>
+      {l.buildUp ? (
+        <span className="ls-hint">{copy.transport.speedBuilding}</span>
+      ) : (
+        <span className="ls-hint ls-keys-hint">{copy.transport.speedKeys}</span>
+      )}
     </div>
   );
 }
@@ -1153,6 +1200,7 @@ export function useLessonKeys(l: Lesson) {
         else x.seek(x.timeRef.current + d * x.structure.grid.secondsPerCount);
       } else if (k === "m") x.setMirrored((v) => !v);
       else if (k === "s") x.cycleSpeed();
+      else if (e.key === "<" || e.key === ">") x.nudgeSpeed(e.key === "<" ? -1 : 1);
       else if (k === "b") x.setBuildUp(!x.buildUp);
       else if (k === "f") x.setFollow((v) => !v);
       else if (k === "t") x.tapOne();

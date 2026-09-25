@@ -2,6 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildUpSpeed,
+  clampSpeed,
+  nextPreset,
+  SPEED_GRID,
+  speedText,
+  stepSpeed,
   countName,
   edgeLoop,
   loopLength,
@@ -83,6 +88,23 @@ test("next and previous move by the loop length, and stay put at the ends", () =
 
 test("build up: 0.5 on the first pass, a tenth more each pass, held at 1", () => {
   assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 40].map(buildUpSpeed), [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1, 1]);
+});
+
+test("speed: presets, 0.05 steps from 0.25 to 1.25, shown exactly", () => {
+  assert.equal(stepSpeed(0.6, 1), 0.65);
+  assert.equal(stepSpeed(0.65, -1), 0.6);
+  assert.equal(stepSpeed(0.25, -1), 0.25, "held at the floor");
+  assert.equal(stepSpeed(1.25, 1), 1.25, "held at the ceiling");
+  let s = 0.25;
+  for (let i = 0; i < 20; i++) s = stepSpeed(s, 1);
+  assert.equal(s, 1.25, "twenty steps up land exactly, no float creep");
+  assert.equal(clampSpeed(0.63), 0.65);
+  assert.equal(clampSpeed(3), 1.25);
+  assert.equal(clampSpeed(NaN), 1);
+  assert.deepEqual([speedText(0.65), speedText(1), speedText(0.5), speedText(1.25)], ["0.65×", "1×", "0.5×", "1.25×"]);
+  assert.deepEqual([1, 0.25, 0.5, 0.65, 0.75].map(nextPreset), [0.25, 0.5, 0.75, 0.75, 1]);
+  assert.equal(SPEED_GRID.length, 21);
+  for (let p = 0; p < 12; p++) assert.ok(SPEED_GRID.includes(buildUpSpeed(p)), "Build up stays on the grid");
 });
 
 test("labels are counts, never clock time", () => {

@@ -1247,6 +1247,40 @@ a.ls-chip {
 .ls-panel-sm {
   width: min(320px, calc(100vw - 32px));
 }
+/* Speed: one width for "1×" and "0.65×" alike, so a step never moves the bar. */
+.ls-speed {
+  justify-content: center;
+  min-width: 4.6em;
+}
+/* Its panel opens just above the pill, on its side of the bar, not the far corner. */
+.ls-panel.ls-speed-panel {
+  inset: auto auto 148px 24px;
+}
+.ls-speed-fine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ls-speed-fine .ls-chip {
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+}
+.ls-speed-now {
+  flex: 1;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+.ls-speed-presets {
+  display: flex;
+}
+.ls-speed-presets button {
+  flex: 1;
+  justify-content: center;
+  padding: 0 8px;
+}
 /* Where each part starts on the timeline: a taller accent tick with a dot cap, no text.
    Hover (or a first tap on touch) shows "Section start · Loop this section". */
 .ls-tl-sec {
@@ -1374,12 +1408,38 @@ a.ls-chip {
   .ls-next {
     display: none;
   }
-  .ls-panel {
+  .ls-speed-presets button {
+    min-height: 44px;
+  }
+  .ls-keys-hint {
+    display: none; /* no keyboard on a phone */
+  }
+  .ls-speed {
+    min-width: 4em;
+  }
+  .ls-panel,
+  .ls-panel.ls-speed-panel {
     inset: auto 0 0 0;
     width: 100%;
     max-height: 78dvh;
     border-radius: 20px 20px 0 0;
     padding-bottom: calc(18px + env(safe-area-inset-bottom));
+  }
+}
+/* The narrowest phones (320 px): the clock gives its room to the speed, so the
+   transport still fits on one line; the timeline's playhead says where you are. */
+@media (max-width: 360px) {
+  .ls-time {
+    display: none;
+  }
+  .ls-transport {
+    gap: 4px;
+  }
+  .ls-pill {
+    padding: 0 6px;
+  }
+  .ls-speed {
+    min-width: 3.8em;
   }
 }
 /* Portrait phone: the second panel is an inset over the first. */

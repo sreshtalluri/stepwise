@@ -195,7 +195,10 @@ function Room({
   }, [jobId]);
 
   useEffect(() => {
-    if (video) video.playbackRate = speed;
+    if (!video) return;
+    video.preservesPitch = true; // slower, not lower (see LessonViewer)
+    (video as { webkitPreservesPitch?: boolean }).webkitPreservesPitch = true;
+    video.playbackRate = speed;
   }, [video, speed, src]);
 
   const nextSpeed = useCallback(() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length]), []);
