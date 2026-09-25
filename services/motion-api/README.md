@@ -78,6 +78,15 @@ for the move: the old byte proxy read entire objects into memory and returned a
 200, so video scrubbing could not work. `asset_id` is still opaque and
 immutable, never a signed URL.
 
+GLBs and the MotionResult are **versioned by their bytes**
+(`{clip}_track{n}.{sha12}.glb`, `motion-result/{clip}.{sha12}.json.gz`), so the
+one-year `immutable` Cache-Control can never pin a re-exported lesson to its old
+body. `motion-result/{clip}.json.gz` is the one mutable object: the "latest"
+copy `/result` heads, whose `version` metadata names the immutable key the
+browser is sent to. A re-export deletes the versions it superseded 90 s after
+publishing the new ones. Lessons exported before this keep their unversioned
+names and keep working unchanged.
+
 ```sh
 python3 verify_r2.py                         # laptop: write, range-read, delete
 modal run modal_app.py::verify_r2_access     # the same, using the Modal Secret
@@ -244,7 +253,21 @@ lesson, and `/jobs`, `/assets/video:` and `/assets/*.glb` all 410.
 `POST /jobs/{job_id}/removal` is the same thing addressed by job_id (what the
 web's `/lesson/{job_id}` link carries). Body, both routes:
 `{"relationship": "i_am_in_it" | "i_own_the_rights" | "other", "reason": "<=500 chars, optional"}`.
-Repeating a removal is a 200 no-op. Each real removal: one `events` row
+Repeating a removal is a 200 that re-runs the (idempotent) sweep without a
+second charge or alert, so anything written after the first one goes too.
+
+**Nothing writes a removed lesson.** The tombstone is written first, then the
+job's GPU run and beat proposal are cancelled, then everything is deleted.
+Every writer -- `Reconstructor._run`, `run_clip`'s status/npz/performance
+writes, `export_clip_gltf` (GLBs, manifest, MotionResult, R2, final status),
+`propose_counts`, the Postgres status mirror, the last-access touch -- calls
+`retention.ensure_not_removed` before it writes; on `Removed` it stops without
+a `failed` status and sweeps what it had written (`retention.stop_and_sweep`).
+The daily sweeper re-sweeps any removed lesson with files left, and
+`python3 audit_removed.py [--fix]` lists (and removes) survivors across both
+Volumes, R2 and Postgres.
+
+Each real removal: one `events` row
 (`name='removal'`, daily-salted IP hash, `props.relationship`), a Sentry
 warning "lesson removed" tagged `relationship` + `clip_id` (the typed reason is
 never sent), and the reason kept only on the tombstone. 5 removals/day per IP

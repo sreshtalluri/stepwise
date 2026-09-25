@@ -94,6 +94,20 @@ test("a lesson id resolves to fixture files or to the job API", () => {
   assert.equal(lessonSource("constructor").docUrl, "/api/jobs/constructor/result");
 });
 
+test("a re-exported lesson's GLBs are new URLs; one exported before versioning keeps its old names", () => {
+  // services/motion-api names each GLB after its own bytes
+  // (storage.versioned_name), so a re-export can never be served from a
+  // year-long immutable cache entry of the previous one.
+  const doc = (ids: string[]) =>
+    ({ persons: ids.map((glb_asset_id, i) => ({ person_id: `p${i}`, animation: { glb_asset_id } })) }) as unknown as MotionResult;
+  const job = lessonSource("job_abc");
+  const before = job.glbUrls(doc(["abc_track1.0123456789ab.glb"]));
+  const after = job.glbUrls(doc(["abc_track1.ba9876543210.glb"]));
+  assert.deepEqual(before, ["/api/assets/abc_track1.0123456789ab.glb"]);
+  assert.notDeepEqual(before, after);
+  assert.deepEqual(job.glbUrls(doc(["abc_track1.glb"])), ["/api/assets/abc_track1.glb"]);
+});
+
 test("lessonIdFromLink takes a lesson or processing link, never a fixture", () => {
   assert.equal(lessonIdFromLink("https://stepwise.example/lesson/job_abc123"), "job_abc123");
   assert.equal(lessonIdFromLink("  /job/job_abc?x=1#y "), "job_abc");

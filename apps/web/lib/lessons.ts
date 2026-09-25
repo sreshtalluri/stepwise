@@ -99,6 +99,9 @@ export function lessonSource(id: string): LessonSource {
     docUrl: `/api/jobs/${job}/result`,
     creditUrl: `/api/jobs/${job}/source`,
     videoUrl: `/api/jobs/${job}/video`,
+    // The asset id is versioned by the GLB's bytes (`{clip}_track{n}.{hash}.glb`;
+    // lessons exported before that keep `{clip}_track{n}.glb`), so a re-export
+    // is a new URL and the immutable cache never serves the old body.
     glbUrls: (doc) =>
       doc.persons.map((p) => `/api/assets/${encodeURIComponent(p.animation.glb_asset_id)}`),
   };

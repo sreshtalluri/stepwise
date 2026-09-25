@@ -630,7 +630,7 @@ export const privacy = {
       items: [
         // uploads Volume /{clip_id}.mp4 and R2 video key — api._store_and_dispatch, storage.py
         "The video you uploaded, or the video we fetched from the link you pasted.",
-        // {clip_id}_track{n}.glb, motion-result.json.gz, beats.json — retention.clip_artifact_paths
+        // {clip_id}_track{n}[.{hash}].glb, motion-result[.{hash}].json.gz, beats.json — retention.clip_artifact_paths
         "What we build from it: a 3D body for each dancer, and the lesson data the viewer plays — timings, poses, hand and foot close-up areas, and counts proposed from the music.",
         // performance.json, job-status/job-meta, jobs table — modal_app.py, jobstore.py
         "Processing records: how the job went and how long each step took.",

@@ -53,11 +53,18 @@ from typing import Optional
 # signature and no expiry at all.
 PRESIGN_TTL_S = 6 * 3600
 
-# Delivered bytes are immutable: a clip_id is content-addressed and a GLB is
-# named after the job that produced it, so no key is ever rewritten. One year
-# is the maximum max-age anything honours, and `immutable` tells the browser
-# not to revalidate even on reload.
+# Delivered bytes are immutable: a video is keyed by its clip_id, and a GLB or
+# a MotionResult is keyed by a hash of its own bytes (`versioned_name`), so a
+# re-export writes NEW keys instead of rewriting old ones. That is what makes a
+# one-year `immutable` safe. It was not before: GLBs were `{clip}_track{n}.glb`,
+# and a re-processed lesson (job_a10682..., 2026-09-24) keeps its stale bytes
+# in any cache keyed on that name -- for a year, once assets have a stable
+# public URL (R2_PUBLIC_BASE_URL).
 CACHE_CONTROL = "public, max-age=31536000, immutable"
+# The one object that IS rewritten: `motion-result/{clip}.json.gz`, the
+# "latest" copy api.py reads and heads (its metadata names the current
+# version). No browser is ever sent to it; it says no-cache to any cache anyway.
+MUTABLE_CACHE_CONTROL = "no-cache"
 
 _ENV = ("R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME")
 
@@ -116,12 +123,30 @@ def video_key(clip_id: str) -> str:
 
 
 def glb_key(glb_name: str) -> str:
-    """`glb_name` is `{clip_id}_track{n}.glb`, per modal_app.export_clip_gltf."""
+    """`glb_name` is `{clip_id}_track{n}.{version}.glb` (or, for a lesson
+    exported before versioning, `{clip_id}_track{n}.glb`), per
+    modal_app.export_clip_gltf."""
     return f"glb/{glb_name}"
 
 
-def motion_result_key(clip_id: str) -> str:
-    return f"motion-result/{clip_id}.json.gz"
+def motion_result_key(clip_id: str, version: Optional[str] = None) -> str:
+    """No version: the "latest" copy (see MUTABLE_CACHE_CONTROL). With one: the
+    immutable object a browser is redirected to."""
+    return f"motion-result/{clip_id}.{version}.json.gz" if version else f"motion-result/{clip_id}.json.gz"
+
+
+def content_version(data: bytes) -> str:
+    """12 hex chars of sha256: identical bytes, identical name; any change, a
+    new name. 48 bits is plenty -- it only has to tell apart the handful of
+    exports one lesson will ever have."""
+    import hashlib
+    return hashlib.sha256(data).hexdigest()[:12]
+
+
+def versioned_name(name: str, data: bytes) -> str:
+    """`abc_track1.glb` + its bytes -> `abc_track1.3f2a9c01b7de.glb`."""
+    stem, ext = name.rsplit(".", 1)
+    return f"{stem}.{content_version(data)}.{ext}"
 
 
 def key_for_asset(asset_id: str) -> Optional[str]:
@@ -147,11 +172,37 @@ def clip_id_for_asset(asset_id: str) -> Optional[str]:
     return None
 
 
-def clip_keys(clip_id: str, glb_names: list[str]) -> list[str]:
-    """Every R2 key belonging to one lesson. The removal path deletes exactly
-    this list, so it lives next to the writers rather than being re-derived by
-    whoever is deleting -- same reason retention.clip_artifact_paths exists."""
-    return [video_key(clip_id), motion_result_key(clip_id)] + [glb_key(n) for n in glb_names]
+def clip_prefixes(clip_id: str) -> list[str]:
+    """Every R2 key of one lesson starts with one of these, every version of
+    every GLB and MotionResult included -- which is why deletion lists by
+    prefix instead of deriving names. `{clip}.` / `{clip}_track` cannot match
+    another lesson: clip ids are fixed-length hex."""
+    return [f"video/{clip_id}.", f"motion-result/{clip_id}.", f"glb/{clip_id}_track"]
+
+
+def list_keys(prefix: str) -> list[str]:
+    keys = []
+    for page in client().get_paginator("list_objects_v2").paginate(Bucket=bucket(), Prefix=prefix):
+        keys += [o["Key"] for o in page.get("Contents", [])]
+    return keys
+
+
+def clip_keys(clip_id: str) -> list[str]:
+    """Every R2 key belonging to one lesson, as it is right now. The removal
+    path deletes exactly this list, so it lives next to the writers rather than
+    being re-derived by whoever is deleting -- same reason
+    retention.clip_artifact_paths exists."""
+    return [k for p in clip_prefixes(clip_id) for k in list_keys(p)]
+
+
+def prune_versions(clip_id: str, keep: set) -> list[str]:
+    """Delete this lesson's GLB and MotionResult objects that are not in
+    `keep` -- the versions a re-export superseded. Never the video. Returns the
+    keys deleted."""
+    old = [k for p in clip_prefixes(clip_id)[1:] for k in list_keys(p) if k not in keep]
+    for k in old:
+        client().delete_object(Bucket=bucket(), Key=k)
+    return old
 
 
 # --- reads and writes ------------------------------------------------------
@@ -167,10 +218,11 @@ def put_bytes(key: str, data: bytes, content_type: str,
 
 def put_file(key: str, path: str, content_type: str,
              content_encoding: Optional[str] = None,
-             metadata: Optional[dict] = None) -> str:
+             metadata: Optional[dict] = None,
+             cache_control: str = CACHE_CONTROL) -> str:
     """Streaming upload, for the objects big enough that reading them into
     memory is the thing this module exists to stop doing."""
-    extra = {"ContentType": content_type, "CacheControl": CACHE_CONTROL}
+    extra = {"ContentType": content_type, "CacheControl": cache_control}
     if content_encoding:
         extra["ContentEncoding"] = content_encoding
     if metadata:
@@ -220,8 +272,12 @@ def _self_check() -> None:
     assert key_for_asset("nonsense") is None
     assert clip_id_for_asset("video:abc") == "abc"
     assert clip_id_for_asset("abc_track12.glb") == "abc"
-    assert clip_keys("abc", ["abc_track1.glb"]) == [
-        "video/abc.mp4", "motion-result/abc.json.gz", "glb/abc_track1.glb"]
+    assert clip_id_for_asset("abc_track12.3f2a9c01b7de.glb") == "abc"
+    assert key_for_asset("abc_track1.3f2a9c01b7de.glb") == "glb/abc_track1.3f2a9c01b7de.glb"
+    v = versioned_name("abc_track1.glb", b"x")
+    assert v == versioned_name("abc_track1.glb", b"x") != versioned_name("abc_track1.glb", b"y")
+    assert v.startswith("abc_track1.") and v.endswith(".glb") and len(v) == len("abc_track1.glb") + 13
+    assert motion_result_key("abc", "v1") == "motion-result/abc.v1.json.gz"
     print("storage: id<->key mapping ok")
 
 

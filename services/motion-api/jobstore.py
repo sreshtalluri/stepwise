@@ -126,15 +126,26 @@ def _pg_read(job_id: str) -> Optional[dict]:
                                "retry_count": retry_count})
 
 
-def _pg_write(job_id: str, clip_id: str, doc: dict) -> None:
+def _pg_write(job_id: str, clip_id: str, doc: dict, insert: bool = True) -> None:
     """Upsert, last-write-wins on `updated_at`.
 
     Deliberately not a compare-and-set on state: `run_clip` emits its stages in
     order from a single worker, so there is one writer per job and ordering is
     already guaranteed upstream. A CAS here would only add a way to drop a
     legitimate update.
+
+    `insert=False` updates an existing row and never creates one: the mirror
+    uses it for a row it has just read, so a removal that deletes the row in
+    between (forget) wins instead of being undone by the write.
     """
+    args = (doc["state"], doc["stage_message"], doc["progress"],
+            json.dumps(doc["error"]) if doc["error"] else None, doc["retry_count"])
     with connection() as conn:
+        if not insert:
+            conn.execute(
+                "UPDATE jobs SET state = %s, stage_message = %s, progress = %s, error = %s, "
+                "retry_count = %s, updated_at = now() WHERE job_id = %s", args + (job_id,))
+            return
         conn.execute(
             "INSERT INTO jobs (job_id, clip_id, state, stage_message, progress, error, retry_count) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s) "
@@ -142,8 +153,7 @@ def _pg_write(job_id: str, clip_id: str, doc: dict) -> None:
             "  state = EXCLUDED.state, stage_message = EXCLUDED.stage_message, "
             "  progress = EXCLUDED.progress, error = EXCLUDED.error, "
             "  retry_count = EXCLUDED.retry_count, updated_at = now()",
-            (job_id, clip_id, doc["state"], doc["stage_message"], doc["progress"],
-             json.dumps(doc["error"]) if doc["error"] else None, doc["retry_count"]))
+            (job_id, clip_id) + args)
 
 
 # --- the interface api.py calls -------------------------------------------
@@ -176,8 +186,16 @@ def read_status(volume, job_id: str, clip_id_for) -> Optional[dict]:
     # `milestones` is display-only and has no column: compare without it, or
     # every poll of a job that carries one would rewrite an unchanged row.
     if {k: v for k, v in doc.items() if k != "milestones"} != row:
+        # No row at all is what a removal leaves (forget deleted it), and a
+        # worker may still have written the Volume document after that. Copying
+        # it back would resurrect the job row of a removed lesson on the next
+        # poll, so a missing row is mirrored only once the tombstone says no.
+        # A row that exists is a live job's -- the common path pays nothing --
+        # and is only UPDATEd, so a removal that deletes it meanwhile wins.
+        if row is None and retention.is_removed(volume, clip_id_for(job_id)):
+            return doc
         try:
-            _pg_write(job_id, clip_id_for(job_id), doc)
+            _pg_write(job_id, clip_id_for(job_id), doc, insert=row is None)
         except Exception as e:  # noqa: BLE001
             # Serving the learner their status matters more than the mirror
             # succeeding; the next poll retries it two seconds from now.
@@ -215,17 +233,24 @@ def record_retry(volume, job_id: str, clip_id: str, retry_count: int) -> None:
             print(f"[jobstore] could not record retry for {job_id}: {e}")
 
 
-def forget(job_id: str) -> None:
-    """Removal deletes the job record. The tombstone lives on the lesson, not
-    on the job, so there is nothing here worth keeping -- and a job row that
-    outlived its takedown is exactly the kind of leftover the removal path
-    exists to prevent."""
-    if postgres_enabled():
-        try:
-            with connection() as conn:
-                conn.execute("DELETE FROM jobs WHERE job_id = %s", (job_id,))
-        except Exception as e:  # noqa: BLE001
-            print(f"[jobstore] could not delete job row {job_id}: {e}")
+def forget(job_id: str, clip_id: Optional[str] = None) -> None:
+    """Removal deletes the job record -- every row for the job and, given the
+    clip, for the lesson. The tombstone lives on the lesson, not on the job, so
+    there is nothing here worth keeping -- and a job row that outlived its
+    takedown is exactly the kind of leftover the removal path exists to prevent.
+
+    Whenever a database is configured, not only in postgres mode: rows written
+    while the flag was on outlive a rollback to the Volume backend, and a
+    removal must still reach them. Called by retention.delete_clip, so the
+    takedown, the expiry sweep and the audit's --fix all do it."""
+    if not os.environ.get("DATABASE_URL"):
+        return
+    try:
+        with connection() as conn:
+            conn.execute("DELETE FROM jobs WHERE job_id = %s OR clip_id = %s",
+                         (job_id, clip_id or job_id))
+    except Exception as e:  # noqa: BLE001
+        print(f"[jobstore] could not delete job row {job_id}: {e}")
 
 
 def health() -> dict:
