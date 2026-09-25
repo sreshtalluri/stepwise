@@ -428,6 +428,100 @@ def test_result_validated_at_export_is_a_redirect_with_no_revalidation(api, monk
     assert resp.status_code == 302
     assert resp.headers["location"] == "https://r2.example/motion-result/marked.json.gz?sig"
 
-    # Marked for a different job (a deduplicated upload): not trusted.
+    # Marked for a different job (a deduplicated upload): not trusted. Fresh
+    # replica, since this one already remembers the verdict for job_marked.
     metadata["validated"] = "job_someone_else"
+    api._R2_VALIDATED.clear()
     assert api._validated_r2_url(job_id, "marked") is None
+
+
+def _marked_in_r2(api, monkeypatch, clip_id, job_id):
+    """A finished lesson whose R2 MotionResult export marked validated; returns
+    the list head_object appends to, so a test can count R2 round trips."""
+    _seed_lesson(api, clip_id, job_id)
+    api._PRIMED.add(job_id)
+    heads = []
+    monkeypatch.setattr(api.storage, "enabled", lambda: True)
+    monkeypatch.setattr(api.storage, "client", lambda: types.SimpleNamespace(
+        head_object=lambda **kw: heads.append(kw) or {"Metadata": {"validated": job_id}}))
+    monkeypatch.setattr(api.storage, "bucket", lambda: "b")
+    monkeypatch.setattr(api.storage, "url_for", lambda key: f"https://r2.example/{key}?sig")
+    return heads
+
+
+def test_cached_success_is_still_410_after_a_removal_on_another_replica(api, monkeypatch):
+    """/result caches "succeeded" and the R2 verdict per replica. A removal
+    handled by a DIFFERENT replica clears none of that, so the tombstone must
+    still be read on every request."""
+    import retention
+    from fastapi import HTTPException
+    heads = _marked_in_r2(api, monkeypatch, "abc", "job_abc")
+    assert api.get_job_result("job_abc").status_code == 302
+    assert api.get_job_result("job_abc").status_code == 302
+    assert len(heads) == 1, "the R2 verdict is cached per replica"
+
+    retention.delete_clip(api.uploads_volume, api.results_volume, "abc", "job_abc", "", "i_am_in_it")
+    with pytest.raises(HTTPException) as e:
+        api.get_job_result("job_abc")
+    assert e.value.status_code == 410
+
+
+def test_result_redirect_records_the_access_after_responding(api, monkeypatch):
+    """The last-access write is a BackgroundTask: still recorded (it is the
+    retention clock), but no longer between the learner and the 302."""
+    import asyncio
+    _marked_in_r2(api, monkeypatch, "abc", "job_abc")
+    touch = "/abc.last-access.json"
+    seen = {}
+
+    async def send(msg):
+        if msg["type"] == "http.response.start":
+            seen["status"] = msg["status"]
+            seen["touched_before_response"] = touch in api.results_volume.files
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    path = "/jobs/job_abc/result"
+    asyncio.run(api.app({"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+                         "method": "GET", "scheme": "http", "path": path, "raw_path": path.encode(),
+                         "query_string": b"", "root_path": "", "headers": [],
+                         "client": ("127.0.0.1", 1), "server": ("testserver", 80)}, receive, send))
+    assert seen == {"status": 302, "touched_before_response": False}
+    assert touch in api.results_volume.files
+
+
+def test_removed_mid_run_status_written_after_removal_is_410_and_not_retryable(api):
+    """job_6037...: the lesson was removed while its job ran, and the worker then
+    wrote a final `failed` status after delete_clip. Status and retry must both
+    answer removed -- retry must never re-run the GPU on a taken-down lesson."""
+    from fastapi import HTTPException
+    _seed_lesson(api, "abc", "job_abc")
+    api.remove_lesson("abc", _removal(api), NO_REQUEST)
+    api.results_volume.files["/job_abc.job-meta.json"] = json.dumps({"clip_id": "abc"}).encode()
+    api.results_volume.files["/job_abc.job-status.json"] = json.dumps({
+        "schema_version": "1.0.0", "job_id": "job_abc", "state": "failed",
+        "stage_message": "", "progress": 0.5, "retry_count": 0,
+        "error": {"code": "export_error", "message": "x", "retryable": True}}).encode()
+    for call in (lambda: api.get_job_status("job_abc"),
+                 lambda: api.retry_job("job_abc", NO_REQUEST)):
+        with pytest.raises(HTTPException) as e:
+            call()
+        assert e.value.status_code == 410
+
+
+def test_finished_status_rechecks_removal_after_the_cache_window(api, monkeypatch):
+    """The not-removed verdict is cached per replica, so a finished job's polls
+    stay cheap; a removal on ANOTHER replica is seen once the window passes."""
+    import retention
+    from fastapi import HTTPException
+    _seed_lesson(api, "abc", "job_abc")
+    assert api.get_job_status("job_abc")["state"] == "succeeded"
+    retention.delete_clip(api.uploads_volume, api.results_volume, "abc", "job_abc", "", "i_am_in_it")
+    api.results_volume.files["/job_abc.job-status.json"] = json.dumps({
+        "schema_version": "1.0.0", "job_id": "job_abc", "state": "succeeded",
+        "stage_message": "", "progress": 1.0, "error": None, "retry_count": 0}).encode()
+    monkeypatch.setattr(api, "_REMOVAL_CHECK_S", 0.0)
+    with pytest.raises(HTTPException) as e:
+        api.get_job_status("job_abc")
+    assert e.value.status_code == 410

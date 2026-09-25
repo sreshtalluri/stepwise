@@ -674,9 +674,38 @@ def get_job_source(job_id: str) -> dict:
 # results Volume, unmodified (no reinterpretation, spec item 5).
 # ---------------------------------------------------------------------------
 
+# job_id -> clip_id. The mapping is written once, at dispatch, and never
+# changes, so a found one is true forever. Reading an existing file off the
+# Volume from this (unmounted) container measured 0.45-1.25 s warm
+# (2026-09-24), and /result used to do it twice per request; the jobs row
+# answers in ~3 ms on a warm pool.
+# A miss is not cached: the meta may simply not exist yet.
+_CLIP_OF: dict[str, str] = {}
+
+
+def _clip_id_from_row(job_id: str) -> Optional[str]:
+    if not jobstore.postgres_enabled():
+        return None
+    try:
+        with jobstore.connection() as conn:
+            row = conn.execute("SELECT clip_id FROM jobs WHERE job_id = %s", (job_id,)).fetchone()
+        return row[0] if row else None
+    except Exception as e:  # noqa: BLE001 -- the Volume below still answers
+        print(f"[jobs] clip_id lookup for {job_id} fell back to the Volume: {e}")
+        return None
+
+
 def _clip_id_for(job_id: str) -> str:
+    if job_id in _CLIP_OF:
+        return _CLIP_OF[job_id]
+    if clip_id := _clip_id_from_row(job_id):
+        _CLIP_OF[job_id] = clip_id
+        return clip_id
     meta = _volume_read_json(results_volume, f"/{job_id}.job-meta.json")
-    return meta["clip_id"] if meta else job_id.removeprefix("job_")
+    if not meta:
+        return job_id.removeprefix("job_")
+    _CLIP_OF[job_id] = meta["clip_id"]
+    return meta["clip_id"]
 
 
 def _refuse_if_removed(clip_id: str) -> None:
@@ -690,6 +719,22 @@ def _refuse_if_removed(clip_id: str) -> None:
     tomb = _volume_read_json(results_volume, f"/{clip_id}.removed.json")
     if tomb is not None:
         raise HTTPException(410, "This lesson was removed and is not coming back.")
+
+
+# job_id -> monotonic time its lesson was last confirmed NOT removed. A missing
+# tombstone costs ~0.1 s to confirm; a finished job's status is polled on every
+# open, so it is confirmed at most this often per replica. A removal on another
+# replica shows up here within this window; /result checks every time anyway.
+_NOT_REMOVED: dict[str, float] = {}
+_REMOVAL_CHECK_S = 30.0
+
+
+def _refuse_if_removed_cached(job_id: str) -> None:
+    seen = _NOT_REMOVED.get(job_id)
+    if seen is not None and time.monotonic() - seen < _REMOVAL_CHECK_S:
+        return
+    _refuse_if_removed(_clip_id_for(job_id))
+    _NOT_REMOVED[job_id] = time.monotonic()
 
 
 def _with_early_counts(doc: dict, job_id: str) -> dict:
@@ -718,9 +763,9 @@ def _with_early_counts(doc: dict, job_id: str) -> dict:
 def get_job_status(job_id: str) -> dict:
     doc = jobstore.read_status(results_volume, job_id, _clip_id_for)
     if doc is None:
-        # Removal deletes the job-status document, so a MISSING one is the only
-        # case that can be a removed lesson -- which is why the tombstone is
-        # checked here and not at the top. This endpoint is polled every second
+        # Removal deletes the job-status document, so a MISSING one is the
+        # usual removed lesson (terminal ones are caught below) -- which is why
+        # the tombstone is checked here and not at the top. This endpoint is polled every second
         # or so by the processing screen, and the common path (a job that is
         # genuinely running) must stay at exactly one Volume read, the way it
         # was before removal existed.
@@ -737,6 +782,13 @@ def get_job_status(job_id: str) -> dict:
         if _volume_read_json(results_volume, f"/{job_id}.job-meta.json") is None:
             raise HTTPException(404, "No lesson at this link.")
         doc = jobstore.queued_doc(job_id)
+    elif doc["state"] in ("succeeded", "failed"):
+        # A lesson removed WHILE its job ran: the worker writes its final status
+        # (and npz) after delete_clip, so a status document can exist for a
+        # removed lesson (job_6037..., 2026-09-25). Terminal states only -- a
+        # running job's polls stay at one Volume read -- and at most one
+        # tombstone read per job per _REMOVAL_CHECK_S per replica.
+        _refuse_if_removed_cached(job_id)
     doc = _with_early_counts(doc, job_id)
     result = validate_job_status(doc)
     if not result.valid:
@@ -773,6 +825,8 @@ def retry_job(job_id: str, http: Request) -> dict:
     doc = jobstore.read_status(results_volume, job_id, _clip_id_for)
     if doc is None:
         raise HTTPException(404, "Unknown job_id.")
+    # Never re-run the GPU on a lesson someone took down.
+    _refuse_if_removed(_clip_id_for(job_id))
     if doc["state"] != "failed":
         raise HTTPException(409, f"Job is '{doc['state']}', not 'failed' -- nothing to retry.")
     if not doc["error"] or not doc["error"]["retryable"]:
@@ -825,6 +879,10 @@ _PRIMED: set[str] = set()
 # ponytail: global, not per-key; per-key if two different cold lessons ever
 # queue behind each other in practice.
 _VALIDATING = threading.Lock()
+# (job_id, clip_id) whose R2 MotionResult carried `validated: <job_id>`. The
+# object is written once per export and removal is checked before this is ever
+# consulted, so one head_object per lesson per replica is enough.
+_R2_VALIDATED: set[tuple[str, str]] = set()
 
 
 def _validated_r2_url(job_id: str, clip_id: str) -> Optional[str]:
@@ -842,10 +900,13 @@ def _validated_r2_url(job_id: str, clip_id: str) -> Optional[str]:
     if not storage.enabled():
         return None
     key = storage.motion_result_key(clip_id)
+    if (job_id, clip_id) in _R2_VALIDATED:
+        return storage.url_for(key)  # presigning is local: no round trip
     try:
         head = storage.client().head_object(Bucket=storage.bucket(), Key=key)
         if (head.get("Metadata") or {}).get("validated") != job_id:
             return None
+        _R2_VALIDATED.add((job_id, clip_id))
         return storage.url_for(key)
     except Exception:  # noqa: BLE001 -- missing or unreachable: the byte path decides
         return None
@@ -909,27 +970,42 @@ def _prime_result(job_id: str) -> None:
     threading.Thread(target=run, daemon=True).start()
 
 
+# Jobs this replica has seen succeed. Succeeded is terminal (retry only takes a
+# failed job), so the one thing that can change afterwards is a removal -- and
+# /result checks the tombstone on every request before trusting this.
+_SUCCEEDED: set[str] = set()
+
+
 @app.get("/jobs/{job_id}/result")
-def get_job_result(job_id: str):
-    status = get_job_status(job_id)
-    if status["state"] != "succeeded":
-        raise HTTPException(409, f"Job is '{status['state']}', not 'succeeded'.")
+def get_job_result(job_id: str, tasks: BackgroundTasks = None):
     clip_id = _clip_id_for(job_id)
-    # Checked explicitly rather than relying on get_job_status: this is the
-    # endpoint that hands over the actual reconstruction, so it does not get to
-    # assume some earlier call already refused. Once per lesson open, not per
-    # poll, so the extra read is free where it matters.
+    # First and on every request, cache or no cache: this is the endpoint that
+    # hands over the actual reconstruction, so it does not get to assume some
+    # earlier call already refused, and no in-process cache below may outlive
+    # a removal made on another replica. One Volume read.
     _refuse_if_removed(clip_id)
+    if job_id not in _SUCCEEDED:
+        status = get_job_status(job_id)
+        if status["state"] != "succeeded":
+            raise HTTPException(409, f"Job is '{status['state']}', not 'succeeded'.")
+        _SUCCEEDED.add(job_id)
+    # The last-access marker is a Volume write: after the response, not before
+    # it. Called directly (tests, no request) it just runs inline.
+    def touch():
+        if tasks is None:
+            _touch(clip_id)
+        else:
+            tasks.add_task(_touch, clip_id)
 
     url = _validated_r2_url(job_id, clip_id)
     if url is not None:
-        _touch(clip_id)
+        touch()
         # 302 like /assets: not cacheable, the URL on the other end expires.
         return RedirectResponse(url, status_code=302)
 
     stored = _stored_result(job_id, clip_id)
     if stored is not None:
-        _touch(clip_id)
+        touch()
         # Already gzipped and already validated: handed over byte-for-byte.
         # Re-parsing, re-validating and re-encoding an 11.7 MB document on
         # every open took 13 s before the first byte on Modal (solo-02).
@@ -950,7 +1026,7 @@ def get_job_result(job_id: str):
     if not result.valid:
         raise HTTPException(500, f"Assembled MotionResult failed contract validation: {result.errors}")
 
-    _touch(clip_id)
+    touch()
     return doc
 
 
@@ -1156,6 +1232,10 @@ def remove_lesson(clip_id: str, request: RemovalRequest, http: Request) -> Remov
                                     request.reason.strip(), request.relationship)
     jobstore.forget(job_id)
     _TOUCHED.pop(clip_id, None)
+    # Belt and braces: /result checks the tombstone before these anyway.
+    _SUCCEEDED.discard(job_id)
+    _R2_VALIDATED.discard((job_id, clip_id))
+    _NOT_REMOVED.pop(job_id, None)
     print(f"[removal] {clip_id}: deleted {len(outcome['deleted'])} artifacts ({request.relationship})")
     # The owner's alert. Ids and the category only -- the free-text reason is
     # on the tombstone and deliberately not here.
