@@ -37,6 +37,8 @@ import { dancerBox, firstWellObserved, markerPoint, sideWord, stillCrop } from "
 import {
   countLoop,
   countName,
+  dragEdge,
+  dragSnap,
   edgeLoop,
   extendAnchor,
   LOOP_ALL,
@@ -56,6 +58,7 @@ import {
 import { lesson as copy, privacy } from "../../lib/copy";
 import { prefersReducedMotion } from "../../lib/reveal";
 import { useCount, useFrameGrabs } from "./hooks";
+import { CountNumeral } from "./CountNumeral";
 import type { Lesson, PanelId } from "../LessonViewer";
 import { StructureEditor } from "../../../../packages/navigation/src/LessonNavigator";
 import "../../../../packages/navigation/src/navigation.css";
@@ -427,13 +430,7 @@ export function CountBar({ l, big = false, select = false }: { l: Lesson; big?: 
           }}
           disabled={c > total}
         >
-          {c <= total ? countLabel(c) : ""}
-          {/* The "and" after the count: there to SEE, it lights on the off-beat. */}
-          {c <= total && (
-            <span className={`ls-and${half === c + 0.5 ? " ls-on" : ""}`} aria-hidden="true">
-              &amp;
-            </span>
-          )}
+          <CountNumeral c={c} total={total} half={half} ands={l.showAnds} />
         </button>
       ))}
     </div>
@@ -460,10 +457,13 @@ export function LoopLength({ l }: { l: Lesson }) {
 /**
  * The timeline: the whole dance, a tick per count and a taller one with a small "1"
  * on each eight's downbeat. Tap = go there; press and drag across it = loop exactly
- * those counts, snapped to counts and "and"s (Alt: unsnapped); the loop's two handles
- * drag to adjust it (44 px targets, arrow keys ½ a count). One pointer model for
- * mouse and touch, captured on the bar, and `touch-action: none` so a drag here is
- * never the page's swipe. Under it, the loop in words, ½-count nudges and ×.
+ * those counts; the loop's two handles drag to adjust it (44 px targets). Drags snap
+ * to whole counts (`dragSnap`: Shift adds the "and"s, Alt none), and while one is
+ * held the loop it would make floats over the finger's edge ("3 – 6"), since on a
+ * phone the finger hides the handle. The "and" is the fine step: the ½-count nudges
+ * beside each end in the readout under it, or the arrow keys on a handle. One pointer
+ * model for mouse and touch, captured on the bar, and `touch-action: none` so a drag
+ * here is never the page's swipe.
  */
 export function Timeline({ l }: { l: Lesson }) {
   const bar = useRef<HTMLDivElement>(null);
@@ -473,6 +473,8 @@ export function Timeline({ l }: { l: Lesson }) {
   const pct = (t: number) => `${(Math.min(Math.max(t / endS, 0), 1) * 100).toFixed(3)}%`;
   const g = useRef<{ kind: "new" | "start" | "end"; x0: number; from: number; moved: boolean } | null>(null);
   const [preview, setPreview] = useState<LoopSpan | null>(null);
+  /** Where the finger is while a drag makes `preview`, in seconds: its bubble sits on the nearer edge. */
+  const [fingerS, setFingerS] = useState(0);
   const timeAtX = (x: number) => {
     const r = bar.current!.getBoundingClientRect();
     return Math.min(Math.max((x - r.left) / r.width, 0), 1) * endS;
@@ -493,12 +495,10 @@ export function Timeline({ l }: { l: Lesson }) {
   const [secOpen, setSecOpen] = useState<string | null>(null);
   const touchTap = useRef(false);
 
-  const spanFor = (d: NonNullable<typeof g.current>, x: number, free: boolean): LoopSpan | null => {
+  const spanFor = (d: NonNullable<typeof g.current>, x: number, snap: number): LoopSpan | null => {
     const c = countAtX(x);
-    if (d.kind === "new") return edgeLoop(d.from, c, total, free);
-    const lp = l.loop!;
-    // The other edge stays put; a handle dragged past it swaps roles.
-    return d.kind === "start" ? edgeLoop(c, lp.endCount + 1, total, free) : edgeLoop(lp.startCount, c, total, free);
+    if (d.kind === "new") return edgeLoop(d.from, c, total, snap);
+    return dragEdge(l.loop!, d.kind, c, total, snap);
   };
   const onDown = (e: React.PointerEvent, kind: "new" | "start" | "end") => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
@@ -517,7 +517,8 @@ export function Timeline({ l }: { l: Lesson }) {
     if (!d) return;
     if (!d.moved && Math.abs(e.clientX - d.x0) < 6) return;
     d.moved = true;
-    setPreview(spanFor(d, e.clientX, e.altKey));
+    setPreview(spanFor(d, e.clientX, dragSnap(e)));
+    setFingerS(timeAtX(e.clientX));
   };
   const onUp = (e: React.PointerEvent) => {
     const d = g.current;
@@ -525,7 +526,7 @@ export function Timeline({ l }: { l: Lesson }) {
     setPreview(null);
     if (!d) return;
     if (!d.moved) return l.seek(timeAtX(e.clientX));
-    const s = spanFor(d, e.clientX, e.altKey);
+    const s = spanFor(d, e.clientX, dragSnap(e));
     if (s) l.setLoop(s, { play: l.playing, keep: d.kind !== "new", via: "drag" });
   };
   const nudge = (edge: "start" | "end", d: number) => l.loop && l.setLoop(nudgeEdge(l.loop, edge, d, total), { play: l.playing, keep: true, via: "drag" });
@@ -619,6 +620,11 @@ export function Timeline({ l }: { l: Lesson }) {
         <div className="ls-tl-head" style={{ left: pct(l.displayTime) }} />
         {shown && handle("start", a)}
         {shown && handle("end", b)}
+        {preview && (
+          <span className="ls-tl-bubble" aria-hidden="true" style={{ left: `clamp(2.5rem, ${pct(Math.abs(fingerS - a) < Math.abs(fingerS - b) ? a : b)}, calc(100% - 2.5rem))` }}>
+            {countName(preview.startCount)} – {countName(preview.endCount)}
+          </span>
+        )}
       </div>
       <div className="ls-tl-read" aria-live="polite">
         {l.loop && !preview ? (
@@ -1123,6 +1129,9 @@ export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }
       <div className="ls-group-row">
         <button type="button" className="ls-chip" aria-pressed={l.follow} onClick={() => l.setFollow((v) => !v)}>
           {l.follow ? copy.transport.followOn : copy.transport.followOff}
+        </button>
+        <button type="button" className="ls-chip" aria-pressed={l.showAnds} onClick={() => l.setShowAnds(!l.showAnds)} title={copy.transport.andsHint}>
+          {copy.transport.ands}
         </button>
       </div>
       <CountOneTools l={l} />
