@@ -522,6 +522,7 @@ export const lesson = {
     removeMine: "Remove from my lessons",
     report: "Report or remove this video",
     privacy: "Privacy",
+    contact: "Contact",
   },
 
   install: {

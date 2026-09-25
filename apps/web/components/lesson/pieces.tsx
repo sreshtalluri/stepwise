@@ -52,7 +52,7 @@ import {
   SPEED_PRESETS,
   speedText,
 } from "../../lib/lessonEngine";
-import { lesson as copy } from "../../lib/copy";
+import { lesson as copy, privacy } from "../../lib/copy";
 import { prefersReducedMotion } from "../../lib/reveal";
 import { useCount, useFrameGrabs } from "./hooks";
 import type { Lesson, PanelId } from "../LessonViewer";
@@ -838,6 +838,15 @@ export function BottomBar({ l, more }: { l: Lesson; more: React.ReactNode }) {
         {more}
       </div>
       <Timeline l={l} />
+      {/* Desktop only (hidden on a phone, where More has them): the footer's two links,
+          in the corner the timeline's readout leaves free. */}
+      <p className="ls-legal">
+        <Link href="/privacy">{copy.menu.privacy}</Link>
+        {" · "}
+        <a href={`mailto:${privacy.contact}`} title={privacy.contact}>
+          {copy.menu.contact}
+        </a>
+      </p>
     </div>
   );
 }
@@ -1138,10 +1147,13 @@ export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }
           <button type="button" className="ls-chip" disabled={!l.onReportOrRemove} onClick={() => l.onReportOrRemove?.()}>
             {copy.menu.report}
           </button>
-          {/* The phone layout never scrolls to the site footer, so the policy is reachable here. */}
+          {/* The lesson hides the site footer (it fills the screen), so both of its links live here. */}
           <Link href="/privacy" className="ls-chip">
             {copy.menu.privacy}
           </Link>
+          <a href={`mailto:${privacy.contact}`} className="ls-chip">
+            {privacy.contact}
+          </a>
         </div>
       </div>
       <details className="ls-about">

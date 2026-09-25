@@ -56,6 +56,18 @@ body {
   font-weight: 400;
   line-height: 1.5;
   font-feature-settings: "tnum" 1; /* tabular figures — DESIGN.md §5 */
+  /* The page, then the site footer (app/layout.tsx) under it. The app screens
+     (processing, loading, state) take `flex: 1` instead of 100dvh, so a screen
+     that fits leaves the footer on screen rather than 80 px below it: no scroll
+     that exists only for the footer. */
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+/* The lesson is the whole screen; its More menu (and a corner link on a desktop)
+   carry the privacy page and the contact address instead. */
+body:has(> .ls) > footer {
+  display: none;
 }
 
 a {
@@ -79,6 +91,7 @@ button {
 /* --- shared chrome ------------------------------------------------------- */
 
 .wrap {
+  width: 100%; /* a flex item (body) with auto margins would shrink to its text */
   max-width: 1400px; /* DESIGN.md §6 */
   margin: 0 auto;
   padding: 0 clamp(20px, 4vw, 48px);
