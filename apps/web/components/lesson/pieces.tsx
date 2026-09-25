@@ -927,7 +927,7 @@ export function CountOneTools({ l }: { l: Lesson }) {
     <div className="ls-group" role="group" aria-labelledby="ls-one-h">
       <span className="ls-group-label" id="ls-one-h">
         {copy.countOne.heading}
-        {l.countsFrom !== "hand" && <small> {copy.countOne.guess}</small>}
+        {l.countsFrom !== "hand" && <small> {l.oneChecked ? copy.countOne.checked : copy.countOne.guess}</small>}
       </span>
       {unsure && <span className="ls-unsure">{copy.countOne.unsure}</span>}
       {unsure && altRow}
@@ -1125,9 +1125,11 @@ export function MoreContent({ l, extra }: { l: Lesson; extra?: React.ReactNode }
   const perMinute = Math.round(60 / l.structure.grid.secondsPerCount);
   const counts =
     l.countsFrom === "music"
-      ? l.oneUnsure
-        ? copy.counts.unsureOne(perMinute)
-        : copy.counts.proposed(perMinute)
+      ? l.oneChecked
+        ? copy.counts.checked(perMinute)
+        : l.oneUnsure
+          ? copy.counts.unsureOne(perMinute)
+          : copy.counts.proposed(perMinute)
       : l.countsFrom === "weak"
         ? copy.counts.weak(perMinute)
         : l.countsFrom === "none"

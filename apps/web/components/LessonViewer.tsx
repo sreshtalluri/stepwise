@@ -164,6 +164,9 @@ function useLesson(
   /** The tracker does not know which beat is 1 (a guess, not just a proposal). Lessons
    * from before `count_one_confidence` existed carry none and read as before. */
   const oneUnsure = !authored && (doc.proposed_counts?.count_one_confidence ?? 1) < ONE_SURE;
+  /** A person (the owner, via /owner) checked which beat is 1 on this lesson, so
+   * "count 1 is a guess" would no longer be true. */
+  const oneChecked = !authored && doc.proposed_counts?.count_one_source === "owner";
 
   // ---- the loop: any run of counts, or null for the whole dance
   const eights = useMemo(() => eightsOf(structure), [structure]);
@@ -519,7 +522,7 @@ function useLesson(
   return {
     doc, title, videoUrl, credit, glbUrls, lessonId, endS, aspect, wide,
     video, setVideo, timeRef, displayTime, playing, setPlaying, play, pause, togglePlay, seek,
-    structure, editStructure, authored, countsFrom, oneUnsure, tapOne, nudgeOne, tryOne, alternates,
+    structure, editStructure, authored, countsFrom, oneUnsure, oneChecked, tapOne, nudgeOne, tryOne, alternates,
     eights, loop, setLoop, loopEight, here, hereCount, stepLoop, loopLen, setLoopLen, next, done, sameSpan,
     speed, speedPick, pickSpeed, cycleSpeed, nudgeSpeed, buildUp, setBuildUp, passes, setHoldSlow,
     clickOn, setClickOn, clickMode, setClickMode, clickVol, setClickVol, musicVol, setMusicVol, showAnds, setShowAnds,
