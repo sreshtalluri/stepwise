@@ -3,8 +3,8 @@
  * tested in lessonEngine.test.ts.
  *
  * One mode, nothing forced: the whole dance plays through with its counts shown until
- * the learner makes a loop — dragged across the timeline from any count or "and" to
- * any other, or a shortcut (a chip, a preset length) — with an optional build-up that
+ * the learner makes a loop — dragged across the timeline from any count to any other
+ * (an "and" one nudge away), or a shortcut (a chip, a preset length) — with an optional build-up that
  * starts a loop at 0.5× and adds a tenth each pass. The page's one clock (the video,
  * `useVideoClock`) counts the passes; everything here is read off that count.
  *
@@ -56,15 +56,38 @@ const clampCount = (c: number, total: number) => Math.max(1, Math.min(snapHalf(c
 export const loopLength = (s: LoopSpan) => s.endCount - s.startCount + 1;
 
 /**
- * A loop between two edges on the timeline, in count coordinates (either order; the
- * later edge is where the loop stops). Snapped to counts and "and"s unless `free`
- * (then to a hundredth of a count). Null when shorter than one count.
+ * How finely a dragged loop edge snaps, in counts. Whole counts by default, on touch
+ * and mouse alike: dancers loop counts and eights, and a finger on a phone timeline
+ * (~10 px a count) cannot land on an "and" without the edge flickering between the
+ * two. The "and" is one step away — the ½ nudges beside each edge in the readout, the
+ * arrow keys on a handle, or Shift while dragging — and Alt drags unsnapped.
  */
-export function edgeLoop(a: number, b: number, total: number, free = false): LoopSpan | null {
-  const q = (c: number) => Math.max(1, Math.min(free ? Math.round(c * 100) / 100 : snapHalf(c), total + 1));
+export const COUNT_SNAP = 1;
+export const HALF_SNAP = 0.5;
+export const FREE_SNAP = 0.01;
+export const dragSnap = (mods: { shiftKey?: boolean; altKey?: boolean }) =>
+  mods.altKey ? FREE_SNAP : mods.shiftKey ? HALF_SNAP : COUNT_SNAP;
+
+/**
+ * A loop between two edges on the timeline, in count coordinates (either order; the
+ * later edge is where the loop stops), each edge rounded to the nearest `snap` counts
+ * (`dragSnap`). Null when shorter than one count.
+ */
+export function edgeLoop(a: number, b: number, total: number, snap = COUNT_SNAP): LoopSpan | null {
+  const q = (c: number) => Math.max(1, Math.min(Math.round(Math.round(c / snap) * snap * 100) / 100, total + 1));
   const s = q(Math.min(a, b));
   const e = q(Math.max(a, b));
   return e - s >= 1 ? { startCount: s, endCount: Math.round((e - 1) * 100) / 100 } : null;
+}
+
+/**
+ * A loop handle dragged to count `c`: only that edge snaps, the other stays exactly
+ * where it is, so a 3& set with a nudge survives dragging the far end. A handle
+ * dragged past the other swaps roles.
+ */
+export function dragEdge(loop: LoopSpan, edge: "start" | "end", c: number, total: number, snap = COUNT_SNAP): LoopSpan | null {
+  const m = Math.round(c / snap) * snap;
+  return edge === "start" ? edgeLoop(m, loop.endCount + 1, total, FREE_SNAP) : edgeLoop(loop.startCount, m, total, FREE_SNAP);
 }
 
 /** One edge moved by `delta` counts (±½ from the nudge buttons); never shorter than one count. */
@@ -256,6 +279,25 @@ export function loadLoopLength(lessonId: string): number {
 export function saveLoopLength(lessonId: string, len: number): void {
   try {
     window.localStorage.setItem(LEN_KEY(lessonId), String(len));
+  } catch {
+    /* private mode: kept for this visit only */
+  }
+}
+
+/** Whether the count strip shows the "&" between counts. Per device; on until turned off. */
+const ANDS_KEY = "stepwise.show-ands.v1";
+
+export function loadShowAnds(): boolean {
+  try {
+    return window.localStorage.getItem(ANDS_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function saveShowAnds(on: boolean): void {
+  try {
+    window.localStorage.setItem(ANDS_KEY, on ? "1" : "0");
   } catch {
     /* private mode: kept for this visit only */
   }

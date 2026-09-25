@@ -774,6 +774,21 @@ a.ls-chip {
 .ls-tl-handle:focus-visible::after {
   box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--ink);
 }
+/* While a drag is held: the loop it would make, over the finger's edge (the finger hides the handle). */
+.ls-tl-bubble {
+  position: absolute;
+  bottom: calc(100% - 2px);
+  z-index: 3;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  font: 700 0.875rem/1.2 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
 .ls-tl-read {
   display: flex;
   align-items: center;
@@ -805,6 +820,15 @@ a.ls-chip {
   height: 36px;
   border-radius: 10px;
   color: var(--ink-muted);
+}
+/* The ½-count nudges are how a finger reaches an "and": a 44 px target around the 36 px button. */
+.ls-tl-nudge button {
+  position: relative;
+}
+.ls-tl-nudge button::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
 }
 .ls-tl-nudge button:hover,
 .ls-tl-clear:hover {
@@ -1455,6 +1479,10 @@ a.ls-chip {
    transport still fits on one line; the timeline's playhead says where you are. */
 @media (max-width: 360px) {
   .ls-time {
+    display: none;
+  }
+  /* The readout's "Loop" word gives its room to the ½ nudges and ×: the band over it says it loops. */
+  .ls-tl-name:has(+ .ls-tl-nudge) {
     display: none;
   }
   .ls-transport {

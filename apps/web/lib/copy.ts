@@ -396,7 +396,7 @@ export const lesson = {
   timeline: {
     label: "Position in the dance. Drag across it to loop those counts.",
     hint: "Drag across the timeline to loop any counts",
-    hintFree: "Hold Alt to drag without snapping to the counts",
+    hintFree: "Drags snap to whole counts. Hold Shift to snap to the & too, Alt not to snap. The arrows by each end move it half a count.",
     clear: "Stop looping",
     section: "Section start · Loop this section",
     start: "Loop start",
@@ -451,6 +451,9 @@ export const lesson = {
     mirrorOff: "Mirror off",
     followOn: "Follow on",
     followOff: "Follow off",
+    /** The "&" between the counts on screen. The click's "and"s are its own (Click settings). */
+    ands: "Show &",
+    andsHint: "The & between the counts on screen. The click's and-beats are set under Click.",
     back: "Home",
   },
 
