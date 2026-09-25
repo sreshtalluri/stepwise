@@ -285,6 +285,13 @@ export const lesson = {
   },
   postCreditTitle: (text: string) => `From the post's caption and sound: ${text}`,
   /**
+   * A link lesson's name in My lessons and the page's heading: whose post it is,
+   * and the choreographer when the caption named one. An upload has no credit and
+   * stays `load.jobTitle`.
+   */
+  creditTitle: (c: { host: string; creator: string | null; choreo: string | null }) =>
+    [c.creator ? `${c.creator} on ${c.host}` : `From ${c.host}`, c.choreo && `Choreo ${c.choreo}`].filter(Boolean).join(" · "),
+  /**
    * Opening a lesson (or its processing page) by its link, keyed by what
    * services/motion-api answered: 409 not ready, 410 removed, 404 unknown.
    * `notReady` still does not promise the lesson exists.
