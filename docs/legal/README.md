@@ -11,6 +11,9 @@ open lawyer questions are listed in each doc. New legal research goes in this fo
 - [`system-review-2026-09.md`](system-review-2026-09.md): the code on `main` (2026-09-25) checked
   against the law and the two docs above, one moving part at a time, including where `/privacy`
   no longer matches the code.
+- [`abuse-report-runbook.md`](abuse-report-runbook.md): what the owner does when a lesson is
+  reported as child sexual abuse material or intimate images shared without consent (preserve,
+  report to NCMEC, 48-hour removal), and how to use `quarantine.py`.
 - Related, in `docs/research/`: [`link-ingestion.md`](../research/link-ingestion.md), the platform
   terms analysis for fetching TikTok and YouTube links.
 
@@ -50,7 +53,7 @@ Every action item from the docs. **R&P** = `rights-and-privacy.md`, **LPL** =
 | 27 | `/privacy`: say that usage notes and removal rows about a removed lesson stay until they expire (Neon 13 months, PostHog its own period); mention backend performance traces (10%) or turn them off; name Neon | SR rows 18, 20, 24 | beta | done (2026-09-25) | `apps/web/lib/copy.ts` `privacy`; `observability.py` `traces_sample_rate` |
 | 28 | Body shape baked into every GLB: say so on `/privacy`, update R&P §2, then decide whether to keep it or coarsen it | SR row 7; R&P §6.7 | beta (copy) / before public launch (decision) | needs owner decision | `modal_app.py` `_character_with_shape`; `export-manifest.json` `shape_params` |
 | 29 | Remove live lesson `job_id`s from the public repo's eval labels (use opaque ids) | SR row 22 | beta | done (2026-09-25) | `evaluation/labels/count_one.json` |
-| 30 | CSAM / intimate-image runbook: preserve and report to NCMEC (18 U.S.C. §2258A, 1-year preservation) instead of instant deletion; 48-hour NCII removal (TAKE IT DOWN Act) | SR row 6 | beta | todo | Removal path today deletes at once (`retention.delete_clip`) |
+| 30 | CSAM / intimate-image runbook: preserve and report to NCMEC (18 U.S.C. §2258A, 1-year preservation) instead of instant deletion; 48-hour NCII removal (TAKE IT DOWN Act) | SR row 6 | beta | partial | [`abuse-report-runbook.md`](abuse-report-runbook.md). Removal dialog box `illegal_sexual_content` and `/owner` Remove > Quarantine take the lesson down and move its bytes to the `stepwise-quarantine` Volume (`retention.quarantine_clip`, manifest + sha256, blocklist, Sentry fatal alert); every other reason still deletes at once. `services/motion-api/quarantine.py` lists, exports and purges. Open: lawyer review (covered-platform status, runbook), NCMEC ESP registration |
 | 31 | Processor register: DPA, region and transfer mechanism for Modal, Cloudflare, Neon, PostHog and Sentry; confirm PostHog "Discard client IP data", the Sentry region and IP storage,  | SR rows 18, 20, 24 | beta | todo | |
 | 32 | Self-host fonts (Google Fonts and Fontshare get the visitor's IP today) | SR row 24 | before public launch | todo | `apps/web/app/layout.tsx`, `global-error.tsx` |
 | 33 | YouTube links and §1201 (*Yout v. RIAA* pending): ask counsel; consider TikTok-only links or YouTube via download-then-upload | SR row 1 | before public launch | needs owner decision | `ingest.ALLOWED_HOSTS` |

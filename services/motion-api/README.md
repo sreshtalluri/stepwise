@@ -252,9 +252,19 @@ lesson, and `/jobs`, `/assets/video:` and `/assets/*.glb` all 410.
 
 `POST /jobs/{job_id}/removal` is the same thing addressed by job_id (what the
 web's `/lesson/{job_id}` link carries). Body, both routes:
-`{"relationship": "i_am_in_it" | "i_own_the_rights" | "other", "reason": "<=500 chars, optional"}`.
+`{"relationship": "i_am_in_it" | "under_18" | "i_own_the_rights" | "other" | "illegal_sexual_content", "reason": "<=500 chars, optional"}`.
 Repeating a removal is a 200 that re-runs the (idempotent) sweep without a
 second charge or alert, so anything written after the first one goes too.
+
+**`illegal_sexual_content` quarantines instead of deleting**
+(docs/legal/abuse-report-runbook.md). Same tombstone and the same 410
+everywhere, but the files are copied (sha256-verified) to the
+`stepwise-quarantine` Volume with a manifest before the originals are deleted,
+the fingerprint joins a blocklist that refuses re-uploads, and the owner gets a
+Sentry `fatal`. From then on every sweep of that lesson moves rather than
+deletes. `POST /owner/jobs/{job_id}/remove` (`{"mode": "delete" | "quarantine",
+"note": "..."}`, owner key) is the owner's version of both.
+`python3 quarantine.py list | export | purge` is the only way into the Volume.
 
 **Nothing writes a removed lesson.** The tombstone is written first, then the
 job's GPU run and beat proposal are cancelled, then everything is deleted.

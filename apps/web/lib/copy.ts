@@ -581,6 +581,9 @@ export const myLessons = {
  * services/motion-api `POST /jobs/{job_id}/removal` does: it deletes the source
  * video and every 3D artifact at once, for the one shared lesson, and leaves
  * only a tombstone. It cannot be undone because nothing is kept to undo from.
+ * The one exception is `illegal_sexual_content`: taken down the same way, but
+ * preserved in quarantine for a report (docs/legal/abuse-report-runbook.md),
+ * so the dialog swaps in `reportNote`, `submitReport` and `doneReported` for it.
  */
 export const removal = {
   menuItem: "Report or remove this video",
@@ -592,9 +595,15 @@ export const removal = {
     under_18: "Someone in this video is under 18",
     i_own_the_rights: "I own the rights to this video",
     other: "Something else",
+    // retention.quarantine_clip: taken down now, kept apart and reported, not deleted.
+    illegal_sexual_content: "This shows sexual content involving a minor, or intimate images shared without consent",
   },
+  // Shown only when that last box is picked, because for it the body line above is not true.
+  reportNote:
+    "For this option we take the lesson down for everyone straight away, but we do not delete it yet. We keep the video apart, where no page on the site can reach it, and report it to the authorities as the law requires.",
   reasonLabel: "Anything else to add (optional)",
   submit: "Delete for everyone",
+  submitReport: "Take down and report",
   submitting: "Deleting",
   cancel: "Cancel",
   close: "Close",
@@ -602,6 +611,7 @@ export const removal = {
   failed: "The removal did not go through. Check your connection and try again.",
   doneTitle: "Removed",
   done: "The video and the 3D lesson are deleted. Anyone opening the link now sees that it was removed.",
+  doneReported: "The lesson is down for everyone. Anyone opening the link now sees that it was removed. Thank you for reporting it.",
 };
 
 /**
@@ -709,6 +719,8 @@ export const privacy = {
       items: [
         // retention.TTL_DAYS == 180, modal_app.sweep_expired daily
         "We keep the clip while the lesson exists. Lessons nobody opens for six months are deleted, and a removal request deletes one straight away.",
+        // api.remove_lesson (illegal_sexual_content) -> retention.quarantine_clip; docs/legal/abuse-report-runbook.md
+        "The one exception is a lesson reported as sexual content involving a minor, or intimate images shared without consent: it is taken down straight away, but instead of being deleted at once it is kept apart from the site, where no page can reach it, and reported to the authorities as the law requires.",
         // retention.delete_clip tombstone {clip_id, removed_at, reason, relationship}
         "After a deletion we keep a short note that the lesson was removed — when, the option picked and anything typed — so the link can say it was removed instead of pretending it never existed. The usage counts above keep the lesson's id (not the video, the 3D or anything from it) for as long as those counts are kept.",
       ],

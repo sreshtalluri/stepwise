@@ -132,6 +132,7 @@ def api(monkeypatch):
     api_mod._spawned = spawned
     api_mod._prewarmed, api_mod._handoff_dict = prewarmed, handoff
     api_mod._cancelled = cancelled
+    api_mod.quarantine = api_mod.retention._quarantine_vol = FakeVolume("quarantine")
     return api_mod
 
 
@@ -557,6 +558,11 @@ class FakeR2:
     def delete_object(self, Bucket, Key):
         self.objects.pop(Key, None)
 
+    def get_object(self, Bucket, Key):
+        if Key not in self.objects:
+            raise FileNotFoundError(Key)
+        return {"Body": types.SimpleNamespace(read=lambda: f"r2-bytes:{Key}".encode())}
+
     def head_object(self, Bucket, Key):
         if Key not in self.objects:
             raise FileNotFoundError(Key)
@@ -879,3 +885,220 @@ def test_result_redirect_follows_the_version_and_old_lessons_fall_back(api, monk
     assert api._validated_r2_url("job_new", "new") == \
         "https://r2.example/motion-result/new.0123456789ab.json.gz"
     assert api._validated_r2_url("job_old", "old") == "https://r2.example/motion-result/old.json.gz"
+
+
+# --------------------------------------------------------------------------
+# quarantine: a report of illegal sexual content (abuse-report-runbook.md)
+# --------------------------------------------------------------------------
+
+ABUSE = "illegal_sexual_content"
+FP = {"sha256": "f" * 64, "duration_s": 20.0, "frames": 4, "ahash": "0" * 64, "dhash": "0" * 64}
+
+
+def _public(api, clip_id="abc"):
+    """Everything of this lesson still in a place a route or an R2 URL can reach."""
+    return ([p for p in api.results_volume.files if clip_id in p and p != f"/{clip_id}.removed.json"]
+            + [p for p in api.uploads_volume.files if clip_id in p])
+
+
+def _quarantined(api, clip_id="abc"):
+    import retention
+    return json.loads(retention._quarantine_vol.files[f"/{clip_id}/manifest.json"])
+
+
+@pytest.mark.parametrize("relationship", ["i_am_in_it", "under_18", "i_own_the_rights", "other"])
+def test_every_existing_reason_still_deletes_at_once_and_quarantines_nothing(api, r2, relationship):
+    _seed_lesson(api, "abc", "job_abc", FP)
+    r2.objects.update({"video/abc.mp4": {}, "glb/abc_track1.glb": {}})
+    api.remove_lesson("abc", _removal(api, relationship, "words"), NO_REQUEST)
+    assert _public(api) == [] and r2.objects == {}
+    assert api.quarantine.files == {}, "an ordinary removal must keep nothing"
+    tomb = json.loads(api.results_volume.files["/abc.removed.json"])
+    assert set(tomb) == {"clip_id", "removed_at", "reason", "relationship"}
+    assert (tomb["relationship"], tomb["reason"]) == (relationship, "words")
+
+
+def test_report_takes_the_lesson_down_and_preserves_every_byte(api, r2, monkeypatch):
+    import hashlib
+    import retention
+    from fastapi import HTTPException
+    sent = []
+    monkeypatch.setattr(api.observability, "message",
+                        lambda text, component, **kw: sent.append((text, kw)))
+    _seed_lesson(api, "abc", "job_abc", FP)
+    api.results_volume.files["/abc.npz"] = b"npz-bytes"
+    before = {**{f"uploads:{p}": v for p, v in api.uploads_volume.files.items()},
+              **{f"results:{p}": v for p, v in api.results_volume.files.items() if "abc" in p}}
+    r2.objects.update({"video/abc.mp4": {}, "glb/abc_track1.0123456789ab.glb": {},
+                       "motion-result/abc.json.gz": {}, "glb/other_track1.glb": {}})
+
+    api.remove_lesson("abc", _removal(api, ABUSE, "the person is a child"), NO_REQUEST)
+
+    # Down, exactly like any removal: 410 everywhere, nothing public, no R2 key.
+    for call in (lambda: api.get_job_status("job_abc"), lambda: api.get_job_result("job_abc"),
+                 lambda: api.get_asset("video:abc"), lambda: api.get_asset("abc_track1.glb")):
+        with pytest.raises(HTTPException) as e:
+            call()
+        assert e.value.status_code == 410
+    assert _public(api) == []
+    assert sorted(r2.objects) == ["glb/other_track1.glb"], "presigned R2 URLs must stop working"
+    assert retention.read_index(api.results_volume) == []
+    tomb = json.loads(api.results_volume.files["/abc.removed.json"])
+    assert tomb["quarantined"] is True and tomb["reason"] == "", "the words go to the manifest only"
+
+    # Preserved: every byte, sha256-recorded, with who asked and why.
+    m = _quarantined(api)
+    assert (m["clip_id"], m["job_id"], m["relationship"], m["reason"]) == \
+        ("abc", "job_abc", ABUSE, "the person is a child")
+    assert m["preserve_until"] - m["quarantined_at"] == 365 * 86400
+    kept = {f["source"]: f for f in m["files"]}
+    for source, data in before.items():
+        f = kept[source]
+        assert api.quarantine.files[f["path"]] == data
+        assert f["sha256"] == hashlib.sha256(data).hexdigest()
+    assert api.quarantine.files[kept["r2:video/abc.mp4"]["path"]] == b"r2-bytes:video/abc.mp4"
+    assert "r2:glb/other_track1.glb" not in kept
+
+    # Loud, and nothing typed in it.
+    assert [kw["level"] for _, kw in sent] == ["fatal"]
+    assert "runbook" in sent[0][0] and "child" not in json.dumps(sent)
+
+
+def test_sweeper_and_delete_clip_never_touch_the_quarantine(api):
+    import retention
+    _seed_lesson(api, "abc", "job_abc", FP)
+    api.remove_lesson("abc", _removal(api, ABUSE), NO_REQUEST)
+    snapshot = dict(api.quarantine.files)
+    retention.delete_clip(api.uploads_volume, api.results_volume, "abc", "job_abc", "expired")
+    api.remove_lesson("abc", _removal(api, "i_am_in_it"), NO_REQUEST)
+    api.remove_lesson("abc", _removal(api, ABUSE), NO_REQUEST)
+    assert api.quarantine.files == snapshot
+    # A later ordinary request cannot turn the quarantine into a deletion.
+    assert json.loads(api.results_volume.files["/abc.removed.json"])["quarantined"] is True
+
+
+def test_a_late_write_after_a_quarantine_is_moved_not_deleted_and_nothing_is_overwritten(api):
+    import retention
+    _seed_lesson(api, "abc", "job_abc")
+    api.remove_lesson("abc", _removal(api, ABUSE), NO_REQUEST)
+    first = _quarantined(api)["files"]
+    _late_writes(api, "abc", "job_abc")    # the job_6037 shape
+    retention.delete_clip(api.uploads_volume, api.results_volume, "abc", "job_abc", "")
+    assert _public(api) == []
+    files = _quarantined(api)["files"]
+    assert files[:len(first)] == first, "an earlier record changed"
+    assert any(f["source"] == "results:/abc.npz" for f in files)
+    status = [f for f in files if f["source"] == "results:/job_abc.job-status.json"]
+    assert len(status) == 2 and status[0]["path"] != status[1]["path"], "a second version overwrote the first"
+
+
+def test_a_failed_copy_deletes_nothing(api, monkeypatch):
+    import retention
+    from fastapi import HTTPException
+
+    def down(force=False):
+        raise OSError("quarantine Volume unreachable")
+
+    _seed_lesson(api, "abc", "job_abc")
+    monkeypatch.setattr(api.quarantine, "batch_upload", down)
+    out = api.remove_lesson("abc", _removal(api, ABUSE), NO_REQUEST)
+    assert out.removed == []
+    assert "/abc.mp4" in api.uploads_volume.files, "evidence was deleted without a verified copy"
+    with pytest.raises(HTTPException) as e:
+        api.get_job_status("job_abc")
+    assert e.value.status_code == 410, "the lesson must be down even when the move failed"
+    assert retention.is_quarantined(api.results_volume, "abc")
+
+
+def test_a_reupload_of_a_quarantined_video_is_refused(api, tmp_path):
+    import asyncio
+    from fastapi import HTTPException
+    _seed_lesson(api, "abc", "job_abc", dict(FP, source_key="tiktok:1"))
+    api.remove_lesson("abc", _removal(api, ABUSE), NO_REQUEST)
+    clip = tmp_path / "same.mp4"
+    clip.write_bytes(b"video-bytes")   # the quarantined upload, byte for byte
+
+    class _Upload:
+        def __init__(self, path):
+            self._f = open(path, "rb")
+
+        async def read(self, n):
+            return self._f.read(n)
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(api.upload_clip(NO_REQUEST, _Upload(clip)))
+    assert e.value.status_code == 410
+    assert api._spawned == [] and _public(api) == []
+    # A re-encode (perceptual match) and the same link are refused too.
+    for kw in ({"fp": dict(FP, sha256="0" * 64)}, {"source_key": "tiktok:1"}):
+        with pytest.raises(HTTPException) as e:
+            api._refuse_if_quarantined(**kw)
+        assert e.value.status_code == 410
+    api._refuse_if_quarantined(fp={"sha256": "1" * 64, "frames": 0}, source_key="tiktok:2")
+
+
+def test_an_ordinary_removal_still_lets_the_same_video_back(api):
+    """D7 is unchanged for every other reason: no blocklist."""
+    _seed_lesson(api, "abc", "job_abc", FP)
+    api.remove_lesson("abc", _removal(api, "under_18"), NO_REQUEST)
+    api._refuse_if_quarantined(fp=dict(FP))
+
+
+def test_a_report_on_an_already_deleted_lesson_still_alerts(api, monkeypatch):
+    sent = []
+    monkeypatch.setattr(api.observability, "message", lambda text, c, **kw: sent.append(kw["level"]))
+    _seed_lesson(api, "abc", "job_abc")
+    api.remove_lesson("abc", _removal(api, "other"), NO_REQUEST)
+    api.remove_lesson("abc", _removal(api, ABUSE), NO_REQUEST)
+    assert sent == ["warning", "fatal"]
+    assert api.quarantine.files == {}, "nothing was left to preserve"
+
+
+def test_removing_a_running_job_quarantines_its_late_writes(api, worker):
+    """The PR #45 late-writer path: the worker stops at the tombstone and its
+    sweep moves what it wrote, uncommitted local writes included, into
+    quarantine instead of deleting it."""
+    import retention
+    results, uploads = worker._test_volumes
+    (uploads.root / "abc.mp4").write_bytes(b"v")
+    retention.write_tombstone(results, "abc", "", ABUSE, quarantined=True)
+    for name in ("abc.npz", "job_abc.job-status.json", "abc_track1.0123456789ab.glb"):
+        (results.root / name).write_bytes(b"late")
+    retention.stop_and_sweep(uploads, results, "abc", "job_abc",
+                             {str(results.root): results, str(uploads.root): uploads})
+    assert results.names() == ["abc.removed.json"] and uploads.names() == []
+    sources = {f["source"] for f in _quarantined(api)["files"]}
+    assert {"uploads:/abc.mp4", "results:/abc.npz", "results:/abc_track1.0123456789ab.glb"} <= sources
+
+
+def test_the_daily_sweep_moves_quarantined_leftovers(api, worker, monkeypatch):
+    import retention
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    results, uploads = worker._test_volumes
+    retention.write_tombstone(results, "abc", "", ABUSE, quarantined=True)
+    (results.root / "abc.npz").write_bytes(b"late")
+    out = worker._sweep_expired(dry_run=False)
+    assert out["resweep"] == ["abc"] and results.names() == ["abc.removed.json"]
+    assert [f["source"] for f in _quarantined(api)["files"]] == ["results:/abc.npz"]
+
+
+def test_owner_can_list_export_and_only_purge_after_a_year(api, tmp_path):
+    import quarantine
+    import retention
+    _seed_lesson(api, "abc", "job_abc", FP)
+    api.remove_lesson("abc", _removal(api, ABUSE), NO_REQUEST)
+    q = api.quarantine
+    assert [m["clip_id"] for m in quarantine.list_items(q)] == ["abc"]
+
+    out = quarantine.export_item(q, "abc", str(tmp_path))
+    assert (out / "uploads" / "abc.mp4").read_bytes() == b"video-bytes"
+    assert len(_quarantined(api)["exports"]) == 1
+
+    with pytest.raises(SystemExit):
+        quarantine.purge_item(q, "abc", confirmed=False, now=2e10)
+    with pytest.raises(SystemExit):
+        quarantine.purge_item(q, "abc", confirmed=True)   # inside the year
+    assert "/abc/uploads/abc.mp4" in q.files
+    quarantine.purge_item(q, "abc", confirmed=True, now=2e10)
+    assert list(q.files) == [retention.BLOCKLIST_PATH], "only the hashes stay"
+    assert "/abc.removed.json" in api.results_volume.files

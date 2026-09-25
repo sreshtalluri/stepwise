@@ -232,7 +232,12 @@ test("privacy and removal copy match what the code does — §7h", () => {
   assert.match(copy.myLessons.subtitle, /on this device/i);
   // The API's relationship enum, verbatim (services/motion-api/api.py RemovalRequest;
   // test_retention.py checks the same from the other side).
-  assert.deepEqual(Object.keys(copy.removal.relationships), ["i_am_in_it", "under_18", "i_own_the_rights", "other"]);
+  assert.deepEqual(Object.keys(copy.removal.relationships),
+    ["i_am_in_it", "under_18", "i_own_the_rights", "other", "illegal_sexual_content"]);
+  // That last box preserves instead of deleting (retention.quarantine_clip), and both surfaces say so.
+  assert.match(copy.removal.reportNote, /do not delete it yet/);
+  assert.match(all, /instead of being deleted at once/);
+  assert.match(all, /reported to the authorities as the law requires/);
   // Nothing there is to promise: no terms, no response time, no inbox.
   assert.ok(!/\b(terms|within \d+|hours?|we will respond|contact us)\b/i.test(all), all);
   // There is no app, only a website (1e680e3).

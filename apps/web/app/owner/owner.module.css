@@ -208,3 +208,28 @@
   font-weight: 600;
   color: var(--dancer-2);
 }
+
+.removeDialog {
+  margin: auto;
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 24px;
+}
+.removeDialog::backdrop {
+  background: rgba(18, 16, 15, 0.55);
+}
+.removeForm {
+  display: grid;
+  gap: var(--s2);
+}
+.removeForm .small {
+  align-items: flex-start;
+}
+.removeForm textarea {
+  width: 100%;
+  font: inherit;
+}
