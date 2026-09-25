@@ -11,6 +11,8 @@ open lawyer questions are listed in each doc. New legal research goes in this fo
 - [`system-review-2026-09.md`](system-review-2026-09.md): the code on `main` (2026-09-25) checked
   against the law and the two docs above, one moving part at a time, including where `/privacy`
   no longer matches the code.
+- [`body-shape-decision.md`](body-shape-decision.md): keep, drop or coarsen the estimated body
+  shape in the lesson GLB (tracker item 28), with measurements on public lessons.
 - Related, in `docs/research/`: [`link-ingestion.md`](../research/link-ingestion.md), the platform
   terms analysis for fetching TikTok and YouTube links.
 
@@ -48,7 +50,7 @@ Every action item from the docs. **R&P** = `rights-and-privacy.md`, **LPL** =
 | 25 | Right of publicity review before any paid tier or marketing use | R&P §8.4; LPL §5 | before library | todo | |
 | 26 | `/privacy` says the rate-limit IP hash key "changes every day"; `ratelimit._ip_hash` used a fixed key; now uses the daily random analytics salt | SR row 19 | beta | done (2026-09-25) | `services/motion-api/ratelimit.py` `_ip_hash`; `apps/web/lib/copy.ts` `privacy` |
 | 27 | `/privacy`: say that usage notes and removal rows about a removed lesson stay until they expire (Neon 13 months, PostHog its own period); mention backend performance traces (10%) or turn them off; name Neon | SR rows 18, 20, 24 | beta | done (2026-09-25) | `apps/web/lib/copy.ts` `privacy`; `observability.py` `traces_sample_rate` |
-| 28 | Body shape baked into every GLB: say so on `/privacy`, update R&P §2, then decide whether to keep it or coarsen it | SR row 7; R&P §6.7 | beta (copy) / before public launch (decision) | needs owner decision | `modal_app.py` `_character_with_shape`; `export-manifest.json` `shape_params` |
+| 28 | Body shape baked into every GLB: say so on `/privacy`, update R&P §2, then decide whether to keep it or coarsen it | SR row 7; R&P §6.7; [`body-shape-decision.md`](body-shape-decision.md) | beta (copy) / before public launch (decision) | needs owner decision (2026-09-25: research done, see `body-shape-decision.md`. Recommends a generic surface plus the dancer-sized skeleton for beta and launch, and saying so on `/privacy`. The surface shape is a few-mm mesh corrective with no effect on the moves. Limb lengths come from the skeleton, which was always dancer-sized) | `modal_app.py` `_character_with_shape`; `export-manifest.json` `shape_params` |
 | 29 | Remove live lesson `job_id`s from the public repo's eval labels (use opaque ids) | SR row 22 | beta | done (2026-09-25) | `evaluation/labels/count_one.json` |
 | 30 | CSAM / intimate-image runbook: preserve and report to NCMEC (18 U.S.C. §2258A, 1-year preservation) instead of instant deletion; 48-hour NCII removal (TAKE IT DOWN Act) | SR row 6 | beta | todo | Removal path today deletes at once (`retention.delete_clip`) |
 | 31 | Processor register: DPA, region and transfer mechanism for Modal, Cloudflare, Neon, PostHog and Sentry; confirm PostHog "Discard client IP data", the Sentry region and IP storage,  | SR rows 18, 20, 24 | beta | todo | |
