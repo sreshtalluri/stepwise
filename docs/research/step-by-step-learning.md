@@ -341,7 +341,111 @@ front".
 
 ## 6. UI plan
 
-@@UI@@
+**Principles** (the owner asked for guided mode not to feel crowded; every layout below
+was scored against these):
+
+1. **Progressive disclosure.** Show only the current step and one primary action.
+   Editing (split, merge, rename, nudge, detail level) and step details sit behind one
+   secondary control. They are never on screen by default.
+2. **One primary action per state.** "Got it · next", "Put it together", "Speed up",
+   "Next chunk": each state has exactly one filled button.
+3. **The dancer is the hero.** Video and 3D keep their space. Guided mode takes the
+   least space that works, and mostly *replaces* free-practice controls rather than
+   adding to them.
+4. **No more controls on screen than free practice has today.** The counts are in the
+   table below.
+5. **Generous spacing and touch targets of 44px or more on phone.** The site's larger
+   targets stay where they already are.
+6. **Same look.** Use the `front.css` / `lesson.css` tokens and the existing tiles, count
+   band and speed panel. No new colours, and the accent is still the only accent.
+7. **Hide rather than shrink** when space is short, especially at 844×390.
+
+**Mockups.** Serve `tools/research/step_segments/` (`python3 -m http.server`) and open
+`mockups/index.html` for the layout comparison and density table, then
+`mockups/guided.html` (layout A) at 1440×900, 390×844 and 844×390.
+`guided.html?layout=b` and `?layout=c` are the alternatives. The dashed "Mockup state"
+menu jumps to any of the 20 states. It is review chrome, not part of the design. The
+mockups use real bhangra data from `out/steps.json`: steps at all three levels, the
+lead-in and outro, and a low-confidence cut. The cue text is hand-tidied in the v1
+style.
+
+**Three layouts, scored on density.** The table shows visible controls / text lines in
+the step-card state, counted by `window.density()` in `guided.html`. It was run on the
+live page as well as the mockups.
+
+| | desktop 1440×900 | phone 390×844 | phone 844×390 | covers dancer |
+|---|---|---|---|---|
+| Live free practice today | 37 / 25 | 32 / 19 | 30 / 18 | — |
+| Mockup free practice (baseline) | 28 / 28 | 22 / 18 | 19 / 18 | — |
+| **A. Step card docked under the stages** | **22 / 37 (−6 / +9)** | **16 / 24 (−6 / +6)** | **13 / 23 (−6 / +5)** | no |
+| B. Step list is the guided UI | 33 / 58 (+5 / +30) | 22 / 33 (0 / +15) | 16 / 24 | no, but the stages lose 400 px of width or 130 px of height |
+| C. Steps on the band, floating card | 22 / 35 | 16 / 26 | 13 / 22 | yes: 12% on desktop, 31–48% on phone |
+
+**Pick: A.** It is the calmest layout that still makes the flow obvious. It has the
+fewest controls (tied with C) and never covers the dancer. Its single button says what
+happens next ("Got it · put 1–2 together"). Applied to the live page, guided A has
+fewer controls than free practice today at every size: about 31, 26 and 24. It adds
+5–9 short text lines: the chunk and step, the counts, the cue, and "Suggested from the
+3D". It fits the no-scroll rule in all 20 states at all three sizes. The phone's primary
+button is 88 px or taller.
+
+**How it fits the page:**
+- **Stages.** Unchanged grid. On desktop they are 555 px tall in guided mode (694 in
+  free practice). A phone on its side is unchanged.
+- **Count band.** Follows the current chunk, with a thin step bar underneath: the
+  current step filled, and an unclear cut drawn as a ring. While guided it is a readout,
+  not 8 loop buttons, because the guide sets the loop. That is where most of the −6
+  controls come from.
+- **Step card (the dock).**
+  - Desktop: above the transport, with the chunk, a dot path, the counts, the cue,
+    Steps, Exit and one button.
+  - Phone upright: above the transport, with an 88 px button.
+  - Phone on its side: in the right rail, with the text on the left and the button on
+    the right.
+- **Speed panel and Build up.** The same pills. Steps and "put it together" play at
+  0.5×. "At speed" turns Build up on (0.5× → 1×), shows its meter, and offers Click (the
+  metronome).
+- **Timeline.** Adds a chunk band under the track (current chunk in ink, done ones
+  grey), ticks for the current chunk's steps, and hatched **not-dancing** regions.
+- **More menu.** A new first group: "Learn it in steps", or Resume / Start over.
+
+**Flow.** Step → *Got it · next step* → put 1–2 together → step 3 → put 1–3 together →
+… → chunk at speed with Build up → next chunk → join the chunks. "Put it together"
+loops 4 times, then waits ("Press play to go again"). Nothing is locked.
+
+**Entry and discoverability:**
+- A quiet link in the timeline hint on first visit: "…or learn it in steps".
+- "Learn this loop in steps" when a loop is selected.
+- "Learn it in steps" in More.
+- No pop-up and no auto-start.
+
+**Editing and details (progressive disclosure).** One **Steps** button opens a panel on
+desktop or a sheet on phone. It holds:
+- rename (the learner's words replace the suggested cue)
+- split at the playhead (snaps to a half-beat)
+- merge with next
+- nudge a cut by ± half a count
+- skip
+- the detail level (Beginner / Intermediate / Advanced)
+- the full step list
+- "Include this" for a not-dancing region
+
+Changing the level re-cuts only the steps the learner hasn't edited.
+
+**Progress, resume and exit.** "Exit" returns to free practice, with the current loop set
+to the step or chunk you were on. The More menu and the lesson then offer "Resume at step
+4 of chunk 2". Progress is per browser, next to the authored counts.
+
+**Empty and uncertain states:**
+- *Low-confidence cut:* "This split is a guess — the move doesn't stop here."
+- *Uncertain body part:* uses the §4 uncertainty language, and the cue skips that part.
+- *No cue:* shows the counts only, plus "Name this step".
+- *Not dancing:* a hatched region, "Dance starts at 0:04.5", and "Include this".
+- *No steps in this loop:* "No clear steps here. Try the whole loop, or a longer one."
+- *Advanced with no fast evidence:* "No quarter-count hits found in this chunk."
+
+**Not verified:** real playback, real touch on devices, and the performance of the
+extra timeline layers. The mockup stages are drawn placeholders.
 
 ## 7. Dancing vs not dancing
 

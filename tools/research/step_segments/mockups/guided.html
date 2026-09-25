@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Learn it in steps</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&display=swap">
+<link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=switzer@400,500,600,700&display=swap">
+<style>
+/* ===== Copied from apps/web/app/globals.css + components/lesson/lesson.css (subset, verbatim values) ===== */
+:root{--font-display:"Bricolage Grotesque","Switzer",system-ui,sans-serif;--font-ui:"Switzer",system-ui,sans-serif}
+html,body{margin:0;height:100%;overflow:hidden;background:#f2efe9}
+body{font-feature-settings:"tnum" 1}
+p,h2,h3{margin:0}
+button{border:0;background:none;padding:0}
+.ls{--paper:#f2efe9;--paper-sunk:#e7e1d6;--line:#d8d0c3;--stage:#1c1917;--stage-deep:#12100f;--ink:#221e1c;--ink-muted:#6b635c;--ink-faint:#9a9188;--on-stage:#e8e1d8;--on-stage-muted:#b8aea3;--glass:rgb(28 25 23 / .72);--ease:cubic-bezier(.16,1,.3,1);--t:160ms var(--ease);--r:14px;--accent:#F2891D;
+  color:var(--ink);background:var(--paper);font-family:var(--font-ui);font-variant-numeric:tabular-nums;-webkit-tap-highlight-color:transparent}
+.ls *,.ls *::before,.ls *::after{box-sizing:border-box}
+:where(.ls) button{font:inherit;color:inherit;transition:transform var(--t),background-color var(--t),color var(--t),opacity var(--t)}
+:where(.ls) button:not(:disabled){cursor:pointer}
+:where(.ls) button:active:not(:disabled){transform:scale(.98) translateY(1px)}
+.ls :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ls-icon{flex:none;display:block}
+.ls-hint{font-size:.8125rem;color:var(--ink-muted)}
+.ls-icon-btn{display:inline-grid;place-items:center;width:44px;height:44px;border-radius:999px;flex:none}
+.ls-icon-btn:hover{background:var(--paper-sunk)}
+.ls-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border-radius:999px;background:var(--paper);font-weight:600;white-space:nowrap}
+.ls-btn:hover{background:var(--line)}
+.ls-ghost{background:transparent;box-shadow:inset 0 0 0 1px var(--line)}
+.ls-accent,.ls-accent:hover{background:var(--accent);color:var(--stage)}
+.ls-seg{display:inline-flex;gap:2px;padding:3px;border-radius:999px;background:var(--paper-sunk)}
+.ls-seg button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:0 14px;border-radius:999px;font-size:.9375rem;font-weight:500;color:var(--ink-muted);white-space:nowrap}
+.ls-seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper);font-weight:600}
+.ls-stage,.ls-pane{position:relative;overflow:hidden;border-radius:var(--r);background:radial-gradient(ellipse at 50% 42%,var(--stage) 45%,var(--stage-deep) 100%);isolation:isolate}
+.ls-counts{display:grid;grid-template-columns:repeat(8,1fr);align-items:end;min-width:0}
+.ls-count{position:relative;display:grid;place-items:end center;min-height:56px;padding:0 0 4px;font:700 clamp(1.25rem,2.4vw,1.75rem)/1 var(--font-display);letter-spacing:-.02em;color:var(--ink-faint);border-bottom:2px solid var(--line)}
+.ls-count.ls-on{font-weight:800;font-size:clamp(2rem,4.4vw,3.25rem);color:var(--ink);border-bottom-color:var(--accent)}
+.ls-count.ls-out{opacity:.4}
+.ls-and{position:absolute;right:0;bottom:8px;transform:translateX(50%);font:600 .75rem/1 var(--font-ui);color:var(--ink-faint);opacity:.5;pointer-events:none}
+.ls-group{display:grid;gap:6px}
+.ls-group-label{font-size:.875rem;font-weight:600;color:var(--ink-muted)}
+.ls-group-row{display:flex;flex-wrap:wrap;gap:6px}
+.ls-chip{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:10px 16px;border-radius:999px;background:var(--paper-sunk);font-weight:500}
+.ls-chip[aria-pressed="true"],.ls-chip.ls-strong{background:var(--ink);color:var(--paper);font-weight:600}
+.ls-chip.ls-accent{background:var(--accent);color:var(--stage);font-weight:600}
+.ls-chip:disabled{color:var(--ink-faint);cursor:default}
+.ls-more{display:grid;gap:16px;padding:4px 0}
+.ls-panel{position:fixed;inset:auto 24px 110px auto;z-index:30;margin:0;width:min(420px,calc(100vw - 32px));max-height:min(78vh,720px);overflow:auto;padding:18px;border:1px solid var(--line);border-radius:var(--r);background:var(--paper);color:var(--ink);box-shadow:0 18px 48px rgb(28 25 23 / .25)}
+.ls-desk,.ls-phone{display:grid;grid-template-rows:auto minmax(0,1fr) auto;height:100dvh;overflow:hidden}
+.ls-phone{position:fixed;inset:0;overscroll-behavior:none}
+.ls-bar{display:flex;align-items:center;gap:8px;min-width:0;padding:8px 16px;position:relative}
+.ls-vbar{display:flex;align-items:center;gap:4px;min-width:0;overflow-x:auto;scrollbar-width:none}
+.ls-vbar::-webkit-scrollbar{display:none}
+.ls-vbtn{flex:none;min-height:40px;padding:0 14px;border-radius:10px;font-size:.9375rem;font-weight:500;color:var(--ink-muted);white-space:nowrap}
+.ls-vbtn:hover{background:var(--paper-sunk);color:var(--ink)}
+.ls-vbtn[aria-pressed="true"]{background:var(--accent);color:var(--stage);font-weight:600}
+.ls-vsep{flex:none;width:1px;height:24px;margin:0 6px;background:var(--line)}
+.ls-bar-end{margin-left:auto;display:flex;align-items:center;gap:12px;flex:none}
+.ls-meter{font-size:.8125rem;color:var(--ink-muted);white-space:nowrap}
+.ls-credit{display:flex;flex-direction:column;min-width:0;font-size:.8125rem;line-height:1.25;color:var(--ink-muted);max-width:34ch}
+.ls-credit>*{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ls-credit a{color:inherit;text-decoration:underline;text-underline-offset:3px}
+.ls-credit small{font-size:.6875rem}
+.ls-panels{position:relative;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:6px;min-height:0;padding:0 16px}
+.ls-tile{position:relative;min-width:0;min-height:0}
+.ls-tile>.ls-stage,.ls-tile>.ls-pane{position:absolute;inset:0}
+.ls-corner{position:absolute;left:10px;top:10px;z-index:2;text-transform:uppercase;letter-spacing:.04em;font-size:.6875rem;color:var(--on-stage-muted);text-shadow:0 1px 4px rgb(0 0 0 / .6);pointer-events:none}
+.ls-stage-counts{position:absolute;left:28px;bottom:10px;z-index:3;width:min(460px,calc(100% - 56px))}
+.ls-bottom{position:relative;display:grid;gap:2px;padding:8px 16px 6px}
+.ls-transport{display:flex;align-items:center;gap:8px;min-width:0}
+.ls-play{display:inline-grid;place-items:center;width:44px;height:44px;flex:none;border-radius:999px;background:var(--ink);color:var(--paper)}
+.ls-time{flex:none;min-width:7.5em;font-size:.8125rem;color:var(--ink-muted)}
+.ls-pill{display:inline-flex;align-items:center;gap:6px;flex:none;min-height:36px;padding:0 12px;border-radius:999px;box-shadow:inset 0 0 0 1px var(--line);font-size:.875rem;font-weight:600;white-space:nowrap}
+.ls-pill:hover{background:var(--paper-sunk)}
+.ls-pill.ls-on{background:var(--ink);color:var(--paper);box-shadow:none}
+.ls-pill-pair{display:inline-flex;flex:none}
+.ls-pill-pair .ls-pill:first-child{border-radius:999px 0 0 999px}
+.ls-pill-more{padding:0 8px;border-radius:0 999px 999px 0;margin-left:-1px}
+.ls-speed{justify-content:center;min-width:4.6em}
+.ls-next{font-weight:500}
+.ls-more-btn{margin-left:auto}
+.ls-legal{position:absolute;right:16px;bottom:6px;display:flex;align-items:center;gap:.3em;min-height:36px;font-size:.75rem;color:var(--ink-faint);margin:0}
+.ls-legal a{color:inherit;text-underline-offset:3px}
+.ls-tl-wrap{display:grid;gap:2px;min-width:0}
+.ls-tl{position:relative;height:48px;cursor:pointer;touch-action:none;user-select:none}
+.ls-tl-track{position:absolute;inset:16px 0 10px}
+.ls-tl-track::before{content:"";position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;background:var(--line)}
+.ls-tl-tick{position:absolute;top:6px;bottom:6px;width:1px;background:var(--line);pointer-events:none}
+.ls-tl-loop{position:absolute;top:12px;bottom:6px;border-radius:4px;background:color-mix(in srgb,var(--accent) 24%,transparent);pointer-events:none}
+.ls-tl-head{position:absolute;top:10px;bottom:4px;width:2px;margin-left:-1px;border-radius:1px;background:var(--ink);pointer-events:none;z-index:3}
+.ls-tl-handle{position:absolute;top:4px;bottom:0;width:44px;margin-left:-22px;z-index:2;cursor:ew-resize}
+.ls-tl-handle::after{content:"";position:absolute;left:50%;top:6px;bottom:4px;width:8px;margin-left:-4px;border-radius:4px;background:var(--accent);box-shadow:0 0 0 2px var(--paper)}
+.ls-tl-read{display:flex;align-items:center;gap:6px;min-height:36px;font-size:.875rem;color:var(--ink-muted);min-width:0}
+.ls-tl-name{font-weight:700;color:var(--ink);white-space:nowrap}
+.ls-tl-nudge{display:inline-flex;align-items:center}
+.ls-tl-nudge b{min-width:2.4em;text-align:center;font-weight:700;color:var(--ink)}
+.ls-tl-nudge button,.ls-tl-clear{display:inline-grid;place-items:center;width:36px;height:36px;border-radius:10px;color:var(--ink-muted)}
+.ls-tl-nudge button:hover,.ls-tl-clear:hover{background:var(--paper-sunk);color:var(--ink)}
+.ls-desk .ls-tl-read{padding-right:7.5rem}
+.ls-tl-sec{position:absolute;top:0;bottom:0;z-index:1;width:0}
+.ls-tl-mark{position:absolute;top:0;left:-14px;width:28px;height:16px}
+.ls-tl-mark::before{content:"";position:absolute;left:50%;top:8px;height:34px;width:2px;margin-left:-1px;border-radius:1px;background:var(--accent)}
+.ls-tl-mark::after{content:"";position:absolute;left:50%;top:3px;width:8px;height:8px;margin-left:-4px;border-radius:50%;background:var(--accent)}
+.ls-flash{position:absolute;left:50%;top:40%;z-index:6;transform:translate(-50%,-50%);padding:10px 18px;border-radius:999px;background:var(--glass);color:var(--paper);font-weight:600;opacity:0;pointer-events:none;transition:opacity var(--t);white-space:nowrap}
+.ls-flash.ls-show{opacity:1}
+/* desktop: counts band under the tiles */
+.ls-desk .ls-panels{padding-bottom:66px}
+.ls-desk .ls-stage-counts{left:50%;bottom:2px;width:min(520px,calc(100% - 32px));transform:translateX(-50%)}
+.ls-desk .ls-count{min-height:60px}
+/* phone: same three rows */
+@media (max-width:767px),(max-height:520px){
+  .ls-bar{padding:4px 8px;gap:4px}
+  .ls-vbtn{padding:0 11px;min-height:40px}
+  .ls-panels{padding:0;gap:0}
+  .ls-tile>.ls-stage,.ls-tile>.ls-pane{border-radius:0}
+  .ls-bottom{padding:6px 10px 6px}
+  .ls-transport{gap:6px}
+  .ls-time{min-width:0;font-size:.75rem}
+  .ls-time-total{display:none}
+  .ls-pill{padding:0 9px;min-height:40px}
+  .ls-pill-more{padding:0 6px}
+  .ls-next,.ls-legal{display:none}
+  .ls-speed{min-width:4em}
+  .ls-panel{inset:auto 0 0 0;width:100%;max-height:78dvh;border-radius:20px 20px 0 0}
+}
+.ls-phone .ls-stage-counts{left:10px;right:10px;bottom:8px;width:auto;color:var(--paper)}
+.ls-phone .ls-count{min-height:52px;color:rgb(232 225 216 / .7);border-bottom-color:rgb(232 225 216 / .25);text-shadow:0 2px 10px rgb(0 0 0 / .5);font-size:1.375rem}
+.ls-phone .ls-count.ls-on{color:var(--paper);font-size:2.75rem;border-bottom-color:var(--accent)}
+.ls-phone .ls-and{color:rgb(232 225 216 / .6)}
+.ls-phone:not(.ls-land) .ls-panels{grid-auto-flow:row;grid-auto-columns:auto}
+.ls-second{position:absolute!important;right:10px;top:10px;z-index:4;width:36%;aspect-ratio:3/4;border-radius:12px;overflow:hidden;box-shadow:0 0 0 1px rgb(255 255 255 / .15),0 8px 24px rgb(0 0 0 / .4)}
+.ls-second>.ls-pane{border-radius:12px!important}
+.ls-land .ls-vbtn,.ls-land .ls-pill,.ls-land .ls-play{min-height:34px}
+.ls-land .ls-play{width:36px;height:36px}
+.ls-phone.ls-land{grid-template-columns:minmax(0,1fr) clamp(250px,36vw,360px);grid-template-rows:auto minmax(0,1fr) auto}
+.ls-land .ls-panels{grid-column:1;grid-row:1 / span 3}
+.ls-land .ls-bar,.ls-land .ls-bottom,.ls-land .gd-dock{grid-column:2;min-width:0}
+.ls-land .ls-bar{grid-row:1}
+.ls-land .ls-bottom{grid-row:3;align-content:end}
+.ls-land .ls-second{width:26%;right:8px;top:8px}
+
+/* ===== Mockup-only: placeholder stages (a drawn figure, not the product's render) ===== */
+.mk-fig{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+.mk-fig svg{height:78%;max-width:90%}
+.mk-floor{position:absolute;left:0;right:0;bottom:0;height:34%;background:linear-gradient(#2a2521,#221e1b);border-top:2px solid #3a332e}
+.mk-cap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:.75rem;color:var(--on-stage-muted);opacity:.7}
+.mk-legend{position:absolute;right:10px;bottom:8px;z-index:2;font-size:.6875rem;color:var(--on-stage-muted);text-shadow:0 1px 4px rgb(0 0 0 / .6)}
+.ls-phone .mk-legend{display:none}
+.ls-phone .ls-second .mk-legend{display:none}
+
+/* ===== Guided mode (new). Progressive disclosure: one step, one primary action; editing behind "Steps". ===== */
+.gd-ico{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:16;stroke-linecap:round;stroke-linejoin:round}
+.gd-dock{display:none}
+.is-guided .gd-dock{display:grid}
+.gd-dock{position:relative;min-width:0;margin:8px 16px 0;padding:12px 16px 14px;border-radius:var(--r);background:var(--paper-sunk);
+  grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"head head head" "counts body go";gap:10px 28px;align-items:center}
+.gd-head{grid-area:head;display:flex;align-items:center;gap:14px;min-width:0}
+.gd-where{font-size:.875rem;font-weight:600;color:var(--ink-muted);white-space:nowrap}
+/* the path: where you are in step, add, put together, at speed. Read-only (Steps jumps). */
+.gd-path{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;font-size:.8125rem;color:var(--ink-faint);white-space:nowrap}
+.gd-pi{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:8px;height:8px;border-radius:4px;background:var(--line)}
+.gd-pi.gd-comb{min-width:16px}
+.gd-pi.gd-done{background:var(--ink-faint)}
+.gd-pi.gd-now{height:22px;padding:0 9px;border-radius:999px;background:var(--ink);color:var(--paper);font-size:.75rem;font-weight:600}
+.gd-pi.gd-goal{height:auto;background:none;min-width:0;color:var(--ink-faint);font-size:.75rem}
+.gd-pi.gd-goal.gd-now{height:22px;background:var(--ink);color:var(--paper)}
+.gd-headbtns{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
+.gd-tbtn{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border-radius:999px;font-size:.875rem;font-weight:600;white-space:nowrap;box-shadow:inset 0 0 0 1px var(--line);background:var(--paper)}
+.gd-tbtn:hover{background:var(--line)}
+.gd-tbtn[aria-pressed="true"]{background:var(--ink);color:var(--paper);box-shadow:none}
+.gd-tbtn:disabled{color:var(--ink-faint);cursor:default}
+.gd-countsbox{grid-area:counts;min-width:0}
+.gd-kicker{font-size:.8125rem;color:var(--ink-muted);white-space:nowrap}
+.gd-big{font:800 clamp(1.9rem,3vw,2.6rem)/1 var(--font-display);letter-spacing:-.02em;white-space:nowrap}
+.gd-body{grid-area:body;min-width:0;display:grid;gap:4px}
+.gd-cue{font-size:1.125rem;font-weight:600;letter-spacing:-.01em;line-height:1.25}
+.gd-cue.gd-none{font-weight:500;color:var(--ink-muted)}
+.gd-meta{font-size:.8125rem;color:var(--ink-faint)}
+.gd-note{font-size:.875rem;color:var(--ink);line-height:1.35}
+.gd-note b{font-weight:600}
+.gd-go{grid-area:go;display:flex;gap:8px;align-items:center}
+.gd-go .ls-btn{min-height:48px}
+.gd-go .ls-accent{padding:0 20px}
+.gd-meter{position:relative;height:8px;border-radius:4px;background:var(--paper);margin:8px 12px 18px;max-width:420px}
+.gd-meter i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--ink)}
+.gd-meter span{position:absolute;top:12px;transform:translateX(-50%);font-size:.75rem;color:var(--ink-muted)}
+.gd-meter span::before{content:"";position:absolute;left:50%;top:-14px;width:2px;height:10px;background:var(--ink-faint)}
+.gd-intro{grid-column:1 / -1;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 28px;align-items:center}
+.gd-intro h2{font:800 1.5rem/1.1 var(--font-display);letter-spacing:-.02em}
+.gd-intro p{font-size:.9375rem;color:var(--ink-muted);max-width:62ch;line-height:1.4}
+.gd-intro .gd-go{grid-row:1 / span 3;grid-column:2}
+.gd-flash{position:absolute;left:50%;top:-14px;transform:translate(-50%,-100%);z-index:8;padding:8px 16px;border-radius:999px;background:var(--ink);color:var(--paper);font-size:.875rem;font-weight:600;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity var(--t);max-width:calc(100vw - 24px);overflow:hidden;text-overflow:ellipsis}
+.gd-flash.ls-show{opacity:1}
+.ls-phone.is-guided .ls-tl-read{display:none}
+
+/* steps bar under the count band: the chunk's steps, the current one filled */
+.gd-sbar{display:none;position:relative;height:16px;margin-top:6px}
+.is-guided .gd-sbar{display:block}
+.gd-seg{position:absolute;top:5px;height:6px;border-radius:3px;background:var(--line)}
+.gd-seg.gd-in{background:var(--ink-faint)}
+.gd-seg.gd-cur{background:var(--accent);top:3px;height:10px}
+.gd-seg.gd-idle{background:transparent;border:1px dashed var(--ink-faint);opacity:.7}
+.gd-seg.gd-skipped{opacity:.35}
+.gd-cut{position:absolute;top:0;width:2px;height:16px;margin-left:-1px;background:var(--ink);border-radius:1px}
+.gd-cut.gd-weak{background:transparent;width:10px;height:10px;top:3px;margin-left:-5px;border-radius:50%;box-shadow:inset 0 0 0 2px var(--ink)}
+.ls-phone .gd-seg{background:rgb(232 225 216 / .25)}
+.ls-phone .gd-seg.gd-in{background:rgb(232 225 216 / .55)}
+.ls-phone .gd-seg.gd-cur{background:var(--accent)}
+.ls-phone .gd-cut{background:var(--on-stage)}
+.ls-phone .gd-cut.gd-weak{background:transparent;box-shadow:inset 0 0 0 2px var(--on-stage)}
+.ls-phone .gd-seg.gd-idle{border-color:var(--on-stage-muted)}
+.ls-count.gd-pre{opacity:.3}
+.gd-unit{display:none;margin-left:4px;font-size:.8125rem;color:var(--ink-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.is-guided .gd-unit{display:block}
+.ls-phone .gd-unit{color:var(--on-stage-muted);text-shadow:0 1px 4px rgb(0 0 0 / .7)}
+.is-guided.ls-desk .ls-panels{padding-bottom:104px}
+
+/* timeline: phrase marks (existing) > chunk band > step ticks in the current chunk; not-dancing hatched */
+.gd-tl-chunk{display:none;position:absolute;bottom:2px;height:5px;border-radius:3px;background:var(--line)}
+.is-guided .gd-tl-chunk{display:block}
+.gd-tl-chunk.gd-now{background:var(--ink)}
+.gd-tl-chunk.gd-did{background:var(--ink-faint)}
+.gd-tl-step{display:none;position:absolute;top:18px;height:12px;width:2px;margin-left:-1px;background:var(--ink);border-radius:1px;z-index:2}
+.is-guided .gd-tl-step{display:block}
+.gd-tl-idle{position:absolute;top:12px;bottom:6px;background:repeating-linear-gradient(90deg,var(--paper-sunk) 0 3px,transparent 3px 6px);border-radius:3px;z-index:1}
+.gd-tl-idle.gd-inc{display:none}
+.gd-inline-link{font:inherit;font-weight:600;color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+
+/* the Steps panel: this step's changes, detail, then the list */
+.gd-list{display:grid;gap:12px}
+.gd-list h3{font-size:1rem;font-weight:700}
+.gd-rename{display:flex;gap:6px;align-items:center}
+.gd-rename input{font:600 1rem var(--font-ui);min-height:44px;padding:0 12px;border-radius:10px;border:1px solid var(--ink-faint);background:var(--paper);color:var(--ink);min-width:0;flex:1}
+.gd-lchunk{display:flex;align-items:baseline;gap:8px;font-size:.875rem;font-weight:600;color:var(--ink-muted);padding-top:8px;border-top:1px solid var(--line)}
+.gd-lchunk small{font-weight:400;color:var(--ink-faint)}
+.gd-lrow{display:grid;grid-template-columns:24px 64px minmax(0,1fr);align-items:center;gap:8px;min-height:44px;padding:4px 8px;border-radius:10px;text-align:left;width:100%}
+.gd-lrow:hover{background:var(--paper-sunk)}
+.gd-lrow[aria-current="true"]{background:var(--ink);color:var(--paper)}
+.gd-lrow[aria-current="true"] .gd-lsub{color:var(--on-stage-muted)}
+.gd-lnum{font:700 .9375rem var(--font-display);opacity:.7}
+.gd-lcounts{font:700 1rem var(--font-display)}
+.gd-lcue{font-size:.875rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gd-lsub{display:block;font-size:.75rem;color:var(--ink-faint)}
+.gd-lrow.gd-skipped .gd-lcounts,.gd-lrow.gd-skipped .gd-lcue{text-decoration:line-through;opacity:.6}
+.gd-lidle{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.875rem;color:var(--ink-muted);padding:8px 10px;border-radius:10px;background:var(--paper-sunk)}
+.ls-panel .ls-seg button{min-height:40px}
+.ls-panel .ls-chip .gd-ico{width:18px;height:18px}
+
+/* ===== phone upright ===== */
+.ls-phone.is-guided:not(.ls-land){grid-template-rows:auto minmax(0,1fr) auto auto}
+.ls-phone .gd-dock{margin:0;border-radius:0;padding:10px 12px 10px;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"head head" "counts counts" "body body" "go go";gap:8px 10px}
+.ls-phone .gd-head{gap:8px}
+.ls-phone .gd-where{display:none}
+.ls-phone .gd-path{flex:1}
+.ls-phone .gd-pi.gd-goal:not(.gd-now){font-size:0;min-width:18px;height:8px;background:var(--line)}
+.ls-phone .gd-countsbox{display:flex;align-items:baseline;gap:10px}
+.ls-phone .gd-big{font-size:2rem}
+.ls-phone .gd-cue{font-size:1.0625rem}
+.ls-phone .gd-go .ls-btn{min-height:88px;font-size:1.0625rem;border-radius:18px;white-space:normal;text-align:center;line-height:1.2;padding:0 12px}
+.ls-phone .gd-go{display:grid;grid-template-columns:1fr 1.7fr}
+.ls-phone .gd-go.gd-one{grid-template-columns:1fr}
+.ls-phone .gd-tbtn{min-height:44px}
+.ls-phone .gd-lbl{display:none}
+.ls-phone .gd-headbtns .gd-tbtn{padding:0 11px}
+.ls-phone .gd-intro{grid-template-columns:1fr}
+.ls-phone .gd-intro .gd-go{grid-row:auto;grid-column:auto}
+.ls-phone .gd-intro h2{font-size:1.3rem}
+.ls-phone .gd-intro p{font-size:.875rem}
+.ls-phone .gd-meter{margin:6px 12px 16px}
+/* ===== phone on its side: the card lives in the rail, where the page has empty room today. Hide, don't shrink. ===== */
+.ls-land.is-guided .gd-dock{grid-row:2;align-self:stretch;align-content:start;overflow:hidden;padding:6px 8px;grid-template-columns:minmax(0,1fr) 104px;grid-template-areas:"head head" "counts go" "body go";grid-template-rows:auto auto 1fr;gap:6px 8px}
+.ls-land .gd-countsbox{display:block}
+.ls-land .gd-big{font-size:1.5rem}
+.ls-land .gd-kicker{font-size:.75rem}
+.ls-land .gd-body{align-self:start;gap:4px}
+.ls-land .gd-cue{font-size:.9375rem;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ls-land .gd-meta,.ls-land .gd-side,.ls-land .gd-exitlbl{display:none}
+.ls-land .gd-note{font-size:.8125rem}
+.ls-land .gd-go{display:grid;grid-template-columns:1fr;grid-auto-rows:minmax(88px,auto);align-self:start;gap:6px}
+.ls-land .gd-go .ls-btn{min-height:88px;padding:0 8px;font-size:.875rem;border-radius:16px;flex-direction:column;gap:4px}
+.ls-land .gd-headbtns .gd-tbtn{min-height:44px;padding:0 11px}
+.ls-land.is-guided .ls-time,.ls-land.is-guided .ls-pill-more{display:none}
+.ls-land .ls-transport{flex-wrap:nowrap;gap:5px}
+.ls-land .ls-pill{padding:0 8px}
+.ls-land .gd-intro h2{font-size:1.1rem}
+.ls-land .gd-intro p{font-size:.8125rem}
+.ls-land .gd-intro .gd-go{grid-template-columns:1fr 1fr}
+.ls-land .gd-intro .gd-go.gd-one{grid-template-columns:1fr}
+.ls-land .gd-meter{margin:4px 12px 14px}
+.ls-land .ls-tl{height:40px}
+
+/* ===== comparison variants (review only) ===== */
+/* B: the steps list is the guided UI, always open: a rail on desktop, a half-height sheet on a phone */
+.lay-b.ls-desk.is-guided{grid-template-columns:minmax(0,1fr) 400px}
+.lay-b.ls-desk.is-guided .ls-bar,.lay-b.ls-desk.is-guided .ls-bottom{grid-column:1 / -1}
+.lay-b.ls-desk.is-guided .ls-panels{grid-column:1;grid-row:2}
+.lay-b.ls-desk.is-guided .gd-dock{grid-column:2;grid-row:2;margin:0 16px 0 0;align-content:start;overflow:auto}
+.lay-b.is-guided .gd-dock{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"head head" "counts counts" "body body" "go go" "list list"}
+.lay-b.ls-desk.is-guided .ls-panels{padding-bottom:104px}
+.lay-b.ls-phone.is-guided:not(.ls-land){grid-template-rows:auto minmax(0,.8fr) minmax(0,1fr) auto}
+.lay-b.ls-phone.is-guided .gd-dock{overflow:auto;align-content:start}
+.gd-inlist{grid-area:list;display:none}
+.lay-b .gd-inlist{display:block}
+/* C: a card floating over the stage, steps on the count band */
+.lay-c.is-guided .gd-dock{position:absolute;z-index:6;left:50%;transform:translateX(-50%);bottom:112px;width:min(620px,calc(100% - 32px));margin:0;background:rgb(242 239 233 / .96);box-shadow:0 12px 40px rgb(0 0 0 / .35)}
+.lay-c.is-guided .gd-dock{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"head head" "counts body" "go go"}
+.lay-c .gd-go{justify-content:flex-end}
+.lay-c .ls-panels > .gd-dock{grid-column:auto;grid-row:auto}
+.lay-c.ls-phone.is-guided .gd-dock{left:10px;right:10px;width:auto;transform:none;bottom:92px;border-radius:14px}
+.lay-c.ls-land.is-guided .gd-dock{left:8px;right:auto;width:62%;bottom:78px;transform:none;grid-row:auto;grid-template-columns:auto minmax(0,1fr);grid-template-areas:"head head" "counts body" "go go";grid-template-rows:auto;align-self:auto}
+.lay-c.ls-land .gd-go{display:flex}
+.lay-c.ls-land .gd-go .ls-btn{flex:1;flex-direction:row}
+.lay-c.ls-phone.is-guided:not(.ls-land){grid-template-rows:auto minmax(0,1fr) auto}
+
+/* mockup chrome: the state picker (not part of the design) */
+.mk-states{position:fixed;z-index:60;top:8px;left:calc(50% + 40px);display:flex;align-items:center;gap:6px;font:500 12px/1 system-ui;color:#555}
+.mk-states select{max-width:230px;font:500 12px system-ui;padding:6px 8px;border-radius:8px;border:1px dashed #9a9188;background:#fffbe9}
+.ls-phone ~ .mk-states{left:4px;right:auto;top:84px;bottom:auto;transform:none;opacity:.85}
+.ls-land ~ .mk-states{left:110px;top:4px}
+.mk-states label{display:none}
+.ls-desk ~ .mk-states label{display:inline}
+.scrim{position:fixed;inset:0;z-index:29;background:rgb(28 25 23 / .18)}
+.ls-desk ~ .scrim{background:transparent}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main id="app" class="ls ls-desk"></main>
+<div class="scrim" id="scrim" hidden></div>
+<div class="mk-states"><label for="mk">Mockup state</label><select id="mk" aria-label="Mockup state"></select></div>
+<script>
+/* ---------------- data: lesson "bhangra" (job_5716…), tools/research/step_segments/out/steps.json, chunks 1–3 at each level.
+   Cue text is written from each step's `moves` (v1 style: 8 words at most, the dancer's side). */
+const G = {"one": 2.5748, "spc": 0.6316, "end": 48.05};
+const IDLE = [{"a": 0, "b": 4.47, "kind": "lead-in", "why": ["not in frame", "still", "walking"]}, {"a": 46.787, "b": 48.05, "kind": "outro", "why": ["no music", "walking"]}];
+const FAST_QUARTERS = [41, 43];
+const LV = {"beginner": [[{"s": 4.47, "e": 5.101, "cue": "Left arm up and back", "q": "", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 5.101, "e": 5.733, "cue": "Right arm up, left leg up and back", "q": "", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 5.733, "e": 6.364, "cue": "Left arm up and back", "q": "smooth", "conf": 0.93, "unsure": [], "sub": false, "note": null}, {"s": 6.364, "e": 7.628, "cue": "Left arm up and back", "q": "sharp", "conf": 0.88, "unsure": [], "sub": false, "note": null}], [{"s": 7.628, "e": 8.259, "cue": "Right arm up, left arm up", "q": "hold", "conf": 0.73, "unsure": [], "sub": false, "note": null}, {"s": 8.259, "e": 8.891, "cue": "Left arm to their left and back", "q": "smooth", "conf": 0.77, "unsure": [], "sub": false, "note": null}, {"s": 8.891, "e": 10.786, "cue": "Left arm to their left and up and", "q": "sharp", "conf": 0.78, "unsure": [], "sub": false, "note": null}, {"s": 10.786, "e": 11.417, "cue": "Right arm to their left and up and", "q": "", "conf": 0.97, "unsure": [], "sub": false, "note": null}], [{"s": 11.417, "e": 12.049, "cue": "Left arm up and forward", "q": "smooth", "conf": 0.82, "unsure": [], "sub": false, "note": null}, {"s": 12.049, "e": 12.68, "cue": "Left arm up", "q": "", "conf": 0.96, "unsure": [], "sub": false, "note": null}, {"s": 12.68, "e": 13.944, "cue": "Left arm up and back", "q": "hold", "conf": 0.87, "unsure": [], "sub": false, "note": null}, {"s": 13.944, "e": 14.575, "cue": "Left arm to their left and up", "q": "hold", "conf": 0.64, "unsure": [], "sub": false, "note": null}, {"s": 14.575, "e": 16.47, "cue": "Left arm up and back", "q": "hold", "conf": 0.41, "unsure": [], "sub": false, "note": null}]], "intermediate": [[{"s": 4.47, "e": 5.101, "cue": "Left arm up and back", "q": "", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 5.101, "e": 5.733, "cue": "Right arm up, left leg up and back", "q": "", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 5.733, "e": 6.364, "cue": "Left arm up and back", "q": "smooth", "conf": 0.93, "unsure": [], "sub": false, "note": null}, {"s": 6.364, "e": 6.996, "cue": "Left arm up and back", "q": "", "conf": 0.67, "unsure": [], "sub": false, "note": null}, {"s": 6.996, "e": 7.628, "cue": "Left arm back", "q": "", "conf": 0.88, "unsure": [], "sub": false, "note": null}], [{"s": 7.628, "e": 8.259, "cue": "Right arm up, left arm up", "q": "hold", "conf": 0.73, "unsure": [], "sub": false, "note": null}, {"s": 8.259, "e": 8.891, "cue": "Left arm to their left and back", "q": "smooth", "conf": 0.77, "unsure": [], "sub": false, "note": null}, {"s": 8.891, "e": 9.838, "cue": "Left arm up", "q": "sharp", "conf": 0.81, "unsure": [], "sub": false, "note": null}, {"s": 9.838, "e": 10.786, "cue": "Right arm to their right and up", "q": "", "conf": 0.78, "unsure": [], "sub": false, "note": null}, {"s": 10.786, "e": 11.417, "cue": "Right arm to their left and up and", "q": "", "conf": 0.97, "unsure": [], "sub": false, "note": null}], [{"s": 11.417, "e": 12.049, "cue": "Left arm up and forward", "q": "smooth", "conf": 0.82, "unsure": [], "sub": false, "note": null}, {"s": 12.049, "e": 12.68, "cue": "Left arm up", "q": "", "conf": 0.96, "unsure": [], "sub": false, "note": null}, {"s": 12.68, "e": 13.944, "cue": "Left arm up and back", "q": "hold", "conf": 0.87, "unsure": [], "sub": false, "note": null}, {"s": 13.944, "e": 14.575, "cue": "Left arm to their left and up", "q": "hold", "conf": 0.64, "unsure": [], "sub": false, "note": null}, {"s": 14.575, "e": 15.838, "cue": "Right leg up and forward and back", "q": "hold", "conf": 0.52, "unsure": [], "sub": false, "note": null}, {"s": 15.838, "e": 16.47, "cue": "Left arm to their right and up", "q": "hold", "conf": 0.41, "unsure": [], "sub": false, "note": null}]], "advanced": [[{"s": 4.47, "e": 4.785, "cue": "Left arm to their left and back", "q": "", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 4.785, "e": 5.101, "cue": "Left arm to their right and forward", "q": "", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 5.101, "e": 5.417, "cue": "Right arm to their right and up", "q": "", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 5.417, "e": 5.733, "cue": "Right arm to their left and forward", "q": "", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 5.733, "e": 6.049, "cue": "Left arm up and back", "q": "smooth", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 6.049, "e": 6.364, "cue": "Left arm down and forward, right leg forward", "q": "smooth", "conf": 0.93, "unsure": [], "sub": false, "note": null}, {"s": 6.364, "e": 6.68, "cue": "Left arm up, right leg to their left", "q": "", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 6.68, "e": 6.996, "cue": "Left arm to their left and down and", "q": "smooth", "conf": 0.67, "unsure": [], "sub": false, "note": null}, {"s": 6.996, "e": 7.312, "cue": "Left arm back", "q": "", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 7.312, "e": 7.628, "cue": "Right leg to their left and forward", "q": "", "conf": 0.88, "unsure": [], "sub": false, "note": null}], [{"s": 7.628, "e": 7.943, "cue": "Right leg to their right and up", "q": "hold", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 7.943, "e": 8.259, "cue": "Right arm down and forward", "q": "sharp", "conf": 0.73, "unsure": [], "sub": false, "note": null}, {"s": 8.259, "e": 8.575, "cue": "Left arm to their left and back", "q": "", "conf": 0.99, "unsure": [], "sub": false, "note": null}, {"s": 8.575, "e": 8.891, "cue": "Left arm to their right and forward", "q": "smooth", "conf": 0.77, "unsure": [], "sub": false, "note": null}, {"s": 8.891, "e": 9.207, "cue": "Left arm up, right arm up", "q": "", "conf": 0.94, "unsure": [], "sub": false, "note": null}, {"s": 9.207, "e": 9.522, "cue": "Left arm down, right arm down and forward", "q": "sharp", "conf": 0.57, "unsure": [], "sub": false, "note": null}, {"s": 9.522, "e": 9.838, "cue": "Right arm down and back", "q": "sharp", "conf": 0.81, "unsure": [], "sub": false, "note": null}, {"s": 9.838, "e": 10.154, "cue": "Right leg up", "q": "", "conf": 0.7, "unsure": [], "sub": false, "note": null}, {"s": 10.154, "e": 10.47, "cue": "Left leg to their left and up and", "q": "hold", "conf": 0.74, "unsure": [], "sub": false, "note": null}, {"s": 10.47, "e": 10.786, "cue": "Left leg to their right and down and", "q": "", "conf": 0.78, "unsure": [], "sub": false, "note": null}, {"s": 10.786, "e": 11.101, "cue": "Right arm to their left and up and", "q": "", "conf": 1.0, "unsure": [], "sub": false, "note": null}, {"s": 11.101, "e": 11.417, "cue": "Right leg forward", "q": "smooth", "conf": 0.97, "unsure": [], "sub": false, "note": null}], [{"s": 11.417, "e": 11.733, "cue": "Left arm to their left and up and", "q": "", "conf": 0.98, "unsure": [], "sub": false, "note": null}, {"s": 11.733, "e": 12.049, "cue": "Left arm to their right and forward", "q": "", "conf": 0.82, "unsure": [], "sub": false, "note": null}, {"s": 12.049, "e": 12.365, "cue": "Left arm down and back", "q": "", "conf": 0.71, "unsure": [], "sub": false, "note": null}, {"s": 12.365, "e": 12.68, "cue": "Right leg to their left, left arm down", "q": "", "conf": 0.96, "unsure": [], "sub": false, "note": null}, {"s": 12.68, "e": 12.996, "cue": "Right leg to their right and up", "q": "hold", "conf": 0.81, "unsure": [], "sub": false, "note": null}, {"s": 12.996, "e": 13.312, "cue": "Left arm down, right leg down", "q": "hold", "conf": 0.59, "unsure": [], "sub": false, "note": null}, {"s": 13.312, "e": 13.628, "cue": "Right arm to their right and up", "q": "hold", "conf": 0.68, "unsure": [], "sub": false, "note": null}, {"s": 13.628, "e": 13.944, "cue": "Left leg to their right and forward", "q": "smooth", "conf": 0.87, "unsure": [], "sub": false, "note": null}, {"s": 13.944, "e": 14.259, "cue": "Left arm to their left and up", "q": "hold", "conf": 0.7, "unsure": [], "sub": false, "note": null}, {"s": 14.259, "e": 14.575, "cue": "Left arm down", "q": "hold", "conf": 0.64, "unsure": [], "sub": false, "note": null}, {"s": 14.575, "e": 14.891, "cue": "Left arm up", "q": "", "conf": 0.6, "unsure": [], "sub": false, "note": null}, {"s": 14.891, "e": 15.523, "cue": "Right leg up and forward", "q": "hold", "conf": 0.55, "unsure": [], "sub": false, "note": null}, {"s": 15.523, "e": 15.838, "cue": "Right leg to their left and down and", "q": "smooth", "conf": 0.52, "unsure": [], "sub": false, "note": null}, {"s": 15.838, "e": 16.47, "cue": "Left arm to their right and up", "q": "hold", "conf": 0.41, "unsure": [], "sub": false, "note": null}]]};
+const LATER = [[16.47, 20.26], [20.26, 22.786], [22.786, 25.313], [25.313, 27.839], [27.839, 30.365], [30.365, 34.155], [34.155, 37.945], [37.945, 40.471], [40.471, 42.997], [42.997, 45.524], [45.524, 46.787]];
+
+// Beginner cues, hand-tidied from `moves` (the auto text above is the fallback at other levels).
+const BEGINNER_CUES = [
+  ['Left arm up and back, right leg up', 'Right arm up, left leg up and back', 'Left arm up and back, smooth', 'Left arm up and back, sharp'],
+  ['Both arms up, and hold', 'Left arm out to their left and back', 'Left arm to their left and up, sharp', null],
+  ['Left arm up and forward, smooth', 'Left arm up', 'Left arm up and back, hold', 'Left arm to their left and up', 'Left arm up and back'],
+];
+BEGINNER_CUES.forEach((c, ci) => c.forEach((cue, si) => { LV.beginner[ci][si].cue = cue; }));
+LV.beginner[1][1].unsure = ['left arm']; // hypothetical: the first chunks of this clip have no unsure parts
+const tidy = c => c && c.replace(/\s+(and|to|their)$/g, '').replace(/\s+(and|to|their)$/g, '');
+['intermediate', 'advanced'].forEach(k => LV[k].forEach(c => c.forEach(s => { s.cue = tidy(s.cue); })));
+const LEVELS = { beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced' };
+const LEVEL_HINT = { beginner: 'about 1 count a step', intermediate: '½ to 1 count a step', advanced: 'down to ½ count, ¼ where the video has a clear hit' };
+const LEAD = IDLE.find(i => i.kind === 'lead-in');
+let LAYOUT = (new URLSearchParams(location.search).get('layout') || 'a').toLowerCase();
+
+/* ---------------- count helpers */
+const cOf = t => (t - G.one) / G.spc + 1;
+const tOf = c => G.one + (c - 1) * G.spc;
+const q4 = c => Math.round(c * 4) / 4;
+function lab(c) {
+  c = q4(c); const w = Math.floor(c), f = c - w, base = (((w - 1) % 8) + 8) % 8 + 1;
+  return base + (f === .5 ? '&' : f === .25 ? 'e' : f === .75 ? 'a' : '');
+}
+const span = (a, b) => `${lab(cOf(a))}–${lab(cOf(b))}`;
+const spanSp = (a, b) => `${lab(cOf(a))} – ${lab(cOf(b))}`;
+const clock = t => { t = Math.max(0, t); const m = Math.floor(t / 60), s = t - m * 60; return `${m}:${s < 10 ? '0' : ''}${s.toFixed(1)}`; };
+const fmt = s => `${Math.round(s * 100) / 100}×`;
+
+/* ---------------- icons: Phosphor-style regular weight (16 on a 256 grid) */
+const IC = {
+  play: '<svg class="gd-ico" viewBox="0 0 256 256" style="fill:currentColor;stroke:none"><path d="M232.4,114.49,88.32,26.35a16,16,0,0,0-16.2-.3A15.86,15.86,0,0,0,64,39.87V216.13A15.94,15.94,0,0,0,80,232a16.07,16.07,0,0,0,8.36-2.35L232.4,141.51a15.81,15.81,0,0,0,0-27ZM80,215.94V40l143.83,88Z"/></svg>',
+  pause: '<svg class="gd-ico" viewBox="0 0 256 256" style="fill:currentColor;stroke:none"><path d="M200,32H160a16,16,0,0,0-16,16V208a16,16,0,0,0,16,16h40a16,16,0,0,0,16-16V48A16,16,0,0,0,200,32Zm0,176H160V48h40ZM96,32H56A16,16,0,0,0,40,48V208a16,16,0,0,0,16,16H96a16,16,0,0,0,16-16V48A16,16,0,0,0,96,32Zm0,176H56V48H96Z"/></svg>',
+  left: '<svg class="gd-ico" viewBox="0 0 256 256"><path d="M160 208 80 128l80-80"/></svg>',
+  right: '<svg class="gd-ico" viewBox="0 0 256 256"><path d="m96 48 80 80-80 80"/></svg>',
+  x: '<svg class="gd-ico" viewBox="0 0 256 256"><path d="M200 56 56 200M200 200 56 56"/></svg>',
+  dots: '<svg class="gd-ico" viewBox="0 0 256 256" style="fill:currentColor;stroke:none"><circle cx="60" cy="128" r="12"/><circle cx="128" cy="128" r="12"/><circle cx="196" cy="128" r="12"/></svg>',
+  list: '<svg class="gd-ico" viewBox="0 0 256 256"><path d="M96 64h120M96 128h120M96 192h120"/><circle cx="48" cy="64" r="6" style="fill:currentColor"/><circle cx="48" cy="128" r="6" style="fill:currentColor"/><circle cx="48" cy="192" r="6" style="fill:currentColor"/></svg>',
+  again: '<svg class="gd-ico" viewBox="0 0 256 256"><path d="M80 100H32V52"/><path d="M66 190a88 88 0 1 0 0-124L32 100"/></svg>',
+  split: '<svg class="gd-ico" viewBox="0 0 256 256"><path d="M128 32v192M88 88l-40 40 40 40M168 88l40 40-40 40"/></svg>',
+  merge: '<svg class="gd-ico" viewBox="0 0 256 256"><path d="M128 32v192M48 88l40 40-40 40M208 88l-40 40 40 40"/></svg>',
+  skip: '<svg class="gd-ico" viewBox="0 0 256 256"><path d="M200 40v176M56 48v160l112-80Z"/></svg>',
+  steps: '<svg class="gd-ico" viewBox="0 0 256 256"><path d="M40 208h56v-56h56V96h56V48"/></svg>',
+};
+
+/* ---------------- state */
+let S;
+const copyLevel = lv => LV[lv].map(c => c.map(s => ({ ...s, unsure: [...s.unsure], edited: false, skipped: false, name: '' })));
+const WALKIN = () => ({ s: LEAD.a, e: LEAD.b, cue: null, q: '', conf: 1, unsure: [], edited: true, skipped: false, name: '', walk: true });
+function reset(o = {}) {
+  S = { mode: 'free', view: 'flow', level: 'beginner', chunks: copyLevel('beginner'), ci: 0, pi: 0, done: new Set(),
+    t: 5.2, playing: false, speed: 1, learnSpeed: .5, buildUp: false, click: false, mirror: false, passes: 0, asked: false,
+    loop: null, panel: null, idleInc: false, firstVisit: false, resume: null, flash: '', source: 'loop', ...o };
+}
+/* re-cut the learner's untouched steps to another level; edited steps stay exactly as they are */
+function recut(steps, level) {
+  const out = []; let run = [];
+  const flush = () => {
+    if (!run.length) return;
+    const a = run[0].s, b = run[run.length - 1].e;
+    const tgt = LV[level].flat().filter(s => s.s >= a - 1e-3 && s.e <= b + 1e-3);
+    const ok = tgt.length && Math.abs(tgt[0].s - a) < 1e-3 && Math.abs(tgt[tgt.length - 1].e - b) < 1e-3;
+    out.push(...(ok ? tgt.map(s => ({ ...s, unsure: [...s.unsure], edited: false, skipped: false, name: '' })) : run));
+    run = [];
+  };
+  steps.forEach(s => { if (s.edited) { flush(); out.push(s); } else run.push(s); });
+  flush();
+  return out;
+}
+/* the path through a chunk: step, add the next, put them together … at speed, then join with the chunks before */
+function pathFor(ci) {
+  const st = S.chunks[ci], live = st.map((s, i) => i).filter(i => !st[i].skipped), items = [];
+  live.forEach((si, k) => { items.push({ k: 'step', ci, si, n: k }); if (k > 0) items.push({ k: 'comb', ci, from: live[0], to: si, n: k }); });
+  items.push({ k: 'speed', ci });
+  if (ci > 0) items.push({ k: 'join', ci });
+  return items;
+}
+const chunkSpan = ci => { const st = S.chunks[ci].filter(s => !s.skipped); return [st[0].s, st[st.length - 1].e]; };
+function itemSpan(it) {
+  const st = S.chunks[it.ci];
+  if (it.k === 'step') return [st[it.si].s, st[it.si].e];
+  if (it.k === 'comb') return [st[it.from].s, st[it.to].e];
+  if (it.k === 'speed') return chunkSpan(it.ci);
+  return [chunkSpan(0)[0], chunkSpan(it.ci)[1]];
+}
+const cur = () => { const p = pathFor(S.ci); S.pi = Math.min(S.pi, p.length - 1); return p[S.pi]; };
+const flow = () => S.mode === 'guided' && S.view === 'flow';
+const curSpan = () => flow() ? itemSpan(cur()) : S.loop;
+const liveIndex = (ci, si) => S.chunks[ci].slice(0, si + 1).filter(s => !s.skipped).length;
+const liveCount = ci => S.chunks[ci].filter(s => !s.skipped).length;
+const totalSteps = () => S.chunks.reduce((n, c, i) => n + liveCount(i), 0);
+const curStep = () => { const it = flow() && cur(); return it && it.k === 'step' ? S.chunks[it.ci][it.si] : null; };
+
+/* ---------------- render */
+const app = document.getElementById('app');
+const layoutOf = () => { const w = innerWidth, h = innerHeight, phone = w < 768 || h <= 520; return { phone, land: phone && w > h }; };
+function render() {
+  const L = layoutOf();
+  app.className = `ls ${L.phone ? 'ls-phone' : 'ls-desk'}${L.land ? ' ls-land' : ''}${S.mode === 'guided' ? ' is-guided' : ''} lay-${LAYOUT}`;
+  const d = dock(L);
+  app.innerHTML = bar(L) + panels(L, LAYOUT === 'c' ? d : '') + (LAYOUT === 'c' ? '' : d) + bottom(L) + overlay(L);
+  document.getElementById('scrim').hidden = !S.panel;
+  wire(); frame(true);
+}
+function bar(L) {
+  const v = (id, on) => `<button class="ls-vbtn" aria-pressed="${on}">${id}</button>`;
+  return `<header class="ls-bar">
+    <a class="ls-icon-btn" aria-label="Home" href="index.html">${IC.left}</a>
+    <nav class="ls-vbar" aria-label="Views">${v('On video', true)}${v('Video', false)}${v('Front', true)}${v('Side', false)}${v('Back', false)}${v('Top', false)}
+      <button class="ls-vbtn" data-act="mirror" aria-pressed="${S.mirror}">Mirror</button><span class="ls-vsep"></span>${v('Hands', false)}${v('Feet', false)}</nav>
+    ${L.phone ? '' : `<div class="ls-bar-end"><div class="ls-credit"><a href="#">Original video (credit line)</a><small>Choreo · ♪ track</small></div><span class="ls-meter">${S.done.size ? '14' : '0'} of 70 counts at full speed</span></div>`}
+  </header>`;
+}
+function figure(unsureArm, ink) {
+  const A = ink || 'var(--accent)', B = ink ? '#4a443f' : 'color-mix(in srgb,var(--accent) 70%,#000)';
+  const arm = unsureArm
+    ? `<path d="M40 52 L22 30" stroke="#8d857d" stroke-width="7" stroke-linecap="round" fill="none" filter="url(#wob)"/><path d="M40 52 L22 30" stroke="#b8aea3" stroke-width="2" stroke-dasharray="3 2" fill="none" filter="url(#wob)"/>`
+    : `<path d="M40 52 L22 30" stroke="${A}" stroke-width="7" stroke-linecap="round" fill="none"/>`;
+  return `<svg viewBox="0 0 100 160" aria-hidden="true"><defs><filter id="wob"><feTurbulence baseFrequency=".9" numOctaves="1" seed="3"/><feDisplacementMap in="SourceGraphic" scale="3"/></filter></defs>
+    <ellipse cx="50" cy="152" rx="26" ry="5" fill="#000" opacity=".45"/><circle cx="50" cy="28" r="10" fill="${A}"/>
+    <path d="M50 40 L50 92" stroke="${A}" stroke-width="14" stroke-linecap="round"/><path d="M56 42 L56 90" stroke="${B}" stroke-width="5" stroke-linecap="round"/>${arm}
+    <path d="M60 52 L80 66 L88 44" stroke="${A}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <path d="M46 92 L36 122 L30 150" stroke="${A}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <path d="M54 92 L72 118 L80 146" stroke="${B}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>`;
+}
+function panels(L, inner) {
+  const st = curStep(), unsure = !!(st && st.unsure.length), m = S.mirror ? 'transform:scaleX(-1)' : '';
+  return `<section class="ls-panels" data-n="2">
+    <div class="ls-tile ls-cam"><div class="ls-stage"><span class="ls-corner">On video</span><div class="mk-fig" style="${m}">${figure(false, '#6b635c')}</div><span class="mk-cap" style="top:30px">video (placeholder)</span></div></div>
+    <div class="ls-tile ${L.phone ? 'ls-second' : ''}"><div class="ls-pane"><span class="ls-corner">Front · est.</span><div class="mk-floor"></div><div class="mk-fig" style="${m}">${figure(unsure)}</div><span class="mk-legend">Solid is seen. Grey and hatched is unsure.</span></div></div>
+    <div class="ls-stage-counts">${countBand()}</div>${inner}</section>`;
+}
+/* the count band: the current eight, following the chunk while guided; the chunk's steps under it */
+function bandStart() {
+  if (flow()) {
+    const it = cur(), [a] = it.k === 'join' ? itemSpan(it) : chunkSpan(it.ci), s0 = Math.floor(q4(cOf(a)));
+    return s0 + 8 * Math.max(0, Math.floor((cOf(S.t) - s0) / 8));
+  }
+  return 1 + 8 * Math.max(0, Math.floor((cOf(S.t) - 1) / 8));
+}
+function countBand() {
+  const first = bandStart(), sp = curSpan();
+  let html = '';
+  if (flow()) {
+    const pre = !S.idleInc && LEAD.b > tOf(first) + .05;
+    if (pre) html += `<span class="gd-unit">Dance starts at ${clock(LEAD.b)}</span>`; // only what the card doesn't already say
+  }
+  html += '<div class="ls-counts" id="band">';
+  for (let i = 0; i < 8; i++) {
+    const c = first + i, t = tOf(c), pre = t < LEAD.b - .05 && !S.idleInc;
+    const out = sp && (c + .99 < q4(cOf(sp[0])) || c > q4(cOf(sp[1])) - .01);
+    const tag = S.mode === 'guided' ? 'span' : 'button'; // guided: the band is a readout; the guide sets the loop
+    html += `<${tag} class="ls-count${out ? ' ls-out' : ''}${pre ? ' gd-pre' : ''}" data-c="${c}" tabindex="-1">${t < 0 ? '' : lab(c)}<span class="ls-and">&amp;</span></${tag}>`;
+  }
+  html += '</div>';
+  if (flow()) {
+    const it = cur(), x = t => `${((q4(cOf(t)) - first) / 8) * 100}%`, w = (a, b) => `${((q4(cOf(b)) - q4(cOf(a))) / 8) * 100}%`;
+    const [sa, sb] = itemSpan(it), st = S.chunks[it.ci];
+    let bar = '<div class="gd-sbar" aria-hidden="true">';
+    if (!S.idleInc && LEAD.b > tOf(first) + .05) bar += `<span class="gd-seg gd-idle" style="left:${x(Math.max(0, tOf(first)))};width:${w(Math.max(0, tOf(first)), LEAD.b)}"></span>`;
+    st.forEach((s, i) => {
+      const inSpan = s.s >= sa - 1e-3 && s.e <= sb + 1e-3, isCur = it.k === 'step' && i === it.si;
+      bar += `<span class="gd-seg${inSpan ? ' gd-in' : ''}${isCur ? ' gd-cur' : ''}${s.skipped ? ' gd-skipped' : ''}" style="left:calc(${x(s.s)} + 1px);width:calc(${w(s.s, s.e)} - 2px)"></span>`;
+      if (i > 0) bar += `<span class="gd-cut${st[i - 1].conf < .5 ? ' gd-weak' : ''}" style="left:${x(s.s)}"></span>`;
+    });
+    html += bar + '</div>';
+  }
+  return html;
+}
+
+/* ---------------- the dock: one step, one primary action */
+function path(ci) {
+  return pathFor(ci).map((it, i) => {
+    const lbl = it.k === 'step' ? `${it.n + 1}` : it.k === 'comb' ? `1–${it.n + 1}` : it.k === 'speed' ? 'At speed' : `With ${ci > 1 ? 'chunks 1–' + ci : 'chunk 1'}`;
+    const now = i === S.pi, done = i < S.pi, goal = it.k === 'speed' || it.k === 'join';
+    return `<span class="gd-pi${it.k === 'comb' ? ' gd-comb' : ''}${goal ? ' gd-goal' : ''}${done ? ' gd-done' : ''}${now ? ' gd-now' : ''}"${now ? ' aria-current="step"' : ''}>${now || goal ? lbl : ''}</span>`;
+  }).join('');
+}
+function headBtns(L) {
+  return `<div class="gd-headbtns">
+    ${LAYOUT === 'b' ? '' : `<button class="gd-tbtn" data-act="steps" aria-pressed="${S.panel === 'steps'}" aria-label="Steps: change or pick a step">${IC.list}<span class="gd-lbl">Steps</span></button>`}
+    <button class="gd-tbtn" data-act="exit" aria-label="Exit to free practice">${IC.x}<span class="gd-exitlbl">${L.phone ? 'Free practice' : 'Exit to free practice'}</span></button></div>`;
+}
+function dock(L) {
+  if (S.mode !== 'guided') return '<section class="gd-dock"></section>';
+  const flash = `<div class="gd-flash${S.flash ? ' ls-show' : ''}" role="status">${S.flash}</div>`;
+  if (S.view === 'empty') return `<section class="gd-dock">${flash}<div class="gd-intro"><h2>No steps found in this loop</h2>
+      <p>The dancer stops dancing at ${clock(IDLE[1].a)}, so there is nothing here to split into steps.</p>
+      <div class="gd-go"><button class="ls-btn ls-ghost" data-act="exit">Back to free practice</button><button class="ls-btn ls-accent" data-act="lastchunk">Go to the last steps</button></div></div></section>`;
+  if (S.view === 'intro') {
+    const from = S.source === 'loop' ? 'this loop' : 'the dance from here';
+    return `<section class="gd-dock" aria-label="Learn it in steps">${flash}<div class="gd-intro">
+      <h2>Learn ${from} in steps</h2>
+      <p>${totalSteps()} short steps in ${S.chunks.length} chunks, cut where the dancer stops or changes direction. You can change any of them.</p>
+      ${S.idleInc ? '' : `<p>Dance starts at ${clock(LEAD.b)}. The walk-in before it is left out.</p>`}
+      <div class="gd-go"><button class="ls-btn ls-ghost" data-act="exit">Not now</button><button class="ls-btn ls-accent" data-act="start">Start: step 1 of ${liveCount(0)} ${IC.right}</button></div></div></section>`;
+  }
+  if (S.view === 'finished') return `<section class="gd-dock">${flash}<div class="gd-intro"><h2>All 3 chunks, together</h2>
+      <p>That is this loop, step by step. Keep looping it with Build up, or pick other counts on the timeline.</p>
+      <div class="gd-go gd-one"><button class="ls-btn ls-accent" data-act="exit">Back to free practice</button></div></div></section>`;
+  const it = cur(), st = S.chunks[it.ci], [a, b] = itemSpan(it);
+  const head = `<div class="gd-head"><span class="gd-where">Chunk ${it.ci + 1} of ${S.chunks.length}</span><div class="gd-path" aria-label="Progress">${path(it.ci)}</div>${headBtns(L)}</div>`;
+  let counts, body, go;
+  if (it.k === 'step') {
+    const s = st[it.si];
+    counts = `<div class="gd-countsbox"><div class="gd-kicker">${L.phone ? `Chunk ${it.ci + 1} · ` : ''}Step ${liveIndex(it.ci, it.si)} of ${liveCount(it.ci)}</div><div class="gd-big">${spanSp(s.s, s.e)}</div></div>`;
+    body = `<div class="gd-body">${cueBlock(s)}${note(s)}</div>`;
+    go = `<div class="gd-go gd-one"><button class="ls-btn ls-accent" data-act="next">Got it · ${nextLabel()} ${IC.right}</button></div>`;
+  } else if (it.k === 'comb') {
+    const n = it.n + 1;
+    counts = `<div class="gd-countsbox"><div class="gd-kicker">Put it together</div><div class="gd-big">${spanSp(a, b)}</div></div>`;
+    body = `<div class="gd-body"><div class="gd-cue">Steps 1 to ${n}, back to back.</div>
+      <div class="gd-meta" id="passes">${S.asked ? `Looped 4 times at ${fmt(S.speed)}. Press play to go again.` : `Loop ${Math.min(S.passes + 1, 4)} of 4 at ${fmt(S.speed)}, then it waits for you.`}</div></div>`;
+    go = `<div class="gd-go gd-one"><button class="ls-btn ls-accent" data-act="next">Got it · ${nextLabel()} ${IC.right}</button></div>`;
+  } else {
+    const title = it.k === 'speed' ? `Chunk ${it.ci + 1} at speed` : `Chunks 1–${it.ci + 1} together`;
+    counts = `<div class="gd-countsbox"><div class="gd-kicker">${title}</div><div class="gd-big">${spanSp(a, b)}</div></div>`;
+    body = `<div class="gd-body"><div class="gd-cue">${S.speed >= .999 ? 'Full speed.' : 'Build up: a little faster each time round.'}</div>
+      <div class="gd-meter" aria-label="Build up, 0.5× to 1×"><i style="width:${((S.speed - .5) / .5) * 100}%"></i><span style="left:0">0.5×</span><span style="left:50%">0.75×</span><span style="left:100%">1×</span></div></div>`;
+    const nx = it.k === 'speed' && it.ci > 0 ? `join with ${it.ci > 1 ? 'chunks 1–' + it.ci : 'chunk 1'}` : S.ci + 1 < S.chunks.length ? 'next chunk' : 'finish';
+    go = `<div class="gd-go gd-one"><button class="ls-btn ls-accent" data-act="next">Got it · ${nx} ${IC.right}</button></div>`;
+  }
+  const inlist = LAYOUT === 'b' ? `<div class="gd-inlist">${stepsPanel(L)}</div>` : '';
+  return `<section class="gd-dock" aria-label="Learn it in steps">${flash}${head}${counts}${body}${go}${inlist}</section>`;
+}
+function nextLabel() {
+  const p = pathFor(S.ci), here = p[S.pi], n = p[S.pi + 1];
+  if (!n) return 'next';
+  if (here.k === 'step') return n.k === 'comb' ? `put 1–${n.n + 1} together` : n.k === 'speed' ? 'up to speed' : 'next step';
+  return n.k === 'step' ? `add step ${n.n + 1}` : n.k === 'speed' ? 'up to speed' : 'next';
+}
+function cueBlock(s) {
+  if (s.walk) return `<div class="gd-cue">Walking in</div><div class="gd-meta">We had this as not dancing yet (${LEAD.why.join(', ')}). You included it.</div>`;
+  if (s.name) return `<div class="gd-cue">${s.name}</div><div class="gd-meta">Your name for it</div>`;
+  if (s.note) return `<div class="gd-cue gd-none">No cue: ${s.note}.</div>`;
+  if (!s.cue) return `<div class="gd-cue gd-none">No cue for this step.</div><div class="gd-meta">${s.edited ? 'Cues are dropped on steps you change.' : 'The 3D doesn’t say enough to describe it.'} Watch the video.</div>`;
+  return `<div class="gd-cue">${s.cue}</div><div class="gd-meta">Suggested from the 3D.<span class="gd-side"> “Their left” is the dancer’s left.</span></div>`;
+}
+function note(s) {
+  if (s.conf < .5) return `<div class="gd-note"><b>This split is a guess.</b><span class="gd-side"> The move doesn’t stop here. Merge or move it under Steps.</span></div>`;
+  if (s.unsure.length) return `<div class="gd-note"><b>Their ${s.unsure[0]} is hard to see here.</b><span class="gd-side"> The 3D is unsure (grey and hatched), so the cue leaves it out.</span></div>`;
+  return '';
+}
+
+/* ---------------- transport + timeline (the real page's, plus the guided layers) */
+function bottom(L) {
+  return `<div class="ls-bottom"><div class="ls-transport">
+    <button class="ls-play" data-act="play" aria-label="${S.playing ? 'Pause' : 'Play'}">${S.playing ? IC.pause : IC.play}</button>
+    <span class="ls-time" id="time">${clock(S.t)}<span class="ls-time-total"> / ${clock(G.end)}</span></span>
+    <button class="ls-pill ls-speed" data-act="speed" id="speedpill">${fmt(S.speed)}</button>
+    <button class="ls-pill${S.buildUp ? ' ls-on' : ''}" data-act="build" aria-pressed="${S.buildUp}">Build up</button>
+    <span class="ls-pill-pair"><button class="ls-pill${S.click ? ' ls-on' : ''}" data-act="click" aria-pressed="${S.click}">Click</button><button class="ls-pill ls-pill-more" aria-label="Click settings and volume">${IC.dots}</button></span>
+    <button class="ls-pill ls-more-btn" data-act="more" aria-label="More" aria-pressed="${S.panel === 'more'}">${IC.dots}${L.phone ? '' : '<span>More</span>'}</button>
+  </div>${timeline(L)}<p class="ls-legal"><a href="#">Privacy</a> · <a href="#">Contact</a></p></div>`;
+}
+function timeline(L) {
+  const pct = t => `${(t / G.end) * 100}%`;
+  let h = '<div class="ls-tl-wrap"><div class="ls-tl" id="tl"><div class="ls-tl-track">';
+  for (let c = -8; tOf(c) <= G.end; c++) if (tOf(c) >= 0) h += `<span class="ls-tl-tick" style="left:${pct(tOf(c))}"></span>`;
+  h += '</div>';
+  for (let c = 1; tOf(c) <= G.end; c += 8) h += `<span class="ls-tl-sec" style="left:${pct(tOf(c))}"><span class="ls-tl-mark"></span></span>`;
+  IDLE.forEach(r => h += `<span class="gd-tl-idle${r.kind === 'lead-in' && S.idleInc ? ' gd-inc' : ''}" style="left:${pct(r.a)};width:${pct(r.b - r.a)}" title="Not dancing"></span>`);
+  const ci = flow() ? cur().ci : S.mode === 'guided' ? S.ci : -1;
+  S.chunks.forEach((c, i) => { const [a, b] = chunkSpan(i); h += `<span class="gd-tl-chunk${i === ci ? ' gd-now' : ''}${i < ci ? ' gd-did' : ''}" style="left:calc(${pct(a)} + 1px);width:calc(${pct(b - a)} - 2px)"></span>`; });
+  LATER.forEach(([a, b]) => h += `<span class="gd-tl-chunk" style="left:calc(${pct(a)} + 1px);width:calc(${pct(b - a)} - 2px)"></span>`);
+  if (flow()) S.chunks[ci].forEach((s, i) => { if (i) h += `<span class="gd-tl-step" style="left:${pct(s.s)}"></span>`; });
+  const sp = curSpan();
+  if (sp) h += `<div class="ls-tl-loop" style="left:${pct(sp[0])};width:${pct(sp[1] - sp[0])}"></div><span class="ls-tl-handle" style="left:${pct(sp[0])}"></span><span class="ls-tl-handle" style="left:${pct(sp[1])}"></span>`;
+  h += `<div class="ls-tl-head" id="head" style="left:${pct(S.t)}"></div></div><div class="ls-tl-read">${readout(L)}</div></div>`;
+  return h;
+}
+function readout(L) {
+  if (S.mode === 'guided') return '';
+  const resume = S.resume ? `<button class="gd-tbtn" data-act="resume">${IC.steps}Resume at step ${S.resume.step} of chunk ${S.resume.chunk}</button>` : '';
+  if (S.loop) {
+    const [a, b] = S.loop;
+    return `<span class="ls-tl-name">Loop</span>${L.phone ? `<b style="color:var(--ink)">${span(a, b)}</b>` : `<span class="ls-tl-nudge"><button aria-label="Loop start earlier">${IC.left}</button><b>${lab(cOf(a))}</b><button aria-label="Loop start later">${IC.right}</button></span><span>–</span><span class="ls-tl-nudge"><button aria-label="Loop end earlier">${IC.left}</button><b>${lab(cOf(b))}</b><button aria-label="Loop end later">${IC.right}</button></span>`}
+      ${resume || `<button class="gd-tbtn" data-act="enter-loop">${IC.steps}Learn this loop in steps</button>`}
+      <button class="ls-tl-clear" aria-label="Stop looping" data-act="clearloop">${IC.x}</button>`;
+  }
+  if (resume) return `<span class="ls-hint">Drag across the timeline to loop any counts.</span>${resume}`;
+  return `<span class="ls-hint">Drag across the timeline to loop any counts${S.firstVisit ? `, or <button class="gd-inline-link" data-act="enter-here">learn it in steps</button>` : ''}</span>`;
+}
+
+/* ---------------- panels: More, and Steps (this step's changes, detail, the list) */
+function overlay(L) {
+  if (S.panel === 'more') return `<div class="ls-panel" role="dialog" aria-label="More"><div class="ls-more">
+    <div class="ls-group"><span class="ls-group-label">Learn it in steps</span>
+      <span class="ls-hint">Short steps cut where the dancer stops or changes direction, built back up to full speed. You can change every cut.</span>
+      <div class="ls-group-row">${S.resume ? `<button class="ls-chip ls-accent" data-act="resume">Resume at step ${S.resume.step} of chunk ${S.resume.chunk}</button><button class="ls-chip" data-act="enter-here">Start over</button>` : `<button class="ls-chip ls-accent" data-act="${S.loop ? 'enter-loop' : 'enter-here'}">${S.loop ? 'Learn this loop in steps' : 'Learn it in steps from here'}</button>`}</div></div>
+    <div class="ls-group"><span class="ls-group-label">Counts per loop</span><div class="ls-seg">${[2, 4, 8, 16, 'All'].map(n => `<button aria-pressed="${n === 8}">${n}</button>`).join('')}</div></div>
+    <div class="ls-group-row"><button class="ls-chip" aria-pressed="false">Follow off</button></div>
+    <div class="ls-group"><span class="ls-group-label">Count 1 <small>is a guess</small></span><div class="ls-group-row"><button class="ls-chip">Tap on 1</button><button class="ls-chip">−1</button><button class="ls-chip">+1</button></div></div>
+    <div class="ls-group"><span class="ls-group-label">This lesson</span><div class="ls-group-row"><button class="ls-chip">Remove from my lessons</button><button class="ls-chip">Report or remove this video</button></div></div>
+  </div></div>`;
+  if (S.panel === 'steps' && LAYOUT !== 'b') return `<div class="ls-panel" role="dialog" aria-label="Steps" style="${L.phone ? '' : 'width:min(460px,calc(100vw - 32px))'}">${stepsPanel(L)}</div>`;
+  return '';
+}
+function stepsPanel(L) {
+  const s = curStep(), it = s && cur();
+  let h = '<div class="gd-list">';
+  if (s) {
+    const last = it.si === S.chunks[it.ci].length - 1;
+    h += `<div class="ls-group"><span class="ls-group-label">This step · ${span(s.s, s.e)}</span>
+      <div class="gd-rename"><input id="rn" value="${s.name || ''}" placeholder="${s.cue || 'Call it what you like'}" aria-label="Your name for this step"><button class="ls-btn ls-accent" data-act="savename">Rename</button></div>
+      <span class="ls-hint">${s.cue ? 'The grey text is our suggestion from the 3D. ' : ''}Your name replaces it, and stays if the steps are re-cut.</span>
+      <div class="ls-group-row">
+        ${splitPoint(s) == null ? `<button class="ls-chip" disabled>${IC.split}Already half a count</button>` : `<button class="ls-chip" data-act="split">${IC.split}Split at ${lab(splitPoint(s))}</button>`}
+        <button class="ls-chip" data-act="merge" ${last ? 'disabled' : ''}>${IC.merge}Merge with next</button>
+        <button class="ls-chip" data-act="skip">${IC.skip}Skip</button></div>
+      <div class="ls-group-row" style="align-items:center"><span class="ls-hint">Ends on ${lab(cOf(s.e))}</span><button class="ls-chip" data-act="endm" aria-label="End half a count earlier">${IC.left}½ earlier</button><button class="ls-chip" data-act="endp" ${last ? 'disabled' : ''} aria-label="End half a count later">½ later${IC.right}</button></div>
+      <span class="ls-hint">Split cuts at the playhead, snapped to the nearest half count${S.level === 'advanced' ? ', or quarter where the video has a clear hit' : ''}.</span></div>`;
+  }
+  const edited = S.chunks.flat().filter(x => x.edited).length;
+  h += `<div class="ls-group"><span class="ls-group-label">Detail <small>${LEVEL_HINT[S.level]}</small></span>
+    <div class="ls-seg" role="group" aria-label="Detail">${Object.keys(LEVELS).map(k => `<button data-level="${k}" aria-pressed="${S.level === k}">${LEVELS[k]}</button>`).join('')}</div>
+    <span class="ls-hint">Re-cuts the steps you haven’t changed${edited ? `. Your ${edited} changed step${edited > 1 ? 's stay' : ' stays'} as you left ${edited > 1 ? 'them' : 'it'}` : ''}.${S.level === 'advanced' ? ` Quarter-count hits in this dance: counts ${FAST_QUARTERS.map(c => lab(c)).join(' and ')} at ${FAST_QUARTERS.map(c => clock(tOf(c))).join(' and ')}, none in these chunks.` : ''}</span></div>`;
+  if (!S.idleInc) h += `<div class="gd-lidle">Not dancing 0:00.0–${clock(LEAD.b)} (${LEAD.why.join(', ')}). <button class="gd-inline-link" data-act="include">Include this</button></div>`;
+  S.chunks.forEach((c, ci) => {
+    const [a, b] = chunkSpan(ci);
+    h += `<div class="gd-lchunk">Chunk ${ci + 1} <small>counts ${span(a, b)} · ${liveCount(ci)} steps${S.done.has(ci) ? ' · done' : ''}</small></div>`;
+    let n = 0;
+    c.forEach((x, si) => {
+      if (!x.skipped) n++;
+      const here = s && it.ci === ci && it.si === si;
+      const sub = x.skipped ? 'Skipped' : [x.name ? 'Your name' : x.cue ? 'Suggested' : 'No cue', x.conf < .5 ? 'split is a guess' : '', x.unsure.length ? `${x.unsure[0]} unsure` : '', x.edited ? 'changed by you' : ''].filter(Boolean).join(' · ');
+      h += `<button class="gd-lrow${x.skipped ? ' gd-skipped' : ''}" data-step="${ci}:${si}" aria-current="${!!here}"><span class="gd-lnum">${x.skipped ? '–' : n}</span><span class="gd-lcounts">${span(x.s, x.e)}</span><span class="gd-lcue">${x.name || x.cue || (x.walk ? 'Walk-in' : '—')}<span class="gd-lsub">${sub}</span></span></button>`;
+    });
+  });
+  return h + `<div class="gd-lchunk">Chunks 4–${3 + LATER.length} <small>the rest of the dance</small></div></div>`;
+}
+
+/* ---------------- actions */
+function flash(msg) { S.flash = msg; clearTimeout(flash.t); flash.t = setTimeout(() => { S.flash = ''; const f = app.querySelector('.gd-flash'); f && f.classList.remove('ls-show'); }, 2200); }
+function goItem(pi) {
+  S.pi = pi; S.passes = 0; S.asked = false; const it = cur(); S.t = itemSpan(it)[0];
+  if (it.k === 'speed' || it.k === 'join') { S.buildUp = true; S.speed = it.k === 'join' ? .75 : .5; } else { S.buildUp = false; S.speed = S.learnSpeed; }
+}
+function next() {
+  const p = pathFor(S.ci);
+  if (S.pi + 1 < p.length) return goItem(S.pi + 1);
+  S.done.add(S.ci);
+  if (S.ci + 1 < S.chunks.length) { S.ci++; goItem(0); flash(`Chunk ${S.ci} done. Now chunk ${S.ci + 1}, one step at a time.`); }
+  else { S.view = 'finished'; S.playing = false; S.flash = ''; }
+}
+function back() { if (S.pi > 0) goItem(S.pi - 1); else if (S.ci > 0) { S.ci--; goItem(pathFor(S.ci).length - 1); } }
+function splitPoint(s) {
+  const a = cOf(s.s), b = cOf(s.e); let c = Math.round(cOf(Math.min(Math.max(S.t, s.s), s.e)) * 2) / 2;
+  if (c <= a + .01 || c >= b - .01) c = Math.round(((a + b) / 2) * 2) / 2;
+  if (c <= a + .01 || c >= b - .01) { c = q4((a + b) / 2); if (!FAST_QUARTERS.includes(Math.floor(c))) return null; } // quarters only where the video has clear hits
+  return c;
+}
+function editStep(fn, msg) {
+  const it = cur(); if (!it || it.k !== 'step') return;
+  const st = S.chunks[it.ci]; fn(st, it.si); if (msg) flash(msg);
+  const k = pathFor(it.ci).findIndex(x => x.k === 'step' && x.si === Math.min(it.si, st.length - 1)); if (k >= 0) S.pi = k;
+}
+function act(a) {
+  const it = flow() ? cur() : null;
+  switch (a) {
+    case 'play': S.playing = !S.playing; break;
+    case 'mirror': S.mirror = !S.mirror; break;
+    case 'speed': { const P = [.5, .75, 1]; S.buildUp = false; S.speed = P[(P.findIndex(x => Math.abs(x - S.speed) < .01) + 1) % P.length]; S.learnSpeed = S.speed; break; }
+    case 'build': S.buildUp = !S.buildUp; if (S.buildUp) S.speed = .5; break;
+    case 'click': S.click = !S.click; break;
+    case 'more': S.panel = S.panel === 'more' ? null : 'more'; break;
+    case 'steps': S.panel = S.panel === 'steps' ? null : 'steps'; break;
+    case 'enter-loop': case 'enter-here': S.resume = null; S.mode = 'guided'; S.view = 'intro'; S.source = a === 'enter-loop' ? 'loop' : 'here'; S.panel = null; S.firstVisit = false; S.playing = false; break;
+    case 'resume': { const r = S.resume; S.mode = 'guided'; S.view = 'flow'; S.panel = null; S.ci = r.chunk - 1; goItem(Math.max(0, pathFor(S.ci).findIndex(x => x.k === 'step' && x.n === r.step - 1))); S.resume = null; flash(`Back at step ${r.step} of chunk ${r.chunk}`); break; }
+    case 'start': S.view = 'flow'; S.ci = 0; goItem(0); S.playing = true; break;
+    case 'next': if (S.view === 'flow') next(); S.playing = S.view === 'flow'; break;
+    case 'again': S.passes = 0; S.asked = false; S.t = itemSpan(it)[0]; S.playing = true; break;
+    case 'exit':
+      if (it) { S.resume = { chunk: it.ci + 1, step: it.k === 'step' || it.k === 'comb' ? it.n + 1 : liveCount(it.ci) }; S.loop = chunkSpan(it.ci); }
+      S.mode = 'free'; S.panel = null; S.view = 'flow'; S.buildUp = false; S.speed = 1; S.playing = false; break;
+    case 'clearloop': S.loop = null; break;
+    case 'lastchunk': S.view = 'flow'; S.ci = 2; goItem(0); break;
+    case 'include': { S.idleInc = true; S.chunks[0].unshift(WALKIN()); if (it && it.ci === 0) S.pi = Math.max(0, pathFor(0).findIndex(x => x.k === it.k && (it.k === 'step' ? x.si === it.si + 1 : it.k === 'comb' ? x.to === it.to + 1 : true))); flash('Walk-in included as step 1 of chunk 1'); break; }
+    case 'savename': { const v = ((document.getElementById('rn') || {}).value || '').trim(); editStep((st, i) => { st[i].name = v; st[i].edited = st[i].edited || !!v; }, v ? `Renamed: “${v}”` : 'Back to the suggestion'); break; }
+    case 'split': editStep((st, i) => { const s = st[i], sp = splitPoint(s); if (sp == null) return; const m = tOf(sp); st.splice(i, 1, { ...s, e: m, edited: true, cue: null, conf: .9, note: null }, { ...s, s: m, edited: true, cue: null, name: '', note: null }); }, 'Split. Cues are dropped on steps you change.'); break;
+    case 'merge': editStep((st, i) => { if (i + 1 >= st.length) return; const s = st[i], n = st[i + 1]; st.splice(i, 2, { ...s, e: n.e, edited: true, cue: null, conf: n.conf, unsure: [...s.unsure, ...n.unsure], name: s.name || n.name, note: null }); }, 'Merged with the next step'); break;
+    case 'skip': editStep((st, i) => { st[i].skipped = true; st[i].edited = true; }, 'Skipped. Tap it in Steps to bring it back.'); S.panel = null; goItem(Math.min(S.pi, pathFor(S.ci).length - 1)); break;
+    case 'endm': case 'endp': editStep((st, i) => {
+      const s = st[i], ne = tOf(q4(cOf(s.e) + (a === 'endp' ? .5 : -.5)));
+      if (ne - s.s < G.spc * .45 || (st[i + 1] && st[i + 1].e - ne < G.spc * .45)) return;
+      s.e = ne; s.edited = true; s.cue = null; if (st[i + 1]) { st[i + 1].s = ne; st[i + 1].edited = true; st[i + 1].cue = null; }
+    }, 'Moved half a count. Cues on changed steps are dropped.'); break;
+  }
+  render();
+}
+function wire() {
+  app.querySelectorAll('[data-act]').forEach(b => b.onclick = e => { e.stopPropagation(); act(b.dataset.act); });
+  app.querySelectorAll('[data-level]').forEach(b => b.onclick = () => {
+    const lv = b.dataset.level; if (lv === S.level) return;
+    const edited = S.chunks.flat().filter(s => s.edited).length;
+    S.level = lv; S.chunks = S.chunks.map(c => recut(c, lv)); S.pi = Math.min(S.pi, pathFor(S.ci).length - 1);
+    flash(`${LEVELS[lv]}: ${totalSteps()} steps${edited ? `. Your ${edited} changed step${edited > 1 ? 's' : ''} kept` : ''}.`); render();
+  });
+  app.querySelectorAll('[data-step]').forEach(b => b.onclick = () => {
+    const [ci, si] = b.dataset.step.split(':').map(Number); if (S.chunks[ci][si].skipped) { S.chunks[ci][si].skipped = false; flash('Step back in'); }
+    S.mode = 'guided'; S.view = 'flow'; S.ci = ci; goItem(Math.max(0, pathFor(ci).findIndex(x => x.k === 'step' && x.si === si))); S.panel = LAYOUT === 'b' ? null : S.panel && null; S.playing = true; render();
+  });
+  const rn = document.getElementById('rn'); if (rn) rn.onkeydown = e => { if (e.key === 'Enter') act('savename'); };
+  const tl = document.getElementById('tl'); if (tl) tl.onclick = e => { const r = tl.getBoundingClientRect(); S.t = ((e.clientX - r.left) / r.width) * G.end; frame(true); };
+  const band = document.getElementById('band'); if (band && S.mode !== 'guided') band.querySelectorAll('.ls-count').forEach(b => b.onclick = () => { S.t = Math.max(0, tOf(+b.dataset.c)); frame(true); });
+}
+document.getElementById('scrim').onclick = () => { S.panel = null; render(); };
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === ' ') { e.preventDefault(); act('play'); }
+  if (flow() && (e.key === 'n' || e.key === 'N')) { e.shiftKey ? back() : next(); S.playing = true; render(); }
+  if (e.key === 'Escape' && S.panel) { S.panel = null; render(); }
+});
+
+/* ---------------- the clock: moving playhead, passes, Build up */
+let last = 0;
+function frame(force) {
+  const head = document.getElementById('head'); if (!head) return;
+  head.style.left = `${(S.t / G.end) * 100}%`;
+  const time = document.getElementById('time'); if (time) time.firstChild.nodeValue = clock(S.t);
+  const band = document.getElementById('band');
+  if (band) {
+    const c = cOf(S.t), first = +band.firstElementChild.dataset.c;
+    if (!force && (Math.floor(c) - first >= 8 || Math.floor(c) < first)) return render();
+    band.querySelectorAll('.ls-count').forEach(b => { const on = +b.dataset.c === Math.floor(c + 1e-6), and = b.querySelector('.ls-and'), off = on && c - Math.floor(c) >= .5; b.classList.toggle('ls-on', on); and.style.opacity = off ? 1 : ''; and.style.color = off ? 'var(--accent)' : ''; });
+  }
+  const sp = document.getElementById('speedpill'); if (sp) sp.textContent = fmt(S.speed);
+}
+function tick(now) {
+  const dt = Math.min(.1, (now - last) / 1000); last = now;
+  if (S.playing) {
+    S.t += dt * S.speed;
+    const sp = curSpan() || [0, G.end];
+    if (S.t >= sp[1]) {
+      S.t = sp[0]; S.passes++;
+      const it = flow() ? cur() : null;
+      if (S.buildUp) S.speed = Math.min(1, Math.round((S.speed + .1) * 100) / 100);
+      if (it && it.k === 'comb' && S.passes >= 4) { S.asked = true; S.playing = false; }
+      render(); return requestAnimationFrame(tick);
+    }
+    frame(false);
+  }
+  requestAnimationFrame(tick);
+}
+
+/* ---------------- mockup states (review only) */
+const LOOP = () => [chunkSpan(0)[0], chunkSpan(2)[1]];
+const at = (ci, pred) => pathFor(ci).findIndex(pred);
+const guided = (o = {}) => { reset({ mode: 'guided', ...o }); S.loop = LOOP(); };
+const STATES = {
+  'free': ['1 · Free practice, first visit (quiet nudge)', () => reset({ firstVisit: true, t: 6.0 })],
+  'loop': ['2 · A loop selected', () => { reset({ t: 5.2 }); S.loop = LOOP(); }],
+  'more': ['3 · Entry from More', () => { reset({ t: 5.2, panel: 'more' }); S.loop = LOOP(); }],
+  'intro': ['4 · Entry card', () => { reset({ t: 4.6 }); S.loop = LOOP(); S.mode = 'guided'; S.view = 'intro'; }],
+  'step': ['5 · Step card (step 2 of 4)', () => { guided(); goItem(at(0, x => x.k === 'step' && x.n === 1)); S.t = 5.3; }],
+  'comb': ['6 · Put it together (1–3), asks after 4 loops', () => { guided(); goItem(at(0, x => x.k === 'comb' && x.n === 2)); S.asked = true; S.passes = 4; S.t = 5.0; }],
+  'speed': ['7 · Chunk at speed: Build up + Click', () => { guided(); goItem(at(0, x => x.k === 'speed')); S.speed = .7; S.passes = 2; S.click = true; S.t = 5.6; S.playing = true; }],
+  'next': ['8 · Next chunk, step 1', () => { guided(); S.done.add(0); S.ci = 1; goItem(0); S.t = 7.8; }],
+  'uncertain': ['9 · Unsure body part', () => { guided(); S.done.add(0); S.ci = 1; goItem(at(1, x => x.k === 'step' && x.n === 1)); S.t = 8.4; }],
+  'nocue': ['10 · No cue available', () => { guided(); S.done.add(0); S.ci = 1; goItem(at(1, x => x.k === 'step' && x.n === 3)); S.t = 10.9; }],
+  'join': ['11 · Join chunks 1–2 at speed', () => { guided(); S.done.add(0); S.ci = 1; goItem(at(1, x => x.k === 'join')); S.speed = .85; S.passes = 1; S.t = 6.0; S.playing = true; }],
+  'low': ['12 · Low-confidence cut', () => { guided(); S.done.add(0); S.done.add(1); S.ci = 2; goItem(at(2, x => x.k === 'step' && x.n === 4)); S.t = 15.0; }],
+  'steps': ['13 · Steps panel: change this step, detail, list', () => { guided(); goItem(at(0, x => x.k === 'step' && x.n === 1)); S.chunks[0][3].name = 'Pump it'; S.chunks[0][3].edited = true; S.panel = 'steps'; S.t = 5.4; }],
+  'level': ['14 · Intermediate re-cut, your edits kept', () => { guided(); S.chunks[0][3].name = 'Pump it'; S.chunks[0][3].edited = true; S.level = 'intermediate'; S.chunks = S.chunks.map(c => recut(c, 'intermediate')); goItem(0); S.panel = 'steps'; S.t = 4.6; flash(`Intermediate: ${totalSteps()} steps. Your 1 changed step kept.`); }],
+  'advanced': ['15 · Advanced (½ count, ¼ where supported)', () => { guided({ level: 'advanced' }); S.chunks = copyLevel('advanced'); goItem(at(0, x => x.k === 'step' && x.n === 2)); S.panel = 'steps'; S.t = 5.2; }],
+  'idle': ['16 · Lead-in included by the learner', () => { guided(); S.idleInc = true; S.chunks[0].unshift(WALKIN()); goItem(0); S.t = 1.0; }],
+  'empty': ['17 · Empty: no steps in this loop', () => { reset({ t: 47.0 }); S.loop = [46.787, 48.05]; S.mode = 'guided'; S.view = 'empty'; }],
+  'resume': ['18 · After exit: resume', () => { reset({ t: 8.4, resume: { chunk: 2, step: 3 } }); S.loop = chunkSpan(1); S.done.add(0); }],
+  'resume-more': ['19 · Resume from More', () => { reset({ t: 8.4, resume: { chunk: 2, step: 3 }, panel: 'more' }); S.done.add(0); }],
+  'finished': ['20 · Whole loop learned', () => { guided({ view: 'finished' }); [0, 1, 2].forEach(i => S.done.add(i)); S.ci = 2; }],
+};
+const sel = document.getElementById('mk');
+sel.innerHTML = Object.entries(STATES).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join('');
+function load() { const k = location.hash.slice(1) || 'free'; (STATES[k] || STATES.free)[1](); sel.value = STATES[k] ? k : 'free'; render(); }
+sel.onchange = () => { location.hash = sel.value; };
+addEventListener('hashchange', load);
+let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(render, 60); });
+
+/* density: visible controls and text lines, the same count as run on the live lesson page */
+window.setLayout = l => { LAYOUT = l; render(); };
+window.density = function () {
+  const vis = el => { const r = el.getBoundingClientRect(); if (r.width < 2 || r.height < 2 || r.bottom <= 0 || r.right <= 0 || r.top >= innerHeight || r.left >= innerWidth) return false; for (let e = el; e; e = e.parentElement) { const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false; } return true; };
+  const skip = el => el.closest('.mk-states');
+  const controls = [...document.querySelectorAll('button, a[href], input, select, [role=button], [role=slider]')].filter(el => !skip(el) && vis(el)).length;
+  const lines = new Set();
+  const tw = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n; (n = tw.nextNode());) {
+    if (!n.textContent.trim() || skip(n.parentElement) || !vis(n.parentElement)) continue;
+    const r = document.createRange(); r.selectNodeContents(n);
+    for (const b of r.getClientRects()) if (b.width > 1 && b.bottom > 0 && b.top < innerHeight) lines.add(Math.round(b.top / 6) + ':' + Math.round(b.left / 160));
+  }
+  return { controls, lines: lines.size };
+};
+load(); requestAnimationFrame(t => { last = t; tick(t); });
+</script>
+</body>
+</html>
