@@ -9,6 +9,7 @@ import { LoadFailed } from "./StateScreen";
 import { LESSONS, lessonSource, parseCredit, type Credit } from "../lib/lessons";
 import { captureThumb, forgetLesson, hasThumb, recordOpened } from "../lib/myLessons";
 import { lesson as lessonCopy } from "../lib/copy";
+import { forgetLessonDoc, loadLessonDoc } from "../lib/lessonDoc";
 import type { MotionResult } from "../lib/motion";
 
 type Load =
@@ -35,18 +36,13 @@ export default function LessonLoader({ lessonId }: { lessonId: string }) {
   useEffect(() => {
     let cancelled = false;
     setLoad({ kind: "loading" });
-    fetch(source.docUrl, { cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok) return { kind: "error", status: res.status } as const;
-        const doc = (await res.json()) as MotionResult;
-        // Shallow guard, same reasoning as isJobStatus in lib/jobStatus.ts.
-        if (!Array.isArray(doc?.persons)) return { kind: "error", status: 0 } as const;
-        return { kind: "ok", doc } as const;
-      })
-      .catch(() => ({ kind: "error", status: 0 }) as const)
-      .then((next) => {
-        if (!cancelled) setLoad(next);
-      });
+    // Joins the processing screen's prefetch when there was one; retries a
+    // transient failure either way (lib/lessonDoc.ts).
+    loadLessonDoc(source.docUrl).then((next) => {
+      if (cancelled) return;
+      forgetLessonDoc(source.docUrl);
+      setLoad(next);
+    });
     return () => {
       cancelled = true;
     };

@@ -750,14 +750,46 @@ def retry_job(job_id: str, http: Request) -> dict:
 # again; nothing else can change what a key names.
 _VALID_STORED: set[tuple[str, str, str]] = set()
 _PRIMED: set[str] = set()
+# One validation at a time. It is CPU-bound under the GIL, so parallel runs
+# only slow each other down: four opens of one lesson on a cold container took
+# 78-82 s EACH (2026-09-25 logs) where one alone took ~30 s. Serialised, the
+# second request finds the first one's verdict in _VALID_STORED.
+# ponytail: global, not per-key; per-key if two different cold lessons ever
+# queue behind each other in practice.
+_VALIDATING = threading.Lock()
+
+
+def _validated_r2_url(job_id: str, clip_id: str) -> Optional[str]:
+    """A URL for the stored MotionResult straight from R2, when the exporter
+    validated it for THIS job_id (modal_app.export_clip_gltf writes
+    `validated: <job_id>` metadata in the same PUT as the bytes), else None.
+
+    This is the learner's first-open path: no replica has to download,
+    decompress and re-validate the document (20-30 s on a cold web container,
+    the "second wait" after Start learning), and the browser gets the ~1 MB
+    gzip from R2 with its own Content-Encoding instead of through two proxies.
+    Anything unmarked -- older lessons, a deduplicated job whose document
+    carries another job_id, R2 down -- takes `_stored_result` as before.
+    """
+    if not storage.enabled():
+        return None
+    key = storage.motion_result_key(clip_id)
+    try:
+        head = storage.client().head_object(Bucket=storage.bucket(), Key=key)
+        if (head.get("Metadata") or {}).get("validated") != job_id:
+            return None
+        return storage.url_for(key)
+    except Exception:  # noqa: BLE001 -- missing or unreachable: the byte path decides
+        return None
 
 
 def _stored_result(job_id: str, clip_id: str) -> Optional[bytes]:
     """The stored MotionResult as gzip bytes, contract-validated once, or None.
 
     Validation stays (DESIGN.md §7h: never serve a contract-invalid document)
-    but runs once per stored object, not per open -- it is 2.9 s of the cost
-    on a laptop and most of the 13 s on Modal.
+    but runs once per stored object per replica, not per open -- it is 2.9 s
+    on a laptop and 20-30 s on a cold Modal web container. Only for documents
+    `_validated_r2_url` cannot vouch for.
     """
     stored = _r2_read(storage.motion_result_key(clip_id)) \
         or _volume_read_bytes(results_volume, f"/{clip_id}.motion-result.json.gz")
@@ -766,6 +798,13 @@ def _stored_result(job_id: str, clip_id: str) -> Optional[bytes]:
     key = (clip_id, job_id, hashlib.sha256(stored).hexdigest())
     if key in _VALID_STORED:
         return stored
+    with _VALIDATING:
+        if key in _VALID_STORED:
+            return stored
+        return _validate_stored(stored, job_id, key)
+
+
+def _validate_stored(stored: bytes, job_id: str, key: tuple[str, str, str]) -> bytes:
     doc = json.loads(gzip.decompress(stored))
     stamped = doc.get("job_id") != job_id
     if stamped:
@@ -791,7 +830,11 @@ def _prime_result(job_id: str) -> None:
 
     def run():
         try:
-            _stored_result(job_id, _clip_id_for(job_id))
+            clip_id = _clip_id_for(job_id)
+            # Already validated at export: nothing to do, and a 20-30 s
+            # validation here would only compete for the GIL with the open.
+            if _validated_r2_url(job_id, clip_id) is None:
+                _stored_result(job_id, clip_id)
         except Exception as e:  # noqa: BLE001 -- the real request reports it
             print(f"[result] could not prime {job_id}: {e}")
 
@@ -809,6 +852,12 @@ def get_job_result(job_id: str):
     # assume some earlier call already refused. Once per lesson open, not per
     # poll, so the extra read is free where it matters.
     _refuse_if_removed(clip_id)
+
+    url = _validated_r2_url(job_id, clip_id)
+    if url is not None:
+        _touch(clip_id)
+        # 302 like /assets: not cacheable, the URL on the other end expires.
+        return RedirectResponse(url, status_code=302)
 
     stored = _stored_result(job_id, clip_id)
     if stored is not None:
