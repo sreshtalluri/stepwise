@@ -467,7 +467,9 @@ def invite_codes() -> frozenset[str]:
     with a different value, with no deploy and nothing written to disk.
     """
     raw = os.environ.get("STEPWISE_INVITE_CODES", "")
-    return frozenset(c.strip() for c in raw.split(",") if c.strip())
+    # Lower-cased, and compared lower-cased: a phone keyboard capitalises the
+    # first letter ("Andaaz"), and a tester should not be turned away for it.
+    return frozenset(c.strip().lower() for c in raw.split(",") if c.strip())
 
 
 def invite_code_ok(code: str | None) -> bool:
@@ -488,4 +490,4 @@ def invite_code_ok(code: str | None) -> bool:
     codes = invite_codes()
     if not codes:
         return False
-    return code is not None and code.strip() in codes
+    return code is not None and code.strip().lower() in codes

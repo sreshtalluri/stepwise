@@ -110,6 +110,9 @@ export default function LinkDoor({ id, onAddFile }: { id: string; onAddFile?: ()
             id={`${id}-invite`}
             type="text"
             autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             value={invite}
             onChange={(e) => setInvite(e.target.value)}
           />
