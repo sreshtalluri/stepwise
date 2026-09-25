@@ -256,3 +256,59 @@ def same_clip(fp_a: dict, fp_b: dict) -> bool:
     if ha is None or hd is None:
         return False
     return ha <= MATCH_MAX_AHASH_BITS and hd <= MATCH_MAX_DHASH_BITS
+
+
+# ---------------------------------------------------------------------------
+# Same dance, different cut. `same_clip` above refuses trims on purpose: a
+# 15 s piece of a 33 s video is a different lesson. But it is the same dance,
+# so a count 1 the owner picks on one copy holds on the other, shifted by the
+# trim. This finds that shift: a dHash per frame at SIGNATURE_FPS, slid across
+# every offset. Measured on the beta queue (2026-09-25): the three real
+# same-dance pairs (a byte copy, a 3 s trim, a re-saved trim) sat at median
+# 0-5 bits; the closest of the 52 unrelated pairs at 23.5.
+# ---------------------------------------------------------------------------
+
+SIGNATURE_FPS = 10  # 0.1 s steps; the shifted pick is snapped to the copy's own beat grid
+SAME_DANCE_MAX_BITS = 10.0  # median per-frame dHash distance over the overlap
+# The shorter video must lie almost wholly inside the longer: two dances that
+# merely share a few seconds (a black intro, the same opening pose) never link.
+SAME_DANCE_MIN_OVERLAP = 0.8
+SAME_DANCE_MIN_OVERLAP_S = 5.0
+
+
+def dance_signature(path: str) -> bytes | None:
+    """One 64-bit dHash (8 bytes) per 1/SIGNATURE_FPS s, concatenated: about
+    3 KB for a 40 s clip, cached as-is. None without ffmpeg."""
+    if not _FFMPEG:
+        return None
+    try:
+        raw = subprocess.run(
+            [_FFMPEG, "-v", "error", "-i", path, "-vf",
+             f"fps={SIGNATURE_FPS},scale={GRID + 1}:{GRID},format=gray", "-f", "rawvideo", "-"],
+            capture_output=True, timeout=120, check=True).stdout
+    except subprocess.SubprocessError:
+        return None
+    g = np.frombuffer(raw, np.uint8)[: len(raw) // (GRID * (GRID + 1)) * GRID * (GRID + 1)]
+    g = g.reshape(-1, GRID, GRID + 1).astype(np.int16)
+    return np.packbits((g[:, :, 1:] > g[:, :, :-1]).reshape(len(g), -1), axis=1).tobytes() if len(g) else None
+
+
+def dance_shift_s(sig_a: bytes, sig_b: bytes) -> float | None:
+    """`d` such that time t in A shows what time t + d shows in B, or None
+    when A and B are not the same dance."""
+    a = np.frombuffer(sig_a, np.uint8).reshape(-1, 8)
+    b = np.frombuffer(sig_b, np.uint8).reshape(-1, 8)
+    need = max(SAME_DANCE_MIN_OVERLAP * min(len(a), len(b)), SAME_DANCE_MIN_OVERLAP_S * SIGNATURE_FPS)
+    best: tuple[float, int] | None = None
+    for off in range(-len(a) + 1, len(b)):  # a[i] against b[i + off]
+        i0, j0 = max(-off, 0), max(off, 0)
+        n = min(len(a) - i0, len(b) - j0)
+        if n < need:
+            continue
+        bits = np.unpackbits(a[i0:i0 + n] ^ b[j0:j0 + n], axis=1).sum(1)
+        m = float(np.median(bits))
+        if best is None or m < best[0]:
+            best = (m, off)
+    if best is None or best[0] > SAME_DANCE_MAX_BITS:
+        return None
+    return best[1] / SIGNATURE_FPS

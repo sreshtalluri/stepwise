@@ -341,17 +341,22 @@ def _usable(entry: dict) -> bool:
     """Does this index entry still point at a lesson we can actually serve?
 
     Checked against live state, not just the index: the entry must point at a
-    job that actually succeeded and has not been taken down. A stale index
-    entry therefore degrades to "reconstruct it again" -- which costs $0.08 --
-    and can never serve a lesson that is gone.
+    job that succeeded or is still on its way there, and has not been taken
+    down. In progress counts: the same file sent twice a few seconds apart (a
+    double tap, a retry) joins the first run instead of starting a second one,
+    and if that run fails, retrying it is one button. A failed or stale entry
+    degrades to "reconstruct it again" -- which costs $0.08 -- and can never
+    serve a lesson that is gone.
     """
     clip_id, job_id = entry.get("clip_id"), entry.get("job_id")
     if not clip_id or not job_id:
         return False
     if _volume_read_json(results_volume, f"/{clip_id}.removed.json") is not None:
         return False  # taken down: never resurrect it, and never dedupe onto it
-    status = _volume_read_json(results_volume, f"/{job_id}.job-status.json")
-    return bool(status and status.get("state") == "succeeded")
+    # jobstore, not the Volume: a job still waiting for its worker is only a
+    # `queued` row in Postgres, with no Volume document yet.
+    status = jobstore.read_status(results_volume, job_id, _clip_id_for)
+    return bool(status and status.get("state") in ("queued", "processing", "succeeded"))
 
 
 def _refuse_if_quarantined(fp: dict | None = None, source_key: str | None = None) -> None:
@@ -1550,9 +1555,8 @@ def _owner_item(job_id: str, clip_id: str, created: Optional[float]) -> dict:
     }
 
 
-@app.get("/owner/queue")
-def owner_queue(http: Request) -> dict:
-    _owner_only(http)
+def _owner_items() -> list[dict]:
+    """A queue row for every recent lesson, newest first."""
     rows, seen = [], set()
     for job_id, clip_id, created in _recent_succeeded(OWNER_QUEUE_LIMIT):
         if clip_id not in seen:  # a deduplicated upload shares its lesson
@@ -1560,7 +1564,80 @@ def owner_queue(http: Request) -> dict:
             rows.append((job_id, clip_id, created))
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(16) as pool:
-        return {"jobs": list(pool.map(lambda r: _owner_item(*r), rows))}
+        return list(pool.map(lambda r: _owner_item(*r), rows))
+
+
+def _dance_signature(clip_id: str) -> Optional[bytes]:
+    """fingerprint.dance_signature of this lesson's video, computed once and
+    kept beside its other artifacts (so removal sweeps it). None when the
+    video or ffmpeg is missing."""
+    path = f"/{clip_id}.dance-signature.bin"
+    cached = _volume_read_bytes(results_volume, path)
+    if cached is not None:
+        return cached
+    try:
+        video = _r2_read(storage.video_key(clip_id)) or _volume_read_bytes(uploads_volume, f"/{clip_id}.mp4")
+        if video is None:
+            return None
+        with tempfile.NamedTemporaryFile(suffix=".mp4") as f:
+            f.write(video)
+            f.flush()
+            sig = fingerprint.dance_signature(f.name)
+        if sig is None:
+            return None
+        _volume_write_bytes(path, sig)
+        if retention.is_removed(results_volume, clip_id):  # removed meanwhile: leave nothing behind
+            retention.remove_if_present(results_volume, path)
+            return None
+        return sig
+    except Exception as e:  # noqa: BLE001 -- no signature just means "not linked"
+        print(f"[owner] no dance signature for {clip_id}: {e}")
+        return None
+
+
+SAME_DANCE_TEMPO_TOLERANCE = 0.03  # copies of one dance have the same beat grid
+
+
+def _same_dance_groups(items: list[dict]) -> list[list[tuple[dict, float]]]:
+    """Queue rows grouped by dance: each group is [(row, shift_s)], the longest
+    copy first with shift 0, and time t in it shows what t + shift_s shows in
+    that row's video. Two lessons are one dance only with the same tempo and
+    matching video (fingerprint.dance_shift_s). Groups keep the queue's order."""
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(8) as pool:
+        sigs = dict(zip((i["clip_id"] for i in items),
+                        pool.map(lambda i: _dance_signature(i["clip_id"]) if i.get("seconds_per_count") else None,
+                                 items)))
+    order = {i["clip_id"]: n for n, i in enumerate(items)}
+    groups: list[list[tuple[dict, float]]] = []
+    for it in sorted(items, key=lambda i: -len(sigs[i["clip_id"]] or b"")):
+        sig, d = sigs[it["clip_id"]], None
+        for g in groups if sig else []:
+            rep = g[0][0]
+            if sigs[rep["clip_id"]] and abs(rep["seconds_per_count"] - it["seconds_per_count"]) \
+                    <= SAME_DANCE_TEMPO_TOLERANCE * rep["seconds_per_count"]:
+                d = fingerprint.dance_shift_s(sigs[rep["clip_id"]], sig)
+                if d is not None:
+                    g.append((it, d))
+                    break
+        if d is None:
+            groups.append([(it, 0.0)])
+    return sorted(groups, key=lambda g: min(order[i["clip_id"]] for i, _ in g))
+
+
+@app.get("/owner/queue")
+def owner_queue(http: Request) -> dict:
+    """One row per dance: copies of the same dance (a re-upload, a trim, a
+    re-saved TikTok) are listed under the longest one as `copies`, and a count
+    1 set on it is carried over to them (owner_set_count_one)."""
+    _owner_only(http)
+    rows = []
+    for group in _same_dance_groups(_owner_items()):
+        rep = dict(group[0][0])
+        rep["copies"] = [{"job_id": i["job_id"], "clip_id": i["clip_id"], "shift_s": d,
+                          "confirmed": i["confirmed"], "credit": i["credit"]} for i, d in group[1:]]
+        rows.append(rep)
+    return {"jobs": rows}
 
 
 class CountOneRequest(BaseModel):
@@ -1623,20 +1700,17 @@ def _republish_counts(clip_id: str, doc: dict, proposed_counts: dict) -> None:
     _VALID_STORED.add((clip_id, doc["job_id"], hashlib.sha256(gz).hexdigest()))
 
 
-@app.post("/owner/jobs/{job_id}/count-one")
-def owner_set_count_one(job_id: str, request: CountOneRequest, http: Request) -> dict:
-    """Set this lesson's canonical count 1 (snapped to its grid) and republish.
-    Learners who already authored their own counts keep them (apps/web
-    lib/structure.ts); every new open gets this one."""
-    _owner_only(http)
-    clip_id = _clip_id_for(job_id)
+def _apply_count_one(job_id: str, clip_id: str, requested_s: float, method: str,
+                     option: Optional[str], extra: Optional[dict] = None) -> tuple[dict, dict, dict]:
+    """Set one lesson's count 1, republish it and record the label ->
+    (previous proposed_counts, new proposed_counts, label)."""
     _refuse_if_removed(clip_id)
     doc = _stored_doc(clip_id)
     pc = doc.get("proposed_counts")
     if not pc:
         raise HTTPException(409, "This lesson has no beat grid to correct.")
     try:
-        new_pc = owner.set_count_one(pc, request.count_one_s, float(doc["sample_times_s"][-1]))
+        new_pc = owner.set_count_one(pc, requested_s, float(doc["sample_times_s"][-1]))
     except owner.OffGrid as e:
         raise HTTPException(422, str(e)) from e
     _republish_counts(clip_id, doc, new_pc)
@@ -1645,15 +1719,16 @@ def owner_set_count_one(job_id: str, request: CountOneRequest, http: Request) ->
     detector = beats.get("count_one_s")
     label = {
         "job_id": job_id, "clip_id": clip_id,
-        "count_one_s": new_pc["count_one_s"], "requested_s": request.count_one_s,
+        "count_one_s": new_pc["count_one_s"], "requested_s": requested_s,
         "seconds_per_count": new_pc["seconds_per_count"], "bpm": new_pc["bpm"],
         "detector_count_one_s": max(0.0, detector) if detector is not None
         else (pc["count_one_s"] if pc.get("count_one_source") != "owner" else None),
         "previous_count_one_s": pc["count_one_s"],
-        "method": request.method, "option": request.option,
+        "method": method, "option": option,
         "count_one_alternates": new_pc.get("count_one_alternates", []),
         "duration_s": doc["source_video"]["duration_s"],
         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        **(extra or {}),
     }
     # ponytail: read-modify-write under a per-replica lock; one owner clicking
     # is the only writer. A Postgres table if labels ever come from many people.
@@ -1662,8 +1737,54 @@ def owner_set_count_one(job_id: str, request: CountOneRequest, http: Request) ->
         labels = (_volume_read_json(results_volume, path) or {}).get("labels") or []
         retention.write_json(results_volume, path, {"clip_id": clip_id, "labels": labels + [label]})
     print(f"[owner] {clip_id}: count 1 {pc['count_one_s']:.3f} -> {new_pc['count_one_s']:.3f} s")
+    return pc, new_pc, label
+
+
+def _copy_count_one(clip_id: str, count_one_s: float) -> list[dict]:
+    """Carry an owner's count 1 over to every other copy of the same dance
+    (_same_dance_groups): shifted by the trim, moved to that copy's first
+    count 1 of the same eight (or, in a copy shorter than eight counts, of the
+    same four), then snapped to its own beat grid. Labels say `method: copied`,
+    so evaluation can tell them from independent picks. A copy that cannot
+    take it is skipped and named, never an error for the pick that was made."""
+    group = next((g for g in _same_dance_groups(_owner_items())
+                  if any(i["clip_id"] == clip_id for i, _ in g)), [])
+    d_self = next((d for i, d in group if i["clip_id"] == clip_id), 0.0)
+    out = []
+    for it, d in group:
+        if it["clip_id"] == clip_id:
+            continue
+        t = count_one_s - d_self + d  # the same moment in the copy's video
+        spc = float(it["seconds_per_count"])
+        for counts in (8, 4):
+            want = t % (counts * spc)
+            if want < spc / 2:  # would snap onto a beat before the clip starts: take the next 1
+                want += counts * spc
+            try:
+                _, new_pc, _ = _apply_count_one(it["job_id"], it["clip_id"], want, "copied", None,
+                                                {"copied_from": clip_id, "shift_s": round(d - d_self, 3)})
+                out.append({"job_id": it["job_id"], "clip_id": it["clip_id"], "count_one_s": new_pc["count_one_s"]})
+                break
+            except HTTPException as e:
+                if e.status_code != 422 or counts == 4:
+                    print(f"[owner] {it['clip_id']}: count 1 not copied from {clip_id}: {e.detail}")
+                    out.append({"job_id": it["job_id"], "clip_id": it["clip_id"], "error": e.detail})
+                    break
+    return out
+
+
+@app.post("/owner/jobs/{job_id}/count-one")
+def owner_set_count_one(job_id: str, request: CountOneRequest, http: Request) -> dict:
+    """Set this lesson's canonical count 1 (snapped to its grid) and republish,
+    then carry it over to the other copies of the same dance. Learners who
+    already authored their own counts keep them (apps/web lib/structure.ts);
+    every new open gets this one."""
+    _owner_only(http)
+    clip_id = _clip_id_for(job_id)
+    pc, new_pc, label = _apply_count_one(job_id, clip_id, request.count_one_s, request.method, request.option)
     return {"job_id": job_id, "clip_id": clip_id, "previous_count_one_s": pc["count_one_s"],
-            "proposed_counts": new_pc, "label": label}
+            "proposed_counts": new_pc, "label": label,
+            "copies": _copy_count_one(clip_id, new_pc["count_one_s"])}
 
 
 def _propose_counts_now(clip_id: str) -> dict | None:
