@@ -308,6 +308,17 @@ def test_a_different_posts_credit_does_not_overwrite(api):
     assert api.get_job_source("job_a")["creator"] == "@original"
 
 
+def test_an_old_credit_is_served_without_tracking_params(api):
+    """Saved before clean_url (job_5716ecd3…): the stored URL keeps its junk, the answer does not."""
+    stored = {"url": TIKTOK_FULL + "?_r=1&_t=ZP-99zZiojnXfa", "host": "TikTok", "creator": "@original"}
+    api.results_volume.files["/job_old.job-meta.json"] = json.dumps({"credit": stored}).encode()
+    assert api.get_job_source("job_old") == {**stored, "url": TIKTOK_FULL}
+    assert json.loads(api.results_volume.files["/job_old.job-meta.json"])["credit"] == stored, "read-only"
+    yt = "https://www.youtube.com/watch?v=abc&si=track"
+    api.results_volume.files["/job_yt.job-meta.json"] = json.dumps({"credit": {**stored, "url": yt}}).encode()
+    assert api.get_job_source("job_yt")["url"] == "https://www.youtube.com/watch?v=abc"
+
+
 def test_youtube_bot_check_is_host_blocked_not_login():
     import ingest
     e = ingest.classify_fetch_error(

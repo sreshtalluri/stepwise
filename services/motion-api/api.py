@@ -592,7 +592,12 @@ def get_job_source(job_id: str) -> dict:
     meta = _volume_read_json(results_volume, f"/{job_id}.job-meta.json")
     if not meta or not meta.get("credit"):
         raise HTTPException(404, "No source link for this lesson.")
-    return meta["credit"]
+    credit = dict(meta["credit"])
+    # Credits stored before links were cleaned still carry TikTok's `?_r=1&_t=…`
+    # tracking; cleaned on the way out, so old lessons link like new ones.
+    if isinstance(credit.get("url"), str):
+        credit["url"] = ingest.clean_url(credit["url"])
+    return credit
 
 
 # ---------------------------------------------------------------------------
