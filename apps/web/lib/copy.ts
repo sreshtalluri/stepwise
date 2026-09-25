@@ -655,8 +655,9 @@ export const privacy = {
         "What we build from it: a 3D body for each dancer, sized to their estimated limb lengths (the body's surface is a standard shape, not theirs), and the lesson data the viewer plays — timings, poses, hand and foot close-up areas, and counts proposed from the music.",
         // performance.json, job-status/job-meta, jobs table — modal_app.py, jobstore.py
         "Processing records: how the job went and how long each step took.",
-        // fingerprints/index.json: sha256 + frame hashes, source_key — fingerprint.py, api._store_and_dispatch
-        "A fingerprint of the video (a checksum and small frame hashes) and, for a pasted link, which post it came from. This is how the same video added twice becomes one lesson.",
+        // fingerprints/index.json: sha256 + frame hashes, source_key — fingerprint.py, api._store_and_dispatch;
+        // {clip_id}.dance-signature.bin: per-frame hashes — api._dance_signature
+        "A fingerprint of the video (a checksum and small frame hashes) and, for a pasted link, which post it came from. This is how the same video added twice becomes one lesson, and how a shorter cut of the same dance gets the same counts.",
         // ingest.source_credit: shown as "Original by …" and the choreo/music line
         "For a pasted link, the post's public credits: the poster's @handle, and any choreographer @handles and song named in its caption or sound. We keep those names, not the caption.",
         // {clip_id}.last-access.json — api._touch

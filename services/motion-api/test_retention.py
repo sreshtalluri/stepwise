@@ -278,6 +278,19 @@ def test_dedupe_skips_a_job_that_did_not_succeed(api):
     assert api._find_existing(dict(fp)) is None
 
 
+def test_dedupe_joins_a_job_still_processing(api):
+    """The same file sent twice seconds apart (a double tap, a retry) joins
+    the first run instead of paying for a second one."""
+    fp = {"sha256": "f" * 64, "duration_s": 20.0, "frames": 4,
+          "ahash": "0" * 64, "dhash": "0" * 64}
+    _seed_lesson(api, "abc", "job_abc", fp)
+    api.results_volume.files["/job_abc.job-status.json"] = json.dumps({
+        "schema_version": "1.0.0", "job_id": "job_abc", "state": "processing",
+        "stage_message": "", "progress": 0.3, "error": None, "retry_count": 0}).encode()
+    hit = api._find_existing(dict(fp))
+    assert hit and hit["job_id"] == "job_abc"
+
+
 def test_removal_drops_the_fingerprint_entry(api):
     import retention
     fp = {"sha256": "f" * 64, "duration_s": 20.0, "frames": 4,

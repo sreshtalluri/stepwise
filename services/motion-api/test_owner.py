@@ -314,3 +314,46 @@ def test_owner_quarantine_preserves_and_alerts(lesson, monkeypatch):
     snapshot = dict(lesson.quarantine.files)
     assert _remove(lesson, "delete")["quarantined"] is True
     assert lesson.quarantine.files == snapshot and sent == ["fatal"]
+
+
+# --- copies of the same dance ---------------------------------------------------
+
+def _with_trimmed_copy(api, monkeypatch):
+    """`def` is `abc` trimmed to start 1 s in: same tempo, matching video."""
+    import numpy as np
+    r = api.results_volume.files
+    for suffix in (".motion-result.json.gz", ".beats.json"):
+        r[f"/def{suffix}"] = r[f"/{CLIP}{suffix}"]
+    r["/job_def.job-meta.json"] = json.dumps({"clip_id": "def", "credit": None}).encode()
+    r["/job_def.job-status.json"] = r[f"/{JOB}.job-status.json"].replace(JOB.encode(), b"job_def")
+    full = np.random.default_rng(0).integers(0, 256, (140, 8), dtype=np.uint8)
+    sigs = {CLIP: full.tobytes(), "def": full[10:120].tobytes()}
+    monkeypatch.setattr(api, "_dance_signature", sigs.get)
+
+
+def test_queue_lists_a_trimmed_copy_under_the_longer_one(lesson, monkeypatch):
+    _with_trimmed_copy(lesson, monkeypatch)
+    (row,) = lesson.owner_queue(_http())["jobs"]
+    assert row["clip_id"] == CLIP
+    assert [(c["clip_id"], c["shift_s"]) for c in row["copies"]] == [("def", -1.0)]
+
+
+def test_a_pick_is_copied_to_the_trimmed_copy_shifted_and_labelled(lesson, monkeypatch):
+    _with_trimmed_copy(lesson, monkeypatch)
+    out = _set(lesson, 0.9)
+    # 0.9 s in abc is -0.1 s in def: before it starts, so def's 1 is the next
+    # one eight counts on (3.9 s), on def's own grid.
+    assert out["copies"] == [{"job_id": "job_def", "clip_id": "def", "count_one_s": 3.9}]
+    labels = json.loads(lesson.results_volume.files["/def.count-one-labels.json"])["labels"]
+    assert (labels[-1]["method"], labels[-1]["copied_from"], labels[-1]["shift_s"]) == ("copied", CLIP, -1.0)
+    assert json.loads(gzip.decompress(lesson.results_volume.files["/def.motion-result.json.gz"])
+                      )["proposed_counts"]["count_one_source"] == "owner"
+
+
+def test_unrelated_lessons_are_not_linked(lesson, monkeypatch):
+    import numpy as np
+    _with_trimmed_copy(lesson, monkeypatch)
+    other = np.random.default_rng(1).integers(0, 256, (110, 8), dtype=np.uint8).tobytes()
+    monkeypatch.setattr(lesson, "_dance_signature", {CLIP: lesson._dance_signature(CLIP), "def": other}.get)
+    assert _set(lesson, 0.9)["copies"] == []
+    assert len(lesson.owner_queue(_http())["jobs"]) == 2

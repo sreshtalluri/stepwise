@@ -25,6 +25,10 @@ interface Job {
   confirmed: boolean;
   credit: { creator?: string | null; host?: string; url?: string } | null;
   video_url: string;
+  // Other lessons of the same dance (a re-upload, a trim, a re-saved link):
+  // a pick here is carried over to them.
+  copies?: { job_id: string; clip_id: string; shift_s: number; confirmed: boolean;
+    credit: { creator?: string | null } | null }[];
 }
 
 function readKey(): string {
@@ -266,9 +270,13 @@ function Card({ job, ownerKey, onSaved, onRemoved }: {
       const picked = optionOf(snapped, job.count_one_s!, spc);
       setChosen({ option: picked, tap: method === "tap" });
       const was = `${OPTION_LETTERS[wasOption]} (${pickAtLoad.toFixed(2)} s)`;
+      const copies: { error?: string }[] = out.copies ?? [];
+      const failed = copies.filter((c) => c.error).length;
       setStatus(
         `Saved: ${method === "tap" ? "your tap, on" : "option"} ${OPTION_LETTERS[picked]}, 1 at ${snapped.toFixed(2)} s. ` +
-          (picked === wasOption ? `The pick before was the same beat: ${was}.` : `The pick before was ${was}.`),
+          (picked === wasOption ? `The pick before was the same beat: ${was}.` : `The pick before was ${was}.`) +
+          (copies.length ? ` Copied to ${copies.length - failed} other ${copies.length - failed === 1 ? "copy" : "copies"}.` : "") +
+          (failed ? ` ${failed} could not take it.` : ""),
       );
       onSaved(job.job_id, snapped);
     } catch {
@@ -361,6 +369,20 @@ function Meta({ job, duration, ownerKey, onRemoved }: {
           job.credit?.host,
         ].filter(Boolean).join(" · ")}
       </p>
+      {!!job.copies?.length && (
+        <p className="meta">
+          Same dance as {job.copies.length === 1 ? "one other lesson" : `${job.copies.length} other lessons`} (
+          {job.copies.map((c, i) => (
+            <span key={c.job_id}>
+              {i > 0 && ", "}
+              <a href={`/lesson/${encodeURIComponent(c.job_id)}`} target="_blank" rel="noreferrer">
+                {c.credit?.creator || c.clip_id.slice(0, 10)}
+              </a>
+            </span>
+          ))}
+          ): your pick is copied to {job.copies.length === 1 ? "it" : "them"}.
+        </p>
+      )}
     </div>
   );
 }
