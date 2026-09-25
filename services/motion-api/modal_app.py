@@ -1324,41 +1324,6 @@ def inspect_pymomentum():
         print(f"docstring: {save_fn.__doc__}")
 
     lod_path = f"{WEIGHTS_DIR}/mhr-assets/lod3.fbx"
-    print(f"\nloading Character from {lod_path} via Character.load_fbx")
-    character = pym_geo.Character.load_fbx(lod_path)
-    skeleton = character.skeleton
-    print(f"joint count: {skeleton.size}")
-    print(f"joint names (first 20): {list(skeleton.joint_names)[:20]}")
-    has_mesh_attr = character.has_mesh
-    print(f"has_mesh: {has_mesh_attr() if callable(has_mesh_attr) else has_mesh_attr}")
-
-    return {
-        "save_fn_name": save_fn.__name__ if save_fn else None,
-        "joint_count": skeleton.size,
-        "joint_names": list(skeleton.joint_names),
-    }
-
-
-@app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results}, timeout=600)
-def export_neutral_pose_smoke_test():
-    """Stage 6b: does the export MECHANISM work at all -- Character loaded
-    from a LOD fbx, skel_state from the bundled MHR TorchScript model, and
-    Character.save_gltf_from_skel_states -- independent of whether it is
-    driven by real per-frame video reconstruction yet.
-
-    Deliberately narrow: calls the bundled mhr_model.pt's own forward()
-    directly with a neutral (all-zero) pose, not through SAM3DBodyEstimator.
-    Kept as-is (still useful as a cheap mechanism-only smoke test that doesn't
-    need a real clip run first) now that the neutral-pose gap itself is closed
-    -- see export_clip_gltf below, which drives this same mechanism from real
-    per-frame `skel_state` (sam_3d_body/models/heads/mhr_head.py's
-    _mhr_forward_core now returns it directly, W8, docs/GATE-REPORT.md G6).
-    """
-    import numpy as np
-    import pymomentum.geometry as pym_geo
-    import torch
-
-    mhr_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
     print(f"loading {mhr_path}")
     mhr = torch.jit.load(mhr_path, map_location="cpu")
     mhr.eval()
@@ -1453,99 +1418,6 @@ def dump_joint_hierarchy():
         json.dump(out, f)
     results.commit()
     return out
-
-
-def _mhr_shape_basis(mhr_path):
-    """MHR's own blend-shape pathway, read straight out of the bundled
-    TorchScript buffers: (neutral_verts (18439,3), shape_vectors (45,18439,3)).
-
-    rest_verts(shape) = base_shape + einsum(shape, shape_vectors) -- verified on
-    real hardware against the model's own forward pass (mhr(shape, 0, 0)):
-    max abs difference 3.8e-5 cm, so the buffers ARE the forward's shape path
-    and no 204-dim model_parameters guess is needed. Also verified: shape
-    changes only the mesh, never the skeleton (rest joint positions and the
-    skel_state scale column are bit-identical at shape=0 and shape=median), so
-    baking shape into the rest mesh cannot conflict with the per-frame
-    skel_state animation -- they are exactly MHR's own two stages.
-    """
-    import numpy as np
-    import torch
-
-    bufs = dict(torch.jit.load(mhr_path, map_location="cpu").named_buffers())
-    base = bufs["character_torch.blend_shape.base_shape"].numpy().astype(np.float64)
-    vecs = bufs["character_torch.blend_shape.shape_vectors"].numpy().astype(np.float64)
-    return base, vecs
-
-
-def _nearest_vertex_map(src, dst, block=4096):
-    """For every src vertex, the index of the nearest dst vertex (chunked, CPU).
-
-    Needed because the shipped LOD meshes are decimated (lod3 = 4899 verts) while
-    the shape basis is defined on MHR's full-res 18439-vert mesh. Measured on the
-    real assets: lod3's vertices sit a mean 0.297 cm (max 1.79) off the full-res
-    surface in the same rest pose and units, i.e. lod3 is a resampling of the
-    same body, so sampling the (smooth, low-frequency) shape displacement field
-    at the nearest full-res vertex is well posed.
-    ponytail: 1-NN sampling, not barycentric projection onto the nearest
-    triangle. Upgrade only if a measurement shows the difference matters -- the
-    displacement field varies far more slowly than the 3 mm sampling offset.
-    """
-    import numpy as np
-
-    src = np.ascontiguousarray(src, dtype=np.float32)
-    dst = np.ascontiguousarray(dst, dtype=np.float32)
-    src_sq = (src ** 2).sum(1)[:, None]
-    best = np.full(len(src), np.inf, dtype=np.float32)
-    idx = np.zeros(len(src), dtype=np.int64)
-    for i in range(0, len(dst), block):
-        blk = dst[i:i + block]
-        d2 = src_sq + (blk ** 2).sum(1)[None, :] - 2.0 * (src @ blk.T)
-        m = d2.argmin(1)
-        dm = d2[np.arange(len(src)), m]
-        upd = dm < best
-        best[upd] = dm[upd]
-        idx[upd] = i + m[upd]
-    return idx, np.sqrt(np.maximum(best, 0.0))
-
-
-def _character_with_shape(character, shape_vec, shape_vectors, lod_to_mhr):
-    """The same character with this dancer's estimated body shape baked into its
-    rest mesh (skeleton, skin weights, UVs and topology untouched).
-
-    pymomentum has no "apply blend-shape coefficients to a Character" call:
-    Character.with_blend_shape() attaches a basis for the *solver* to drive
-    through model parameters, and Character.save_gltf_from_skel_states() takes
-    skel_states only -- there is no parameter channel to carry shape into the
-    export. Baking the displacement into the rest mesh is the supported route:
-    LBS is applied to the rest vertices, so a shaped rest mesh + the estimator's
-    skel_state reproduces MHR's own (shape -> rest verts -> LBS) pipeline.
-    """
-    import numpy as np
-    import pymomentum.geometry as pym_geo
-
-    mesh = character.mesh
-    rest = np.asarray(mesh.vertices, dtype=np.float64)
-    delta_full = np.einsum("k,kvj->vj", np.asarray(shape_vec, dtype=np.float64), shape_vectors)
-    shaped = rest + delta_full[lod_to_mhr]
-    if not np.all(np.isfinite(shaped)):
-        raise ValueError("non-finite shaped rest vertices; refusing to export a broken mesh")
-
-    def _opt(attr):
-        val = np.asarray(getattr(mesh, attr))
-        return val if val.size else None
-
-    shaped_mesh = pym_geo.Mesh(
-        vertices=shaped.astype(np.float32),
-        faces=np.asarray(mesh.faces),
-        colors=_opt("colors"),
-        confidence=_opt("confidence"),
-        texcoords=_opt("texcoords"),
-        texcoord_faces=_opt("texcoord_faces"),
-        poly_faces=mesh.poly_faces,
-        poly_face_sizes=mesh.poly_face_sizes,
-        poly_texcoord_faces=mesh.poly_texcoord_faces,
-    ).with_updated_normals()  # normals must follow the new surface, not the mean body
-    return character.with_mesh_and_skin_weights(shaped_mesh, character.skin_weights), shaped - rest
 
 
 @app.function(image=gltf_image, gpu=GPU_TIER, volumes={WEIGHTS_DIR: weights}, timeout=600)
@@ -1773,17 +1645,15 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
     (J, 8) skel_state -- see mhr_head.py's _mhr_forward_core). Builds one
     (n_samples, J, 8) array per dancer and exports it.
 
-    Body shape: the estimator also predicts a 45-dim MHR shape vector per person
-    per frame, which this export used to discard, so every dancer rendered with
-    the mean MHR body. Each track's shape is now averaged across its observed
-    frames (per-dim median) and baked into that track's rest mesh before export
-    -- see _character_with_shape for why baking, not a pymomentum blend-shape
-    call, is the route. Measured effect on solo-01 is real but modest (2.5 mm
-    mean / 2.1 cm max surface displacement): MHR's shape basis moves the SURFACE
-    only. Limb lengths and overall size come from the scale parameters, which
-    already reach the GLB inside the per-frame skel_state and are NOT re-derived
-    here (see the report in docs/GATE-REPORT.md for the numbers, including the
-    ~9% frame-to-frame bone-length wobble that averaging shape does not fix).
+    Body surface: STANDARD for every dancer (docs/legal/body-shape-decision.md,
+    option b). The estimator's 45-dim MHR shape vector is not applied, not
+    averaged and not written anywhere: every GLB's rest mesh is lod3's mean MHR
+    body. What stays per-dancer is the SKELETON -- bone lengths come from the
+    scale parameters inside the per-frame skel_state (held constant per clip by
+    skeleton_constraints.py) and are exported unchanged. Shape never placed a
+    joint (GATE-REPORT shape addendum: rest joints differ by 0.0000 cm, animation
+    channels by 0), so this changes the surface only; hands, feet and the
+    overlay on the video are where they were.
 
     Gap-filling for samples where a dancer wasn't reconstructed (occluded,
     out of frame, or not yet confidently tracked): holds the nearest earlier
@@ -1847,7 +1717,6 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
     n_samples = len(per_frame)
 
     lod_path = f"{WEIGHTS_DIR}/mhr-assets/lod3.fbx"
-    mhr_path = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
 
     # The real sample rate, derived from the npz's own timeline rather than
     # hardcoded. run_clip takes an `fps` argument, so the old hardcoded 15.0
@@ -1863,40 +1732,19 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
     fps = round(1.0 / float(sample_times_s[1] - sample_times_s[0]), 6)
     print(f"sample rate from npz timeline: {fps} fps ({len(sample_times_s)} samples)")
 
-    # Body shape, loaded once for the whole clip: the estimator predicts a 45-dim
-    # MHR shape vector per person per frame and the export used to drop it on the
-    # floor, so every dancer rendered as the mean MHR body.
-    neutral_verts, shape_vectors = _mhr_shape_basis(mhr_path)
-    base_character = pym_geo.Character.load_fbx(lod_path)
-    lod_rest = np.asarray(base_character.mesh.vertices, dtype=np.float64)
-    lod_to_mhr, nn_dist = _nearest_vertex_map(lod_rest, neutral_verts)
-    print(f"lod3 ({len(lod_rest)} verts) -> MHR basis ({len(neutral_verts)} verts): "
-          f"nn dist mean={nn_dist.mean():.4f} max={nn_dist.max():.4f} cm")
-    if nn_dist.mean() > 1.0:
-        # The two assets must be the same body in the same rest pose and units
-        # (measured: 0.297 cm mean, 1.79 cm max). A large number here means a
-        # different LOD/model asset or a unit change -- transferring the shape
-        # displacement anyway would silently warp the mesh, which is the exact
-        # failure mode this pipeline must not ship.
-        raise ValueError(
-            f"LOD mesh does not match the MHR shape basis (nn dist mean {nn_dist.mean():.3f} cm). "
-            "Refusing to bake body shape from a mismatched asset."
-        )
+    # The standard body: lod3's own rest mesh, the same for every dancer.
+    character = pym_geo.Character.load_fbx(lod_path)
 
     out_paths = {}
-    shape_vectors_out = {}
     for track_id in confident_track_ids:
         skel_states = np.zeros((n_samples, 127, 8), dtype=np.float32)
 
         # Pass 1: collect the observed poses by sample index.
         observed: dict[int, "np.ndarray"] = {}
-        shape_samples = []
         for i in range(n_samples):
             person = per_frame[i].get(track_id) if isinstance(per_frame[i], dict) else None
             if person is not None and "skel_state" in person:
                 observed[i] = np.asarray(person["skel_state"], dtype=np.float32)
-                if "shape_params" in person:
-                    shape_samples.append(np.asarray(person["shape_params"], dtype=np.float64).ravel())
         n_observed = len(observed)
         if not observed:
             print(f"track {track_id}: no observed samples, skipping export")
@@ -1939,35 +1787,6 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
 
         print(f"track {track_id}: {n_observed}/{n_samples} samples observed "
               f"(first at {first_observed_idx}, leading gap back-filled)")
-
-        # One body shape for the whole track: a body does not change between
-        # frames, so the per-frame estimates are repeat measurements of one
-        # value. PER-DIM MEDIAN, not the mean: on solo-01's 291 observed frames
-        # the two agree to ||mean - median|| = 0.121 against ||mean|| = 2.883
-        # (4.2%, and a 10%-trimmed mean is 0.062 from the mean), so on a clean
-        # clip the choice is nearly free -- but the per-frame spread is large
-        # (per-dim std 0.199 mean / 0.459 max; per-frame L2 distance from the
-        # mean averages 1.42 and reaches 2.99, i.e. half the vector's own norm),
-        # and a partial-view or occluded frame is exactly the kind of sample
-        # that lands far out. The median bounds any single bad frame's influence
-        # at zero extra cost; the mean does not.
-        character = base_character
-        if shape_samples:
-            shape_vec = np.median(np.stack(shape_samples), axis=0)
-            character, rest_delta = _character_with_shape(
-                base_character, shape_vec, shape_vectors, lod_to_mhr
-            )
-            mag = np.linalg.norm(rest_delta, axis=1)
-            shape_vectors_out[str(track_id)] = shape_vec.tolist()
-            print(f"track {track_id}: shape from {len(shape_samples)} frames, "
-                  f"||shape||={np.linalg.norm(shape_vec):.3f}, per-frame std mean="
-                  f"{np.stack(shape_samples).std(0).mean():.3f}; rest-mesh displacement "
-                  f"mean={mag.mean():.4f} cm max={mag.max():.4f} cm")
-        else:
-            # Honesty (DESIGN.md §7h): no estimate at all means the mean MHR body
-            # is rendered, and api.py must label it default_assumed rather than
-            # present it as this dancer's measured proportions.
-            print(f"track {track_id}: no shape_params in the npz, exporting the mean MHR body")
 
         # Built in /tmp, not on the mount: Modal commits a mounted Volume in the
         # background, and a half-rewritten GLB must never be what lands there.
@@ -2036,11 +1855,6 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
         # reconstructed. Recorded here so the two can never be conflated.
         "gltf_interpolation": GLTF_INTERPOLATION,
         "glb_paths": {str(tid): os.path.basename(p) for tid, p in out_paths.items()},
-        # The exact vector baked into each GLB, so MotionResult.persons[].shape_params
-        # reports what was rendered instead of re-deriving (and disagreeing with) it.
-        # No schema change: ShapeParams already means "one vector for the whole clip,
-        # estimated from well-observed frames" -- this is the first time that is true.
-        "shape_params": shape_vectors_out,
     }
     guard()
     with open(f"{RESULTS_DIR}/{clip_id}.export-manifest.json", "w") as f:

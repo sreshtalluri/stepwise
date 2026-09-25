@@ -410,7 +410,13 @@ def process_clip(
 # Nothing reads it back: the export path rebuilds geometry from lod3.fbx plus
 # skel_state, and the only two npz consumers in the repo (modal_app's
 # export_clip_gltf and services/motion-api/motion_result.py) touch skel_state
-# and shape_params and nothing else.
+# and nothing else of the estimator's output.
+#
+# `shape_params` (45 MHR body-shape coefficients per person per frame) is the
+# third: every lesson now renders the standard body surface
+# (docs/legal/body-shape-decision.md), so nothing reads it, and a per-person
+# shape estimate is exactly what rights-and-privacy.md §4e says not to keep.
+# Limb lengths are unaffected -- they live in skel_state.
 #
 # `expr_params` is 0.02 MB and is here for the other reason: 72 facial
 # expression coefficients per person per frame are the most face-shaped thing
@@ -423,7 +429,7 @@ def process_clip(
 # would also silently break sibling branches that legitimately read
 # bone_length_ratio / hand_crop_rect / foot_crop_rect out of the same npz.
 # Deny only what has been verified unread.
-UNREAD_PER_FRAME_KEYS = ("pred_vertices", "expr_params")
+UNREAD_PER_FRAME_KEYS = ("pred_vertices", "expr_params", "shape_params")
 
 
 def _strip_unread(per_frame: list) -> list:

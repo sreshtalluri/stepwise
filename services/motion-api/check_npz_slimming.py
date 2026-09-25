@@ -69,8 +69,7 @@ def _npz_bytes(per_frame: list) -> bytes:
     return buf.getvalue()
 
 
-MANIFEST = {"fps": 15.0, "glb_paths": {str(TRACK): f"clip_track{TRACK}.glb"},
-            "shape_params": {str(TRACK): [0.25] * 45}}
+MANIFEST = {"fps": 15.0, "glb_paths": {str(TRACK): f"clip_track{TRACK}.glb"}}
 
 fat = [{TRACK: _person()} for _ in range(N_FRAMES)]
 slim = _strip_unread(fat)
@@ -78,7 +77,7 @@ slim = _strip_unread(fat)
 # 1. skel_state (and everything else that is read) survives untouched.
 for i, (f, s) in enumerate(zip(fat, slim)):
     assert np.array_equal(f[TRACK]["skel_state"], s[TRACK]["skel_state"]), f"skel_state differs at frame {i}"
-    for k in ("shape_params", "keypoints_2d"):
+    for k in ("keypoints_2d",):
         assert np.array_equal(f[TRACK][k], s[TRACK][k]), f"{k} differs at frame {i}"
     for k in ("hand_crop_rect", "foot_crop_rect"):
         assert f[TRACK][k] == s[TRACK][k], f"{k} differs at frame {i}"
@@ -97,7 +96,7 @@ assert a == b, "MotionResult CHANGED when the npz was slimmed"
 p = doc_slim["persons"][0]
 assert len(p["samples"]) == N_FRAMES and len(p["samples"][0]["joints"]) == N_JOINTS
 assert any(r is not None for r in p["crop_rects"]["hands"]), "crop rects lost"
-assert p["shape_params"]["source"] == "well_observed_frames"
+assert p["shape_params"] == {"source": "default_assumed"}, "standard surface, no vector"
 assert "vector" not in p["shape_params"], "shape vector is being served again"
 
 print(f"npz {len(fat_bytes):,} -> {len(slim_bytes):,} bytes "
