@@ -341,7 +341,12 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                 for ji in range(n_joints):
                     rel = _rest_relative_rotation(rest_rotations[ji], local_rots[ji])
                     joints_sample.append({
-                        "rotation": list(rel),
+                        # 6 decimals: the values are float32 underneath
+                        # (0.9999999762421847), so the rest is noise -- a
+                        # 1e-6 quaternion step is ~1e-4 degrees. It is
+                        # 127 joints x every sample, and the 17-digit reprs
+                        # were 3.4 MB of a 45 s lesson's gzip; this is 1.1 MB.
+                        "rotation": [round(float(v), 6) for v in rel],
                         "provenance": provenance,
                         "visibility": visibility,
                     })

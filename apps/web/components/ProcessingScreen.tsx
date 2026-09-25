@@ -9,6 +9,8 @@ import { failedBody, flowSteps, handoffHref, type Step } from "../lib/flow";
 import { localClipUrl, timeRemaining, useJobStatus, type JobStatus } from "../lib/jobStatus";
 import { prefersReducedMotion } from "../lib/reveal";
 import { track } from "../lib/analytics";
+import { loadLessonDoc } from "../lib/lessonDoc";
+import { lessonSource } from "../lib/lessons";
 
 /**
  * Processing, A2 "Count off" with the owner's change of 2026-09-23: wait for
@@ -44,6 +46,12 @@ export default function ProcessingScreen({ jobId }: { jobId: string }) {
   const status = feed.kind === "ok" ? feed.status : null;
   const done = status?.state === "succeeded";
   const [retry, setRetry] = useState<Retry>({ kind: "idle" });
+
+  // Start loading the lesson the moment it exists, so "Start learning" opens
+  // on a document that is already here instead of a second wait.
+  useEffect(() => {
+    if (done) void loadLessonDoc(lessonSource(jobId).docUrl);
+  }, [done, jobId]);
 
   // Milestones only ride on live documents, so keep the latest of each.
   const [milestones, setMilestones] = useState<Milestones>({});
