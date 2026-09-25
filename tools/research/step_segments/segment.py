@@ -21,11 +21,11 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LESSONS = {
-    "job_5716ecd319064b329b53df005b736757": "bhangra",
-    "job_345b747b1edb406a90e8f0d847b9c518": "choreo",
-    "job_b8223229f23240d39305493bbe628d7d": "b822",
-    "job_a10682e744734f0fb4034149fb4c0569": "a106",
-    "job_7995c97829a942aba13301fcd14704dd": "7995",
+    "bhangra": "bhangra",
+    "choreo-kinjaz": "choreo",
+    "mirror": "b822",
+    "hoodie-followcam": "a106",
+    "mirror-cut-12s": "7995",
 }
 
 # End effectors per body part (MHR names). Motion of a part = motion of its tip in the dancer's frame.

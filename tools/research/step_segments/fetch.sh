@@ -1,16 +1,20 @@
 #!/bin/sh
 # Download the public MotionResults (and, with --video, the source videos) used by the
-# research scripts into .cache/ (not committed).
+# research scripts into .cache/ (not committed). Lesson ids are NOT in this repo: a job id is
+# the lesson's link and the repo is public. Put one job id per line in .data/jobs.txt
+# (git-ignored), optionally followed by a short name: "job_<id> bhangra".
 set -e
 here=$(dirname "$0")
+list="$here/.data/jobs.txt"
+[ -s "$list" ] || { echo "missing $list (one job id per line)"; exit 1; }
 mkdir -p "$here/.cache"
-for j in job_5716ecd319064b329b53df005b736757 job_345b747b1edb406a90e8f0d847b9c518 \
-         job_b8223229f23240d39305493bbe628d7d job_a10682e744734f0fb4034149fb4c0569 \
-         job_7995c97829a942aba13301fcd14704dd; do
-  [ -s "$here/.cache/$j.json" ] || curl -sf --compressed -o "$here/.cache/$j.json" \
+while read -r j name; do
+  [ -n "$j" ] || continue
+  out="$here/.cache/${name:-$j}"
+  [ -s "$out.json" ] || curl -sf --compressed -o "$out.json" \
     "https://stepwise.sreshta-talluri.workers.dev/api/jobs/$j/result"
-  if [ "$1" = "--video" ] && [ ! -s "$here/.cache/$j.mp4" ]; then
-    curl -sfL -o "$here/.cache/$j.mp4" "https://stepwise.sreshta-talluri.workers.dev/api/jobs/$j/video"
+  if [ "$1" = "--video" ] && [ ! -s "$out.mp4" ]; then
+    curl -sfL -o "$out.mp4" "https://stepwise.sreshta-talluri.workers.dev/api/jobs/$j/video"
   fi
-done
+done < "$list"
 ls -la "$here/.cache"
