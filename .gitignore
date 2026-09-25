@@ -49,3 +49,6 @@ qa-reports/
 
 # Local evaluation clip cache
 .stepwise-clips/
+
+# research scripts: local lesson-id lists (a job id is a lesson link)
+tools/research/*/.data/

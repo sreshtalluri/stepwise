@@ -1,6 +1,6 @@
 # Orientation flips: the body that turns round for one frame
 
-Owner report: on lesson `job_a10682e744734f0fb4034149fb4c0569` (a YouTube short: a
+Owner report: on lesson `hoodie-followcam` (a YouTube short: a
 girl in a full hoodie dancing in the rain in a parking lot at night, follow-cam),
 "for a few frames the whole 3D mesh changes completely or turns around". The ask
 was to correct those frames, not remove them.
