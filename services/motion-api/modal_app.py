@@ -742,6 +742,17 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         )
         observability.capture(e, "run_clip", stage="export", **tags)
         raise
+    # For api.py's export watchdog (_fail_dead_export): an export container
+    # killed without raising (OOM, timeout, crash) writes no terminal status,
+    # so the API asks Modal about this call once the job has sat here too long.
+    # Beside the GPU/beats ids api.py recorded for removal. Best-effort: without
+    # it the watchdog falls back to time alone.
+    try:
+        key = f"calls:{job_id}"
+        gpu_handoff[key] = dict(gpu_handoff.get(key) or {}, export=export_call.object_id,
+                                export_at=time.time(), retry_count=retry_count)
+    except Exception as e:  # noqa: BLE001
+        print(f"[export] could not record the export call for {job_id}: {e}")
 
     return {
         "refused": False,
@@ -1583,13 +1594,18 @@ def inspect_mhr_region_mapping():
     return {"joint_names": joint_names, "resolved": {k: joint_names[v] for k, v in mapping.items()}}
 
 
+# api.py's export watchdog (EXPORT_STALE_S) waits past this before it asks
+# Modal whether a silent export is dead.
+EXPORT_TIMEOUT_S = 600
+
+
 # No GPU (see gltf_image). cpu=2: the work is single-threaded -- 2, 4 and 8
 # cores measured the same -- and the second core is headroom for the Volume
 # and R2 I/O. memory: 1.25-1.33 GB peak RSS measured on a 1-dancer 45 s clip
 # and a 4-dancer clip; 3 GiB leaves room for 6 dancers at 60 s.
 @app.function(image=gltf_image, cpu=2.0, memory=3072,
               volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results, UPLOADS_DIR: uploads},
-              secrets=R2_SECRET + OBS_SECRETS, timeout=600)
+              secrets=R2_SECRET + OBS_SECRETS, timeout=EXPORT_TIMEOUT_S)
 def export_clip_gltf(clip_id: str, job_id: str | None = None, retry_count: int | None = None):
     """The export stage, and -- when run_clip hands a job over (`retry_count`
     given) -- the owner of that job's final status write.
