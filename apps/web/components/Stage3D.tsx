@@ -12,11 +12,10 @@ import {
   regionVisibility,
   absentNotes,
   dancerColor,
-  followStep,
-  clampScreenLag,
-  MAX_SCREEN_OFFSET,
-  deadzoneFor,
-  damp,
+  bodyTrack,
+  presetScreenAxes,
+  steadyViewPath,
+  pathAt,
   rootPlacementObserved,
   rootPositionAt,
   soleLift,
@@ -97,7 +96,7 @@ export interface Focus {
   body: THREE.Box3;
   hands: THREE.Box3;
   feet: THREE.Box3;
-  /** The root joint's world position this frame — what the rig follows rigidly when there is no floor. */
+  /** The root joint's world position this frame — how the camera plan finds a never-placed dancer. */
   root: THREE.Vector3;
 }
 
@@ -564,24 +563,6 @@ function Lights({ doc, grounded }: { doc: MotionResult; grounded: boolean }) {
 /* ------------------------------------------------------------- view presets */
 
 /**
- * Distance at which `bounds` exactly fills the panel for this camera.
- *
- * Frame the body to the panel rather than to a fixed distance: the two stages are
- * very different shapes on phone and desktop, and a preset that crops the feet on one
- * of them is not a preset.
- */
-function frameRadius(bounds: THREE.Box3, cam: THREE.PerspectiveCamera, margin: number): number {
-  const size = bounds.getSize(new THREE.Vector3());
-  const halfV = THREE.MathUtils.degToRad(cam.fov) / 2;
-  return Math.max(size.y / 2 / Math.tan(halfV), Math.max(size.x, size.z) / 2 / Math.tan(halfH(cam))) * 1.18 * margin;
-}
-
-/** The camera's horizontal half-angle, radians. */
-function halfH(cam: THREE.PerspectiveCamera): number {
-  return Math.atan(Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) * cam.aspect);
-}
-
-/**
  * The overlay view's camera: the clip's own camera, pose from `camera_to_world` and
  * projection from the intrinsics, fitted to the canvas the way `object-fit: contain`
  * fits the video under it. No orbit, no follow — the one angle that is not estimated.
@@ -614,13 +595,21 @@ function SourceCamera({ doc }: { doc: MotionResult }) {
  *               same delta — so the learner's orbit angle survives untouched. You can
  *               orbit a following camera, and following never resets your angle.
  *
- * With follow off this is byte-for-byte the old one-shot behaviour.
+ * What follow looks at is not the dancer this frame but a path PLANNED for the whole
+ * clip (`steadyViewPath`): zero-lag smoothed, a slow dolly only where the body would
+ * not fit, and a guarantee that the body stays in the pane. So there is nothing to
+ * react to — the camera is a function of the clock, which also makes seeking, looping
+ * and any playback speed exact. The plan is per pane shape, view and dancer.
+ *
+ * With follow off this is byte-for-byte the old one-shot behaviour, aimed at the plan.
  */
 function ViewRig({
   doc,
   view,
   follow,
   selectedIndex,
+  mirrored,
+  timeRef,
   focusRef,
   controlsRef,
 }: {
@@ -628,28 +617,30 @@ function ViewRig({
   view: ViewId;
   follow: boolean;
   selectedIndex: number;
+  mirrored: boolean;
+  timeRef: RefObject<number>;
   focusRef: RefObject<Focus | null>;
   controlsRef: RefObject<any>;
 }) {
   const { camera, size } = useThree();
   const applied = useRef<ViewId | null>(null);
-  /** Where the camera is currently aiming — the damped, deadzoned follow point. */
-  const aim = useRef<Vec3>([0, 0, 0]);
-  /** The framing distance the rig is driving toward, before the learner's own zoom. */
-  const autoDist = useRef(0);
   /** Distance we last wrote, so a change means the learner dollied. */
   const lastDist = useRef(0);
   /**
-   * The learner's zoom, kept as a RATIO of the automatic framing rather than an
-   * absolute distance. Without this, follow's per-frame distance correction would
-   * silently overwrite the scroll wheel; with it, someone who zooms in twice as close
-   * stays twice as close as the dancer moves toward and away from the camera.
+   * The learner's zoom, kept as a RATIO of the planned framing rather than an
+   * absolute distance, so the plan's slow dollies do not overwrite the scroll wheel.
    */
   const zoomBias = useRef(1);
   const switching = useRef(false);
+  /** A never-placed dancer is drawn where the clip puts them, not at its placeholder root: the constant between the two. */
+  const anchor = useRef(new THREE.Vector3());
+  /** After a switch to a nearby dancer: the offset from the new plan, decaying to zero, so the camera glides across. */
+  const glide = useRef(new THREE.Vector3());
+  const target = useRef(new THREE.Vector3());
+  const offset = useRef(new THREE.Vector3());
 
-  // Presets frame the body to the panel, so a panel that changes shape — turning on
-  // compare, promoting a stage, rotating the phone — has to re-frame or it crops.
+  // A pane that changes shape — compare on, a promoted stage, a rotated phone — is
+  // re-planned (below) and re-aimed, or it crops.
   useEffect(() => {
     applied.current = null;
   }, [size.width, size.height]);
@@ -660,71 +651,59 @@ function ViewRig({
     switching.current = true;
   }, [selectedIndex]);
 
-  const subject = useRef(new THREE.Vector3());
-  const delta = useRef(new THREE.Vector3());
-  const offset = useRef(new THREE.Vector3());
-  const extent = useRef(new THREE.Vector3());
-  const anchor = useRef(new THREE.Vector3());
-  const right = useRef(new THREE.Vector3());
-  // No floor: follow in the DANCER's frame, not the room's — the root is held rigidly
-  // and only body-relative motion goes through the deadzone. With no floor there is
-  // nothing to see travel against, and on a moving camera (job_a10682e7, a follow-cam:
-  // grounding "none") the "travel" is camera motion plus monocular depth noise — root
-  // z jitter 0.16 m std, 4x its x — which is exactly Side's screen-horizontal: the
-  // deadzone let the body slide half out of a narrow pane, or all the way on a 1 m
-  // depth spike. Grounded clips keep world follow, unchanged.
-  const pinned = follow && doc.grounding.status === "none";
   // Every estimated view orbits the FLOOR's up, not the phone's (see `stageBasis`);
-  // "camera" keeps the source camera's own axes. The follow and orbit code below is
-  // direction-agnostic, so this basis and `camera.up` are all that change.
+  // "camera" keeps the source camera's own axes.
   const basis = useMemo(() => stageBasis(doc, view !== "camera"), [doc, view]);
+  const preset = VIEW_PRESETS.find((p) => p.id === view)!;
+
+  /** Rows of [aim x, y, z (world), distance], one per sample. */
+  const plan = useMemo(() => {
+    const tanV = Math.tan(THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov) / 2);
+    const body = bodyTrack(doc, selectedIndex, basis, mirrored);
+    const lens = { ...presetScreenAxes(preset.azimuth, preset.elevation), tanV, tanH: (tanV * size.width) / Math.max(size.height, 1), margin: preset.distance };
+    const { aim, dist } = steadyViewPath(doc.sample_times_s, body, lens);
+    return aim.map((a, k) => [0, 1, 2].map((i) => basis.right[i] * a[0] + basis.up[i] * a[1] + basis.back[i] * a[2]).concat(dist[k]));
+  }, [doc, selectedIndex, basis, mirrored, preset, camera, size.width, size.height]);
 
   useFrame((_, dt) => {
     const focus = focusRef.current;
     const controls = controlsRef.current;
     if (!focus || !controls) return;
+    const t = timeRef.current ?? 0;
+    const row = pathAt(doc.sample_times_s, plan, t);
+    const reanchor = () => {
+      if (rootPlacementObserved(doc, selectedIndex)) anchor.current.set(0, 0, 0);
+      else anchor.current.copy(focus.root).sub(new THREE.Vector3(...rootPositionAt(doc, selectedIndex, t)));
+    };
+    const aim = () => target.current.set(row[0], row[1], row[2]).add(anchor.current);
 
-    const preset = VIEW_PRESETS.find((p) => p.id === view)!;
-    // Close-ups frame the hands or feet themselves, not a fraction of the whole body:
-    // a dancer in a wide pose and a dancer with arms down need very different
-    // distances for the same "hands" preset.
-    const bounds = focus[preset.focus].isEmpty() ? focus.body : focus[preset.focus];
-    const cam = camera as THREE.PerspectiveCamera;
-    anchor.current.set(0, 0, 0);
-    if (pinned) anchor.current.copy(focus.root);
-    // `subject` and `aim` live in the anchor's frame (the world's when not pinned).
-    bounds.getCenter(subject.current).sub(anchor.current);
-    const radius = frameRadius(bounds, cam, preset.distance);
-
-    // DESIGN.md §7a2: switching dancer is one tap and the lesson re-anchors. How it
-    // re-anchors depends on how far it has to go. Within `cutDistance` the follow
-    // damping simply walks the camera across, which keeps the spatial relationship
-    // between the two bodies legible — you SEE that you moved to the person on the
-    // left. Beyond it a glide is a slow pan across empty floor that tells you nothing
-    // and loses the dancer for a second, so it cuts instead. Same rule the rest of
-    // the viewer uses: show the relationship when it is readable, do not fake one
-    // when it is not.
+    // DESIGN.md §7a2: switching dancer is one tap and the lesson re-anchors. Within
+    // `cutDistance` the camera glides across, which keeps the spatial relationship
+    // between the two bodies legible; beyond it a glide is a slow pan across empty
+    // floor, so it cuts instead.
     if (switching.current) {
       switching.current = false;
-      const far = subject.current.distanceTo(new THREE.Vector3(...aim.current)) > FOLLOW.cutDistance;
+      reanchor();
+      const far = aim().distanceTo(controls.target) > FOLLOW.cutDistance;
       if (!follow || far) applied.current = null;
+      else glide.current.copy(controls.target).sub(target.current);
     }
 
     // ---- one-shot: mount, view change, resize, double-tap reset, or a hard cut ----
     if (applied.current !== view) {
       applied.current = view;
-      aim.current = [subject.current.x, subject.current.y, subject.current.z];
-      autoDist.current = radius;
-      lastDist.current = radius * zoomBias.current;
-      const at = anchor.current;
-      camera.position.set(...orbitPosition(basis, [aim.current[0] + at.x, aim.current[1] + at.y, aim.current[2] + at.z], preset.azimuth, preset.elevation, lastDist.current));
+      reanchor();
+      glide.current.set(0, 0, 0);
+      lastDist.current = row[3] * zoomBias.current;
+      const at = aim();
+      camera.position.set(...orbitPosition(basis, [at.x, at.y, at.z], preset.azimuth, preset.elevation, lastDist.current));
       // drei's OrbitControls is three-stdlib's, whose update() re-reads `camera.up` on
       // every call, so orbit, the polar clamp ("never under the floor") and lookAt all
       // follow this with nothing else to patch. (three's own OrbitControls caches it at
       // construction instead; writing its private `_quat` here threw on stdlib, which
       // left the target stale and turned "side" into a near-frontal view in 4ba6fcc.)
       camera.up.set(...basis.up);
-      controls.target.copy(subject.current).add(anchor.current);
+      controls.target.copy(at);
       controls.update();
       return;
     }
@@ -735,40 +714,20 @@ function ViewRig({
 
     // A distance we did not write means the learner dollied. Record it as a ratio.
     const now = camera.position.distanceTo(controls.target);
-    if (Math.abs(now - lastDist.current) > 1e-4 && autoDist.current > 0) {
-      zoomBias.current = THREE.MathUtils.clamp(now / autoDist.current, 0.2, 5);
+    if (Math.abs(now - lastDist.current) > 1e-4 && row[3] > 0) {
+      zoomBias.current = THREE.MathUtils.clamp(now / row[3], 0.2, 5);
     }
 
-    aim.current = followStep(
-      aim.current,
-      [subject.current.x, subject.current.y, subject.current.z],
-      deadzoneFor(bounds.getSize(extent.current).y),
-      dt,
-    );
-    // Keep the body inside the pane's width, not just inside a distance in metres.
-    const halfW = lastDist.current * Math.tan(halfH(cam));
-    aim.current = clampScreenLag(
-      aim.current,
-      [subject.current.x, subject.current.y, subject.current.z],
-      right.current.setFromMatrixColumn(cam.matrixWorld, 0).toArray() as Vec3,
-      MAX_SCREEN_OFFSET * halfW,
-    );
-    autoDist.current = damp(autoDist.current, radius, FOLLOW.tauDistance, Math.min(dt, 0.1));
-
+    glide.current.multiplyScalar(Math.exp(-Math.min(dt, 0.1) / FOLLOW.tauPosition));
+    const at = aim().add(glide.current);
     // Translate the whole rig: moving target and camera by the same vector leaves
     // `camera.position - target` — which is all OrbitControls stores an orbit as —
     // completely unchanged. This is why follow and orbit compose instead of fighting.
-    delta.current.set(aim.current[0], aim.current[1], aim.current[2]).add(anchor.current).sub(controls.target);
-    controls.target.add(delta.current);
-    camera.position.add(delta.current);
-
-    // Then set the framing distance along the direction the learner is looking from.
     offset.current.copy(camera.position).sub(controls.target);
-    const want = autoDist.current * zoomBias.current;
-    if (offset.current.lengthSq() > 1e-12) {
-      offset.current.setLength(want);
-      camera.position.copy(controls.target).add(offset.current);
-    }
+    controls.target.copy(at);
+    // Then the planned distance along the direction the learner is looking from.
+    if (offset.current.lengthSq() > 1e-12) offset.current.setLength(row[3] * zoomBias.current);
+    camera.position.copy(at).add(offset.current);
     controls.update();
     lastDist.current = camera.position.distanceTo(controls.target);
   });
@@ -879,6 +838,8 @@ export default function Stage3D({
         view={view}
         follow={follow}
         selectedIndex={selectedIndex}
+        mirrored={mirrored}
+        timeRef={timeRef}
         focusRef={focusRef}
         controlsRef={controlsRef}
       />}
