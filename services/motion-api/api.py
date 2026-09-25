@@ -818,6 +818,91 @@ def _with_early_counts(doc: dict, job_id: str) -> dict:
     return dict(doc, milestones=dict(doc.get("milestones") or {}, counts=counts))
 
 
+# --- Export watchdog --------------------------------------------------------
+# run_clip writes EXPORT_STAGE, spawns export_clip_gltf and returns; export
+# writes the terminal status. An export container killed without raising (OOM,
+# its Modal timeout, a crash) writes nothing, and the job would sit at 0.97
+# forever. So once a job has been at this stage longer than export can possibly
+# run, the next poll asks Modal about the call and, if it is dead, writes the
+# retryable `export_error` export would have written. Measured against the real
+# client (2026-09-25): a running or queued call's get(timeout=0) raises the
+# builtin TimeoutError; OOM -> restarted until FunctionTimeoutError at the
+# function's timeout; os._exit -> restarted, then InternalFailure ("lost track
+# of input") after ~60 s in one run but still "running" at 160 s in another --
+# hence EXPORT_GIVE_UP_S.
+EXPORT_STAGE = "Building the 3D body file"
+# modal_app.EXPORT_TIMEOUT_S (600) + room for a CPU container to be scheduled.
+EXPORT_STALE_S = 600 + 120
+EXPORT_GIVE_UP_S = 3 * EXPORT_STALE_S
+_EXPORT_RECHECK_S = 60.0
+# (job_id, retry_count) -> {"since": export spawn time, "call": its id or None,
+# "next": when to look again}. Per replica, so a running job's poll costs a
+# dict lookup: the hand-off Dict is read about once a minute until it names the
+# call, and Modal is only asked once the export is overdue.
+_EXPORT_WATCH: dict[tuple[str, int], dict] = {}
+
+
+def _export_call_dead(call_id: str) -> bool:
+    try:
+        modal.FunctionCall.from_id(call_id).get(timeout=0)
+    except (OSError, modal.exception.ConnectionError):
+        return False  # builtin TimeoutError: still queued/running; or we could not ask
+    except Exception:  # noqa: BLE001 -- it raised, timed out or was lost: it will write nothing more
+        return True
+    return False  # it returned: its own status write is already on the Volume
+
+
+def _fail_dead_export(doc: dict, job_id: str) -> dict:
+    if doc["state"] != "processing" or doc["stage_message"] != EXPORT_STAGE:
+        return doc
+    now = time.time()
+    w = _EXPORT_WATCH.setdefault((job_id, doc["retry_count"]), {"since": now, "call": None, "next": now})
+    if now < w["next"]:
+        return doc
+    if w["call"] is None:
+        try:
+            rec = _handoff().get(_calls_key(job_id)) or {}
+        except Exception as e:  # noqa: BLE001 -- keep timing it from when this replica first saw it
+            print(f"[watchdog] could not read the calls of {job_id}: {e}")
+            rec = {}
+        if rec.get("export") and rec.get("retry_count") == doc["retry_count"]:
+            w["call"], w["since"] = rec["export"], rec.get("export_at") or w["since"]
+    due = w["since"] + EXPORT_STALE_S
+    if now < due:
+        w["next"] = due if w["call"] else now + _EXPORT_RECHECK_S
+        return doc
+    w["next"] = now + _EXPORT_RECHECK_S
+    # No recorded call (a failed put, or a GPU that died between the status
+    # write and the spawn): time alone, which is already past export's timeout.
+    # A call Modal still calls running past EXPORT_GIVE_UP_S is given up on too:
+    # a crash-looping container is restarted, and reported running, for longer.
+    if w["call"] and now < w["since"] + EXPORT_GIVE_UP_S and not _export_call_dead(w["call"]):
+        return doc
+    # A removed lesson stays 410; it never turns into a retryable failure.
+    _refuse_if_removed(_clip_id_for(job_id))
+    if w["call"]:
+        try:  # a no-op on a dead call; on a given-up one it stops a late write racing ours
+            modal.FunctionCall.from_id(w["call"]).cancel()
+        except Exception as e:  # noqa: BLE001
+            print(f"[watchdog] could not cancel {w['call']} for {job_id}: {e}")
+    # Re-read last: whatever landed meanwhile (a `succeeded`, a retry) wins.
+    fresh = jobstore.read_status(results_volume, job_id, _clip_id_for)
+    if fresh is None or (fresh["state"], fresh["stage_message"], fresh["retry_count"]) != \
+            (doc["state"], doc["stage_message"], doc["retry_count"]):
+        return fresh or doc
+    failed = dict(jobstore.queued_doc(job_id), state="failed", retry_count=doc["retry_count"], error={
+        "code": "export_error",
+        "message": "Building the 3D body file stopped before it finished. Trying again usually works.",
+        "retryable": True})
+    # The Volume document, as export itself would have written it; postgres
+    # mode mirrors it into the row on the next read, as it would export's.
+    retention.write_json(results_volume, f"/{job_id}.job-status.json", failed)
+    observability.message("export died without a status", "web", level="error",
+                          job_id=job_id, retry_count=doc["retry_count"], call=w["call"] or "unknown")
+    _EXPORT_WATCH.pop((job_id, doc["retry_count"]), None)
+    return failed
+
+
 @app.get("/jobs/{job_id}")
 def get_job_status(job_id: str) -> dict:
     doc = jobstore.read_status(results_volume, job_id, _clip_id_for)
@@ -848,6 +933,7 @@ def get_job_status(job_id: str) -> dict:
         # running job's polls stay at one Volume read -- and at most one
         # tombstone read per job per _REMOVAL_CHECK_S per replica.
         _refuse_if_removed_cached(job_id)
+    doc = _fail_dead_export(doc, job_id)
     doc = _with_early_counts(doc, job_id)
     result = validate_job_status(doc)
     if not result.valid:

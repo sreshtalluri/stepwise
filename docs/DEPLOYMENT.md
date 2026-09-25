@@ -560,13 +560,20 @@ stale rather than stuck.
 
 1. `modal app logs stepwise-motion` — is the container alive? (One day of
    retention. If it is older than that, you cannot answer this; see §5.3.)
-2. If the worker died, the status document simply stops updating; there is no
-   watchdog. Two workers write it: `Reconstructor.run` up to "Building the 3D
-   body file" (0.97), then the CPU `export_clip_gltf` it spawned writes
-   `succeeded` or `export_error`. A job stuck at 0.97 is an export container
-   that died without raising (OOM, timeout) -- look for its logs, not the GPU's. `POST /jobs/{job_id}/retry` re-spawns at the same `job_id` and
-   increments `retry_count` — but only for a document whose `error.retryable`
-   is true, so a genuinely wedged job needs the worker's last state fixed first.
+2. If the GPU worker died, the status document simply stops updating; there is
+   no watchdog for that stage. Two workers write it: `Reconstructor.run` up to
+   "Building the 3D body file" (0.97), then the CPU `export_clip_gltf` it
+   spawned writes `succeeded` or `export_error`. An export container that dies
+   without raising (OOM, its 600 s timeout, a crash) is caught on the read
+   path: once a job has sat at 0.97 for `api.EXPORT_STALE_S` (720 s) since the
+   spawn, the next poll asks Modal about the export call (recorded under
+   `calls:{job_id}` in `stepwise-gpu-handoff`) and, if it is dead, writes the
+   retryable `export_error` itself (Sentry: "export died without a status").
+   Stuck longer than that: nobody is polling, or Modal still reports the
+   export queued/running. `POST
+   /jobs/{job_id}/retry` re-spawns at the same `job_id` and increments
+   `retry_count` -- but only for a document whose `error.retryable` is true,
+   so a genuinely wedged GPU job needs the worker's last state fixed first.
 
 **Build nothing new on read-after-write over Volume semantics.** That is the
 entire reason Postgres is being added (§5.1), and it is why `jobs` has real
