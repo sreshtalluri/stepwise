@@ -244,7 +244,6 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
         samples_out = []
         root_traj = []
         n_observed = 0
-        shape_vec = None
 
         # Composed world position per sample index, contract world space
         # (metres, Y-up) -- see world-placement.md and the CORRECTION comment
@@ -289,11 +288,6 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
             if observed:
                 held = np.asarray(person["skel_state"], dtype=np.float64)
                 n_observed += 1
-                if shape_vec is None:
-                    # Fallback only, for GLBs exported before the shape bake: one
-                    # frame's estimate, which is a noisy sample of the body rather
-                    # than the clip-wide fit ShapeParams.source promises.
-                    shape_vec = person["shape_params"].tolist()
             if i in composed_position:
                 held_position = composed_position[i]
 
@@ -428,35 +422,18 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
 
             samples_out.append({"joints": joints_sample})
 
-        # Report the vector the exporter actually baked into this dancer's GLB
-        # (per-dim median over its observed frames) rather than a per-frame
-        # sample, so the contract and the mesh cannot disagree.
-        shape_vec = manifest.get("shape_params", {}).get(str(track_id), shape_vec)
         glb_name = manifest["glb_paths"].get(str(track_id))
         persons.append({
             "person_id": f"person_{track_id}",
             "track_id": int(track_id),
             "animation": {"clip_id": f"{clip_id}_track{track_id}", "glb_asset_id": glb_name},
-            # `vector` is deliberately NOT served (branch `caching-retention`).
-            # It is 45 floats describing this specific person's body
-            # proportions -- the most person-specific number the system
-            # produces -- and it was being broadcast to every browser that
-            # opened a lesson while no client read it. Verified across every
-            # branch with viewer code: the only references anywhere are the
-            # schema, the generated types and the fixtures. What the viewer
-            # actually needs is `source`, which drives the honesty labelling.
-            # The vector still exists server-side and is still baked into the
-            # exported mesh by `shape-params`; it just stops leaving the box.
-            # `vector` was relaxed from required to optional in the frozen v1
-            # schema in the same change, so this still validates.
-            #
-            # `source` is still decided by `shape_vec`, which prefers the
-            # manifest's baked value over a per-frame sample -- so the label
-            # keeps tracking what the exporter actually put in the GLB rather
-            # than merely whether the npz happened to carry a shape key.
-            "shape_params": {
-                "source": "well_observed_frames" if shape_vec is not None else "default_assumed",
-            },
+            # Every GLB's surface is the standard MHR body
+            # (docs/legal/body-shape-decision.md, option b): no shape vector is
+            # applied, stored or served, so `default_assumed` is the honest
+            # label -- for the SURFACE. Limb lengths are still this dancer's
+            # (the skeleton inside the GLB). Nothing here reads the npz's
+            # per-frame shape_params, which process_clip no longer keeps.
+            "shape_params": {"source": "default_assumed"},
             "root_trajectory": root_traj,
             "samples": samples_out,
             # Per-side crops are derived HERE, from the detector keypoints the

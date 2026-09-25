@@ -5,7 +5,14 @@ No ffmpeg, torch, GPU, or detector needed -- refusal_reason_for is plain
 logic. Which tracks count as dancers is test_track_hygiene.py's job.
 Run: python tools/test_process_clip.py
 """
-from process_clip import MAX_DANCERS, refusal_reason_for
+from process_clip import MAX_DANCERS, _strip_unread, refusal_reason_for
+
+
+def test_the_npz_keeps_no_body_shape():
+    """Standard body surface (docs/legal/body-shape-decision.md): the per-frame
+    shape estimate is not persisted; the skeleton that carries limb lengths is."""
+    frame = {1: {"skel_state": [1.0], "shape_params": [0.5] * 45, "hand_crop_rect": None}}
+    assert _strip_unread([frame, None]) == [{1: {"skel_state": [1.0], "hand_crop_rect": None}}, None]
 
 
 def test_exactly_at_cap_is_not_refused():

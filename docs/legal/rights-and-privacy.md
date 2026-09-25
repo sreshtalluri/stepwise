@@ -50,6 +50,14 @@ Four findings fall straight out of that table, and they shape every recommendati
 2. **The rendered body is not the dancer's body.** The GLB uses the stock LOD-3 character driven by
    the dancer's pose. Shape personalisation is not wired in. Whatever the mesh reveals about the
    person, it is *motion*, not *proportions*.
+   **Correction (2026-09-25, [`body-shape-decision.md`](body-shape-decision.md)):** this was never
+   fully true. The GLB's *skeleton* always carried the dancer's estimated bone lengths (MHR scale
+   parameters inside `skel_state`), so limb lengths and height were shipped from the start. From
+   `8f4ae48` (2026-09-18) to 2026-09-25 the *surface* was also shaped to the dancer (45-dim shape
+   vector baked into the rest mesh, and the vector stored in `export-manifest.json`). Since
+   2026-09-25 the surface is the standard MHR body for everyone again, the vector is neither applied
+   nor stored (not in the manifest, not in the npz), and every existing lesson was re-exported. What
+   the GLB now reveals is motion plus estimated limb lengths, and `/privacy` says so.
 3. **…but the proportions are shipped anyway.** The 45-dim `shape_params.vector` travels to every
    browser that loads a lesson and does nothing there. It is the single most person-specific number
    in the system and it is currently dead weight in the payload.

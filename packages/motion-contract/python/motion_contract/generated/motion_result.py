@@ -461,7 +461,7 @@ class Sample(BaseModel):
 
 class Source1(Enum):
     """
-    "default_assumed" means no frame in the clip was confident enough to fit shape; the vector is the MHR default and consumers should not present body proportions as measured.
+    "default_assumed" means the rendered body SURFACE is the standard MHR body, not an estimate fitted to this dancer: every lesson since 2026-09-25 (docs/legal/body-shape-decision.md), and before that any clip with no frame confident enough to fit shape. Consumers should not present the surface as measured. Limb lengths are separate: they live in the skeleton inside the GLB, which is still sized to the dancer.
     """
 
     well_observed_frames = 'well_observed_frames'
@@ -474,12 +474,12 @@ class ShapeParams(BaseModel):
     )
     vector: list[float] | None = Field(
         None,
-        description="MHR shape (beta) coefficients, frozen for the whole clip (PRD §4: shape is estimated once from well-observed frames, not per-sample). OPTIONAL, and the API no longer sends it: these are 45 floats describing one identifiable person's body proportions — the most person-specific value the pipeline produces — and no consumer has ever read them (verified across every branch carrying viewer code). Shipping them to every browser that opens a lesson was gratuitous, and they are the artifact most likely to be argued over under the broader state biometric definitions (docs/legal/rights-and-privacy.md §4d, §6.2). The vector is still computed and still used server-side to bake body shape into the exported mesh; it simply stops leaving the server. Relaxed from required rather than deleted so that existing fixtures and any stored document that still carries it stay valid — a consumer must treat it as absent.",
+        description="MHR shape (beta) coefficients, frozen for the whole clip (PRD §4: shape is estimated once from well-observed frames, not per-sample). OPTIONAL, and the API no longer sends it: these are 45 floats describing one identifiable person's body proportions — the most person-specific value the pipeline produces — and no consumer has ever read them (verified across every branch carrying viewer code). Shipping them to every browser that opens a lesson was gratuitous, and they are the artifact most likely to be argued over under the broader state biometric definitions (docs/legal/rights-and-privacy.md §4d, §6.2). Since 2026-09-25 it is not used at all: every lesson renders the standard MHR body surface (docs/legal/body-shape-decision.md), so the vector is neither applied nor stored. Relaxed from required rather than deleted so that existing fixtures and any stored document that still carries it stay valid — a consumer must treat it as absent.",
         min_length=1,
     )
     source: Source1 = Field(
         ...,
-        description='"default_assumed" means no frame in the clip was confident enough to fit shape; the vector is the MHR default and consumers should not present body proportions as measured.',
+        description='"default_assumed" means the rendered body SURFACE is the standard MHR body, not an estimate fitted to this dancer: every lesson since 2026-09-25 (docs/legal/body-shape-decision.md), and before that any clip with no frame confident enough to fit shape. Consumers should not present the surface as measured. Limb lengths are separate: they live in the skeleton inside the GLB, which is still sized to the dancer.',
     )
 
 

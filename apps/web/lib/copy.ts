@@ -650,7 +650,9 @@ export const privacy = {
         // uploads Volume /{clip_id}.mp4 and R2 video key — api._store_and_dispatch, storage.py
         "The video you uploaded, or the video we fetched from the link you pasted.",
         // {clip_id}_track{n}[.{hash}].glb, motion-result[.{hash}].json.gz, beats.json — retention.clip_artifact_paths
-        "What we build from it: a 3D body for each dancer, and the lesson data the viewer plays — timings, poses, hand and foot close-up areas, and counts proposed from the music.",
+        // Sized, not shaped: bone lengths ride in skel_state; the rest mesh is lod3's for everyone and no
+        // shape vector is kept — modal_app._export_clip_gltf, process_clip.UNREAD_PER_FRAME_KEYS
+        "What we build from it: a 3D body for each dancer, sized to their estimated limb lengths (the body's surface is a standard shape, not theirs), and the lesson data the viewer plays — timings, poses, hand and foot close-up areas, and counts proposed from the music.",
         // performance.json, job-status/job-meta, jobs table — modal_app.py, jobstore.py
         "Processing records: how the job went and how long each step took.",
         // fingerprints/index.json: sha256 + frame hashes, source_key — fingerprint.py, api._store_and_dispatch
