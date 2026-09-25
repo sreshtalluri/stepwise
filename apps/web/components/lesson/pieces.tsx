@@ -43,6 +43,7 @@ import {
   LOOP_LENGTHS,
   loopName,
   nudgeEdge,
+  oneAlternates,
   presetCounts,
   sameSpan,
   spanDone,
@@ -896,7 +897,7 @@ export function SpeedTools({ l }: { l: Lesson }) {
  * them are `setCountOne` in packages/navigation.
  */
 export function CountOneTools({ l }: { l: Lesson }) {
-  const alts = l.alternates.filter((a) => a.shift_counts !== 0);
+  const alts = oneAlternates(l.alternates, l.structure.grid);
   return (
     <div className="ls-group" role="group" aria-labelledby="ls-one-h">
       <span className="ls-group-label" id="ls-one-h">
@@ -918,8 +919,8 @@ export function CountOneTools({ l }: { l: Lesson }) {
         <div className="ls-group-row">
           <span className="ls-hint">{copy.countOne.tryAnother}</span>
           {alts.map((a) => (
-            <button key={a.count_one_s} type="button" className="ls-chip" onClick={() => l.tryOne(a.count_one_s)} aria-label={copy.countOne.altLabel(a.shift_counts)}>
-              {a.shift_counts > 0 ? `+${a.shift_counts}` : `−${-a.shift_counts}`}
+            <button key={a.count_one_s} type="button" className="ls-chip" onClick={() => l.tryOne(a.count_one_s)} aria-label={copy.countOne.altLabel(a.by)}>
+              {a.by > 0 ? `+${a.by}` : `−${-a.by}`}
             </button>
           ))}
         </div>

@@ -4,6 +4,7 @@ import {
   buildUpSpeed,
   clampSpeed,
   nextPreset,
+  oneAlternates,
   SPEED_GRID,
   speedText,
   stepSpeed,
@@ -105,6 +106,23 @@ test("speed: presets, 0.05 steps from 0.25 to 1.25, shown exactly", () => {
   assert.deepEqual([1, 0.25, 0.5, 0.65, 0.75].map(nextPreset), [0.25, 0.5, 0.75, 0.75, 1]);
   assert.equal(SPEED_GRID.length, 21);
   for (let p = 0; p < 12; p++) assert.ok(SPEED_GRID.includes(buildUpSpeed(p)), "Build up stays on the grid");
+});
+
+test("try another 1: offsets from the 1 as it is now, no repeat of -1/+1, first guess first, then in order", () => {
+  // job_5716ecd3…'s proposal: the tracker's order is -3, -1, -2.
+  const spc = 0.6316;
+  const grid = { countOneS: 2.5748, secondsPerCount: spc };
+  const alts = [-3, -1, -2].map((k, i) => ({ count_one_s: 2.5748 + k * spc, shift_counts: k, confidence: 0.3 - i / 10 }));
+  assert.deepEqual(oneAlternates(alts, grid).map((a) => a.by), [-3, -2], "-1 is the -1 button");
+  // A later first guess still leads; the rest sort by offset.
+  const mixed = [2, -3, -2].map((k) => ({ count_one_s: 2.5748 + k * spc, shift_counts: k, confidence: 0.2 }));
+  assert.deepEqual(oneAlternates(mixed, grid).map((a) => a.by), [2, -3, -2]);
+  // After the learner nudged count 1 one earlier, offsets are from there: -3 is now -2, -2 is -1 (dropped).
+  const nudged = { ...grid, countOneS: 2.5748 - spc };
+  assert.deepEqual(oneAlternates(alts, nudged).map((a) => [a.by, a.shift_counts]), [[-2, -3]]);
+  // A candidate an eight away is the same 1; offsets wrap to the nearest eight (-4…3).
+  assert.deepEqual(oneAlternates([{ count_one_s: 2.5748 + 6 * spc }], grid).map((a) => a.by), [-2]);
+  assert.deepEqual(oneAlternates([], grid), []);
 });
 
 test("labels are counts, never clock time", () => {

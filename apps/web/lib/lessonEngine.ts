@@ -154,6 +154,31 @@ export function buildUpSpeed(passes: number): number {
   return Math.min(1, Math.round((BUILD_FROM + BUILD_STEP * Math.max(0, passes)) * 100) / 100);
 }
 
+/**
+ * "Try another 1": the beat tracker's other candidates for count 1, each with `by`,
+ * its offset in counts from count 1 as it is NOW (after any nudge or tap), wrapped
+ * to the nearest eight the way `setCountOne` lands it (−4…3). Dropped: the current 1
+ * and ±1, which the −1 / +1 buttons already are, and repeats. The producer's first
+ * candidate stays first — it is its next best guess (packages/beat-detect
+ * propose.py `_count_one`) — and the rest follow in count order, so the row reads
+ * "−3, −2, +2" rather than the order the tracker happened to score them.
+ */
+export function oneAlternates<T extends { count_one_s: number }>(
+  alts: readonly T[],
+  grid: { countOneS: number; secondsPerCount: number },
+): (T & { by: number })[] {
+  const seen = new Set<number>();
+  const out: (T & { by: number })[] = [];
+  for (const a of alts) {
+    const k = Math.round((a.count_one_s - grid.countOneS) / grid.secondsPerCount);
+    const by = ((((k + 4) % 8) + 8) % 8) - 4;
+    if (Math.abs(by) <= 1 || seen.has(by)) continue;
+    seen.add(by);
+    out.push({ ...a, by });
+  }
+  return [...out.slice(0, 1), ...out.slice(1).sort((a, b) => a.by - b.by)];
+}
+
 /** "Counts 9–16" — the coordinate is counts, never a timestamp (DESIGN.md §12.7). */
 export const spanLabel = (s: LoopSpan) =>
   s.startCount === s.endCount ? `Count ${countName(s.startCount)}` : `Counts ${countName(s.startCount)}–${countName(s.endCount)}`;
