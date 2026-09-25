@@ -125,8 +125,9 @@ async def _prewarm_gpu(request: Request, call_next):
                 and ingest.invite_code_ok(request.headers.get("x-invite-code")))):
         try:
             token = uuid.uuid4().hex
-            _reconstructor().run_when_handed.spawn(token)
+            call = _reconstructor().run_when_handed.spawn(token)
             request.state.gpu_token = token
+            request.state.gpu_call_id = getattr(call, "object_id", None)
         except Exception as e:  # noqa: BLE001 -- best-effort: dispatch spawns run() cold instead
             print(f"[prewarm] could not pre-warm a GPU container: {e}")
             token = None
@@ -153,16 +154,63 @@ def _dispatch_run(http, **job) -> None:
     up at the same instant is not a lost job: its "closed" is already there,
     this put fails, and run() is spawned.
     """
-    token = getattr(getattr(http, "state", None), "gpu_token", None)
+    state = getattr(http, "state", None)
+    token = getattr(state, "gpu_token", None)
     if token:
         try:
             if _handoff().put(token, {"job": job}, skip_if_exists=True):
                 http.state.gpu_handed = True
+                _record_calls(job["job_id"], getattr(state, "gpu_call_id", None),
+                              job.get("beats_call_id"), token)
                 return
             _handoff().pop(token, None)
         except Exception as e:  # noqa: BLE001 -- the job still runs, just cold
             print(f"[prewarm] hand-off failed, spawning run(): {e}")
-    _run_clip_fn().spawn(**job)
+    call = _run_clip_fn().spawn(**job)
+    _record_calls(job["job_id"], getattr(call, "object_id", None), job.get("beats_call_id"))
+
+
+def _calls_key(job_id: str) -> str:
+    return f"calls:{job_id}"
+
+
+def _record_calls(job_id: str, gpu: str | None, beats: str | None = None,
+                  token: str | None = None) -> None:
+    """Remember which Modal calls are doing this job's work, so a removal can
+    cancel them instead of paying for a GPU run whose every write it will
+    refuse. In the hand-off Dict, beside the tokens: one small put, and the
+    removal is the only reader. Best-effort -- without it the worker still
+    stops at its next tombstone check, it just costs a little more GPU."""
+    try:
+        _handoff()[_calls_key(job_id)] = {"gpu": gpu, "beats": beats, "token": token}
+    except Exception as e:  # noqa: BLE001
+        print(f"[dispatch] could not record the calls for {job_id}: {e}")
+
+
+def _cancel_inflight(job_id: str) -> None:
+    """Stop this job's running work: drop an unclaimed hand-off and cancel the
+    GPU run and the beat proposal. Cancelling a finished call is a no-op, so
+    there is nothing to check first. The export stage is not cancelled: it is
+    CPU, short, and stops itself at its first tombstone check."""
+    try:
+        rec = _handoff().pop(_calls_key(job_id), None)
+    except Exception as e:  # noqa: BLE001
+        print(f"[removal] could not look up the running calls of {job_id}: {e}")
+        return
+    if not rec:
+        return
+    if rec.get("token"):
+        try:
+            _handoff().pop(rec["token"], None)  # a job the container has not picked up yet
+        except Exception:  # noqa: BLE001
+            pass
+    for call_id in (rec.get("gpu"), rec.get("beats")):
+        if call_id:
+            try:
+                modal.FunctionCall.from_id(call_id).cancel()
+                print(f"[removal] cancelled {call_id} for {job_id}")
+            except Exception as e:  # noqa: BLE001
+                print(f"[removal] could not cancel {call_id} for {job_id}: {e}")
 
 
 @app.middleware("http")
@@ -428,6 +476,17 @@ def _store_and_dispatch(tmp_path: str, clip_id: str, fp: dict, http: Request,
     if _volume_read_json(results_volume, f"/{job_id}.job-status.json") is not None:
         print(f"[dispatch] {job_id} is already running -- adopting it, not spawning again")
         return DispatchResponse(clip_id=clip_id, job_id=job_id, deduplicated=True)
+
+    # A link's clip_id is derived, so it can be taken down by someone else
+    # while this request was downloading and storing: the caller checked the
+    # tombstone before the download, but the lesson was removed since. This is
+    # the job_6037 shape -- a lesson's bytes written after its removal -- and
+    # the answer is to take back what was just written and not spend a GPU.
+    # An uploaded file's clip_id is a fresh uuid4 nobody else can know yet, so
+    # it skips the extra read.
+    if source_key and retention.is_removed(results_volume, clip_id):
+        retention.delete_clip(uploads_volume, results_volume, clip_id, job_id, "")
+        raise HTTPException(410, "This lesson was removed and is not coming back.")
 
     _dispatch_run(http, clip_id=clip_id, job_id=job_id, beats_call_id=_spawn_counts(clip_id))
     return DispatchResponse(clip_id=clip_id, job_id=job_id)
@@ -850,7 +909,8 @@ def retry_job(job_id: str, http: Request) -> dict:
     retry_count = doc["retry_count"] + 1
     _limited(http, charge_as=(job_id, meta["clip_id"]))  # a retry is a GPU run like any other
     jobstore.record_retry(results_volume, job_id, meta["clip_id"], retry_count)
-    _run_clip_fn().spawn(clip_id=meta["clip_id"], job_id=job_id, retry_count=retry_count)
+    call = _run_clip_fn().spawn(clip_id=meta["clip_id"], job_id=job_id, retry_count=retry_count)
+    _record_calls(job_id, getattr(call, "object_id", None))
     return {"job_id": job_id, "retry_count": retry_count}
 
 
@@ -879,10 +939,14 @@ _PRIMED: set[str] = set()
 # ponytail: global, not per-key; per-key if two different cold lessons ever
 # queue behind each other in practice.
 _VALIDATING = threading.Lock()
-# (job_id, clip_id) whose R2 MotionResult carried `validated: <job_id>`. The
-# object is written once per export and removal is checked before this is ever
-# consulted, so one head_object per lesson per replica is enough.
-_R2_VALIDATED: set[tuple[str, str]] = set()
+# (job_id, clip_id) -> (the R2 key its validated MotionResult lives at, when
+# that was read). The key is versioned, so a re-export moves it; the verdict is
+# kept for _R2_VALIDATED_S, well inside the grace export_clip_gltf gives the old
+# version before deleting it (modal_app.OLD_VERSION_GRACE_S), so no replica
+# redirects to an object that is gone. Removal is checked before this is ever
+# consulted.
+_R2_VALIDATED: dict[tuple[str, str], tuple[str, float]] = {}
+_R2_VALIDATED_S = 60.0
 
 
 def _validated_r2_url(job_id: str, clip_id: str) -> Optional[str]:
@@ -896,17 +960,25 @@ def _validated_r2_url(job_id: str, clip_id: str) -> Optional[str]:
     gzip from R2 with its own Content-Encoding instead of through two proxies.
     Anything unmarked -- older lessons, a deduplicated job whose document
     carries another job_id, R2 down -- takes `_stored_result` as before.
+
+    The browser is sent to the immutable, versioned copy the latest object's
+    `version` metadata names, so a re-exported lesson is a new URL rather than
+    a year-cached old one. A lesson exported before versioning has no
+    `version` and is served from the latest key, as before.
     """
     if not storage.enabled():
         return None
-    key = storage.motion_result_key(clip_id)
-    if (job_id, clip_id) in _R2_VALIDATED:
-        return storage.url_for(key)  # presigning is local: no round trip
+    hit = _R2_VALIDATED.get((job_id, clip_id))
+    if hit and time.monotonic() - hit[1] < _R2_VALIDATED_S:
+        return storage.url_for(hit[0])  # presigning is local: no round trip
     try:
-        head = storage.client().head_object(Bucket=storage.bucket(), Key=key)
-        if (head.get("Metadata") or {}).get("validated") != job_id:
+        head = storage.client().head_object(Bucket=storage.bucket(),
+                                            Key=storage.motion_result_key(clip_id))
+        meta = head.get("Metadata") or {}
+        if meta.get("validated") != job_id:
             return None
-        _R2_VALIDATED.add((job_id, clip_id))
+        key = storage.motion_result_key(clip_id, meta.get("version"))
+        _R2_VALIDATED[(job_id, clip_id)] = (key, time.monotonic())
         return storage.url_for(key)
     except Exception:  # noqa: BLE001 -- missing or unreachable: the byte path decides
         return None
@@ -1044,6 +1116,11 @@ def _touch(clip_id: str) -> None:
     if now - _TOUCHED.get(clip_id, 0.0) < 86400:
         return
     try:
+        # Runs after the response, so a removal can land between /result's
+        # tombstone check and this write; without the re-check the marker is
+        # a removed lesson's leftover. Once a day per lesson per replica.
+        if retention.is_removed(results_volume, clip_id):
+            return
         retention.write_json(results_volume, retention.touch_path(clip_id), {"at": now})
         _TOUCHED[clip_id] = now
     except Exception as e:  # noqa: BLE001
@@ -1206,12 +1283,15 @@ def remove_lesson(clip_id: str, request: RemovalRequest, http: Request) -> Remov
     given clip, so this removes it for everyone who uploaded it rather than for
     whichever copy happened to be found.
     """
-    if _volume_read_json(results_volume, f"/{clip_id}.removed.json") is not None:
-        # Already gone. Idempotent and truthful rather than an error: the
-        # answer to "please remove this" is the same either way.
-        return RemovalResponse(clip_id=clip_id, removed=[], already_absent=[])
-
     job_id = f"job_{clip_id}"
+    if retention.is_removed(results_volume, clip_id):
+        # Already removed: no second charge and no second alert, but the sweep
+        # runs again. It is idempotent, and it is how anything a late writer
+        # put back after the first removal goes (job_6037...).
+        outcome = retention.delete_clip(uploads_volume, results_volume, clip_id, job_id, "")
+        return RemovalResponse(clip_id=clip_id, removed=outcome["deleted"],
+                               already_absent=outcome["already_absent"])
+
     if _volume_read_json(results_volume, f"/{job_id}.job-meta.json") is None:
         # Older lessons (and the eval clips) used other job_id shapes; find it
         # rather than leaving a live job-status record pointing at deleted bytes.
@@ -1228,13 +1308,18 @@ def remove_lesson(clip_id: str, request: RemovalRequest, http: Request) -> Remov
     except ratelimit.Limited as e:
         raise _too_many(e) from None
 
+    # Tombstone first: every writer stops at its next check from this instant.
+    # Then stop the work that is still running, then delete what exists.
+    # (delete_clip would write the tombstone itself; doing it here puts the
+    # cancel between the two.)
+    retention.write_tombstone(results_volume, clip_id, request.reason.strip(), request.relationship)
+    _cancel_inflight(job_id)
     outcome = retention.delete_clip(uploads_volume, results_volume, clip_id, job_id,
                                     request.reason.strip(), request.relationship)
-    jobstore.forget(job_id)
     _TOUCHED.pop(clip_id, None)
     # Belt and braces: /result checks the tombstone before these anyway.
     _SUCCEEDED.discard(job_id)
-    _R2_VALIDATED.discard((job_id, clip_id))
+    _R2_VALIDATED.pop((job_id, clip_id), None)
     _NOT_REMOVED.pop(job_id, None)
     print(f"[removal] {clip_id}: deleted {len(outcome['deleted'])} artifacts ({request.relationship})")
     # The owner's alert. Ids and the category only -- the free-text reason is

@@ -309,6 +309,9 @@ cv_image = (
     # The processing screen's early results (detections sidecar, counts milestone).
     .add_local_file(os.path.join(os.path.dirname(__file__), "milestones.py"),
                     remote_path="/app/milestones.py")
+    # The tombstone check every writer makes (retention.ensure_not_removed).
+    .add_local_file(os.path.join(os.path.dirname(__file__), "retention.py"),
+                    remote_path="/app/retention.py")
     # W9: the static MHR skeleton (parent indices + joint names) that
     # tools/smoothing.py needs to work in parent-local space. Same file api.py
     # reads; generated once by dump_joint_hierarchy below.
@@ -447,7 +450,8 @@ class Reconstructor:
     @modal.method()
     def run(self, clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1,
             job_id: str | None = None, retry_count: int = 0, beats_call_id: str | None = None):
-        return self._run(clip_id, fps, max_seconds, bbox_thr, job_id, retry_count, beats_call_id)
+        return self._run(clip_id=clip_id, fps=fps, max_seconds=max_seconds, bbox_thr=bbox_thr,
+                         job_id=job_id, retry_count=retry_count, beats_call_id=beats_call_id)
 
     @modal.method()
     def run_when_handed(self, token: str):
@@ -479,11 +483,28 @@ class Reconstructor:
                 return None  # the request ended without a job: refused, deduped or failed
             return self._run(**msg["job"])
 
-    def _run(self, *args, **kwargs):
-        if self.model.done() and self.model.exception() is not None:
-            # A failed load must not poison a warm container for every later job.
-            self.model = self._pool.submit(self._load_model)
-        return run_clip(*args, **kwargs, detector=self.detector, model=self.model)
+    def _run(self, clip_id: str, **kwargs):
+        import sys
+        sys.path.insert(0, "/app")
+        import retention
+
+        try:
+            # Before any GPU time is spent: a lesson removed while this job
+            # queued, or while a container warmed up for it, is never started.
+            # reload() so this container's mount also stops showing a stale
+            # snapshot of the Volume (the upload, a previous run's npz).
+            retention.ensure_not_removed(results, clip_id, reload=True)
+            if self.model.done() and self.model.exception() is not None:
+                # A failed load must not poison a warm container for every later job.
+                self.model = self._pool.submit(self._load_model)
+            return run_clip(clip_id, **kwargs, detector=self.detector, model=self.model)
+        except retention.Removed:
+            # No `failed` status: the tombstone is the only record. Whatever
+            # was written after the removal (by this run, or the dispatch that
+            # raced it) is taken back here.
+            return retention.stop_and_sweep(uploads, results, clip_id,
+                                            kwargs.get("job_id") or f"job_{clip_id}",
+                                            {RESULTS_DIR: results, UPLOADS_DIR: uploads})
 
 
 def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_thr: float = 0.1,
@@ -526,9 +547,14 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     from tools.process_clip import process_clip, save_clip_result
     sys.path.insert(0, "/app")
     import observability
+    import retention
     from milestones import build_detections, counts_milestone
 
     job_id = job_id or f"job_{clip_id}_{int(time.time())}"
+    # Before every durable write: a removal raises retention.Removed here and
+    # Reconstructor._run stops the job and sweeps (see retention.py).
+    def guard() -> None:
+        retention.ensure_not_removed(results, clip_id)
     tags = {"clip_id": clip_id, "job_id": job_id, "retry_count": retry_count}
     beats_path = f"{RESULTS_DIR}/{clip_id}.beats.json"
 
@@ -560,7 +586,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     def write_status(state: str, stage_message: str, progress, error=None):
         poll_beats()
         _write_job_status(job_id, state, stage_message, progress, retry_count, error,
-                          {k: v for k, v in milestones.items() if v is not None})
+                          {k: v for k, v in milestones.items() if v is not None}, clip_id=clip_id)
 
     def on_progress(stage: str, message: str, progress, frames_done=None, frames_total=None) -> None:
         if frames_done is not None:
@@ -569,6 +595,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
 
     def on_detections(d: dict) -> None:
         # Best-effort: a sidecar that fails to write costs the overlay, never the job.
+        guard()  # outside the try below: a removal stops the job, not just the sidecar
         try:
             doc = build_detections(d["sample_times_s"], d["raw_detections"],
                                    d["confident_track_ids"], d["frame_width"], d["frame_height"])
@@ -611,6 +638,8 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
             detector=detector,
             model=model,
         )
+    except retention.Removed:
+        raise  # not a failure: the lesson was taken down (Reconstructor._run sweeps)
     except Exception as e:  # noqa: BLE001 -- surface as a job-status failure, not a bare crash
         write_status(
             "failed", "",
@@ -643,7 +672,9 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         }
 
     out_path = f"{RESULTS_DIR}/{clip_id}.npz"
+    guard()
     save_clip_result(result, out_path)
+    guard()  # the save takes seconds; recheck before it becomes durable
     results.commit()
 
     cost = wall_s / 3600 * GPU_HOURLY_USD.get(GPU_TIER, 0.0)
@@ -661,6 +692,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         # just the three numbers above into the MotionResult.
         "track_hygiene": result.get("track_hygiene", []),
     }
+    guard()
     with open(f"{RESULTS_DIR}/{clip_id}.performance.json", "w") as f:
         json.dump(perf, f)
 
@@ -673,6 +705,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         try:
             beats_call.get()
         except Exception as e:  # noqa: BLE001 -- a beat failure is never a job failure
+            guard()  # a removal cancels the proposal; that is not a beat failure
             print(f"[beats] {clip_id}: proposal stage failed ({type(e).__name__}: {e})")
             # Warning, not error: the lesson still ships, just without proposed
             # counts. Reported anyway -- a beat stage that fails on every clip
@@ -699,6 +732,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     # retryable `export_error`. This status is the last thing run_clip writes,
     # and it is committed before the spawn, so it can never land after export's.
     write_status("processing", "Building the 3D body file", 0.97)
+    guard()
     try:
         export_call = export_clip_gltf.spawn(clip_id, job_id, retry_count)
     except Exception as e:  # noqa: BLE001 -- could not even hand over to export
@@ -923,6 +957,9 @@ gltf_image = (
     # migration step 5). Mounted alongside the assembly for the same reason.
     .add_local_file(os.path.join(os.path.dirname(__file__), "storage.py"),
                     "/app/storage.py")
+    # The tombstone check before every write, and the sweep when it fires.
+    .add_local_file(os.path.join(os.path.dirname(__file__), "retention.py"),
+                    "/app/retention.py")
     # The MotionResult assembly, so the exporter can materialise the contract
     # document once here instead of api.py rebuilding it from the npz on every
     # single request. motion_result.py reads mhr_joint_hierarchy.json from its
@@ -1005,6 +1042,7 @@ beat_image = (
                  "beat-this==1.1.0")
     .run_commands("python -c \"from beat_this.inference import load_model; load_model('final0')\"")
     .add_local_dir(BEAT_DETECT_DIR, remote_path="/app/beat_detect")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "retention.py"), "/app/retention.py")
 )
 
 
@@ -1030,14 +1068,29 @@ def propose_counts(clip_id: str) -> dict | None:
     `milestones.counts`). run_clip only collects the call before export, so the
     file is committed before anything reads it and nothing computes it twice.
     """
-    import json
-    import os
     import sys
-    from dataclasses import asdict
 
     sys.path.insert(0, "/app")
+    import retention
     from beat_detect import propose_grid
 
+    try:
+        return _propose_counts(clip_id, propose_grid)
+    except retention.Removed:
+        # The lesson was taken down: no proposal, and nothing left behind.
+        retention.stop_and_sweep(uploads, results, clip_id, None,
+                                 {RESULTS_DIR: results, UPLOADS_DIR: uploads})
+        return None
+
+
+def _propose_counts(clip_id: str, propose_grid) -> dict | None:
+    import json
+    import os
+    from dataclasses import asdict
+
+    import retention
+
+    retention.ensure_not_removed(results, clip_id, reload=True)
     upload_path = f"{UPLOADS_DIR}/{clip_id}.mp4"
     if not os.path.exists(upload_path):
         uploads.reload()  # same eventual-consistency guard run_clip uses
@@ -1061,9 +1114,11 @@ def propose_counts(clip_id: str) -> dict | None:
           + (f", warnings: {grid['warnings']}" if grid["warnings"] else ""))
     # Absent file == no proposal, which every reader treats as normal. Listed
     # in retention.clip_artifact_paths so a removal takes it with the rest.
+    retention.ensure_not_removed(results, clip_id)
     with open(f"{RESULTS_DIR}/{clip_id}.beats.json", "w") as f:
         json.dump(grid, f)
     results.commit()
+    retention.ensure_not_removed(results, clip_id)  # removed during the commit: swept by the caller
     return grid
 
 
@@ -1532,7 +1587,8 @@ def inspect_mhr_region_mapping():
 # cores measured the same -- and the second core is headroom for the Volume
 # and R2 I/O. memory: 1.25-1.33 GB peak RSS measured on a 1-dancer 45 s clip
 # and a 4-dancer clip; 3 GiB leaves room for 6 dancers at 60 s.
-@app.function(image=gltf_image, cpu=2.0, memory=3072, volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results},
+@app.function(image=gltf_image, cpu=2.0, memory=3072,
+              volumes={WEIGHTS_DIR: weights, RESULTS_DIR: results, UPLOADS_DIR: uploads},
               secrets=R2_SECRET + OBS_SECRETS, timeout=600)
 def export_clip_gltf(clip_id: str, job_id: str | None = None, retry_count: int | None = None):
     """The export stage, and -- when run_clip hands a job over (`retry_count`
@@ -1552,32 +1608,123 @@ def export_clip_gltf(clip_id: str, job_id: str | None = None, retry_count: int |
 
 def _export_and_report(clip_id: str, job_id: str | None, retry_count: int | None):
     """export_clip_gltf's body, a plain function so test_export_status.py can
-    run it without a container."""
-    if retry_count is None:
-        return _export_clip_gltf(clip_id, job_id)
+    run it without a container.
+
+    A removal stops it cleanly at any of its checks (retention.Removed): no
+    `failed` status, and whatever it had already written is swept."""
     import sys
     sys.path.insert(0, "/app")
-    import observability
+    import retention
     try:
-        out = _export_clip_gltf(clip_id, job_id)
-    except Exception as e:  # noqa: BLE001 -- a real crash in the export stage, not a pipeline_error
-        _write_job_status(job_id, "failed", "", None, retry_count,
-                          error={"code": "export_error", "message": str(e), "retryable": True})
-        observability.capture(e, "export_clip_gltf", stage="export", clip_id=clip_id,
-                              job_id=job_id, retry_count=retry_count)
-        raise
-    _write_job_status(job_id, "succeeded", "", 1.0, retry_count)
+        # Before starting work (the body reloads the mount itself).
+        retention.ensure_not_removed(results, clip_id)
+        if retry_count is None:
+            out = _export_clip_gltf(clip_id, job_id)
+        else:
+            import observability
+            try:
+                out = _export_clip_gltf(clip_id, job_id)
+            except retention.Removed:
+                raise
+            except Exception as e:  # noqa: BLE001 -- a real crash in the export stage, not a pipeline_error
+                _write_job_status(job_id, "failed", "", None, retry_count, clip_id=clip_id,
+                                  error={"code": "export_error", "message": str(e), "retryable": True})
+                observability.capture(e, "export_clip_gltf", stage="export", clip_id=clip_id,
+                                      job_id=job_id, retry_count=retry_count)
+                raise
+            _write_job_status(job_id, "succeeded", "", 1.0, retry_count, clip_id=clip_id)
+        # The last write is done. A removal that landed after the last check
+        # (between it and the commit) is caught here, and swept below.
+        retention.ensure_not_removed(results, clip_id)
+    except retention.Removed:
+        return retention.stop_and_sweep(uploads, results, clip_id, job_id or f"job_{clip_id}",
+                                        {RESULTS_DIR: results})
+    try:
+        _prune_old_versions(clip_id, out)
+    except Exception as e:  # noqa: BLE001 -- the job already succeeded; an old version only costs storage
+        print(f"[versions] could not prune superseded versions of {clip_id}: {e}")
     return out
 
 
+# How long a superseded GLB / MotionResult version outlives the re-export that
+# replaced it. Longer than api.py's _R2_VALIDATED_S (60 s), so no web replica
+# is still redirecting to the old MotionResult when it goes, and long enough
+# for a lesson opened just before the re-export to finish loading its GLBs.
+OLD_VERSION_GRACE_S = 90
+
+
+def _prune_old_versions(clip_id: str, out: dict) -> None:
+    """After a re-export: delete the versions it superseded -- on the Volume
+    and in R2 -- now that the new ones are published, the MotionResult points
+    at them and the status says succeeded. Nothing to do (and no wait) on a
+    first export. Best-effort: a leftover old version costs storage only, and
+    removal deletes every version by prefix anyway."""
+    import sys
+    import time
+    sys.path.insert(0, "/app")
+    import retention
+    import storage
+
+    keep = set(out.get("glb_names") or [])
+    published = out.get("r2_published") or []
+    # Only once the document that names the NEW versions is the one served --
+    # otherwise the old document is still live and still needs its old GLBs.
+    if not out.get("motion_result_materialised") or (
+            storage.enabled() and storage.motion_result_key(clip_id) not in published):
+        return
+    old_volume = [e.path.lstrip("/") for e in results.listdir("/")
+                  if e.path.lstrip("/").startswith(f"{clip_id}_track")
+                  and e.path.endswith(".glb") and e.path.lstrip("/") not in keep]
+    r2_keep = {storage.glb_key(n) for n in keep} | set(published) | {storage.motion_result_key(clip_id)}
+    try:
+        old_r2 = [k for p in storage.clip_prefixes(clip_id)[1:] for k in storage.list_keys(p)
+                  if k not in r2_keep] if storage.enabled() else []
+    except Exception as e:  # noqa: BLE001
+        print(f"[versions] could not list R2 for {clip_id}: {e}")
+        old_r2 = []
+    if not keep or not (old_volume or old_r2):
+        return
+    time.sleep(OLD_VERSION_GRACE_S)
+    for name in old_volume:
+        retention.remove_if_present(results, f"/{name}")
+    try:
+        gone = storage.prune_versions(clip_id, r2_keep) if storage.enabled() else []
+    except Exception as e:  # noqa: BLE001
+        print(f"[versions] could not prune R2 for {clip_id}: {e}")
+        gone = []
+    print(f"[versions] {clip_id}: removed {len(old_volume)} superseded Volume GLBs, "
+          f"{len(gone)} superseded R2 objects")
+
+
+# clip_id -> monotonic time its tombstone was last confirmed absent (this container).
+_CLEARED: dict[str, float] = {}
+_PROGRESS_CHECK_S = 5.0
+
+
 def _write_job_status(job_id: str, state: str, stage_message: str, progress, retry_count: int,
-                      error=None, milestones: dict | None = None) -> None:
+                      error=None, milestones: dict | None = None, clip_id: str | None = None) -> None:
     """One job-status.schema.json document to the results Volume, committed.
 
     Shared by run_clip (every stage up to export) and export_clip_gltf (the
     terminal write), so the two containers cannot drift on the document shape.
+    Refuses (retention.Removed) once the lesson's tombstone exists: a status
+    written after a removal is how job_6037 came back as `failed`, retryable.
     """
     import json
+    import sys
+    import time
+    sys.path.insert(0, "/app")
+    import retention
+    clip_id = clip_id or job_id.removeprefix("job_")
+    # A check is one Volume read (~130 ms measured in-container), and progress
+    # is written every few frames -- ~12 s of L40S per 60 s clip if every write
+    # checked. So a progress write re-checks at most every _PROGRESS_CHECK_S; a
+    # terminal write always does. A progress document that slips through that
+    # window is swept by the next check, which comes within the window.
+    now = time.monotonic()
+    if state not in ("queued", "processing") or now - _CLEARED.get(clip_id, -1e9) >= _PROGRESS_CHECK_S:
+        retention.ensure_not_removed(results, clip_id)
+        _CLEARED[clip_id] = now
     doc = {
         "schema_version": "1.0.0",
         "job_id": job_id,
@@ -1636,6 +1783,7 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
     a tolerant matcher instead of a hardcoded naming guess.
     """
     import os
+    import shutil
     import sys
 
     import numpy as np
@@ -1659,6 +1807,16 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
     # visible, and exporting it shipped every pre-hygiene track again
     # (345b..., 2026-09-24: 4 GLBs for 1 dancer).
     results.reload()
+    sys.path.insert(0, "/app")
+    import retention
+    import storage
+
+    def guard() -> None:
+        """Before every durable write: a removal stops the export here
+        (retention.Removed; _export_and_report sweeps)."""
+        retention.ensure_not_removed(results, clip_id)
+
+    guard()
     print(f"loading {npz_path}")
     data = np.load(npz_path, allow_pickle=True)
     if bool(data["refused"]):
@@ -1791,7 +1949,9 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
             # present it as this dancer's measured proportions.
             print(f"track {track_id}: no shape_params in the npz, exporting the mean MHR body")
 
-        out_path = f"{RESULTS_DIR}/{clip_id}_track{track_id}.glb"
+        # Built in /tmp, not on the mount: Modal commits a mounted Volume in the
+        # background, and a half-rewritten GLB must never be what lands there.
+        out_path = f"/tmp/{clip_id}_track{track_id}.glb"
         pym_geo.Character.save_gltf_from_skel_states(out_path, character, fps, skel_states)
         print(f"SAVED {out_path} (single mesh, pre-region-split)")
 
@@ -1829,6 +1989,14 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
         # pymomentum always writes STEP; nothing downstream can ask it not to.
         # See _rewrite_interpolation_linear for the measurements behind LINEAR.
         interp = _rewrite_interpolation_linear(out_path)
+        # Named after its own bytes (storage.versioned_name), so a re-export is
+        # a new asset id and a new URL -- never a year-cached stale GLB under
+        # the old one. Identical bytes keep the identical name.
+        guard()
+        with open(out_path, "rb") as f:
+            glb_name = storage.versioned_name(f"{clip_id}_track{track_id}.glb", f.read())
+        shutil.move(out_path, f"{RESULTS_DIR}/{glb_name}")
+        out_path = f"{RESULTS_DIR}/{glb_name}"
         out_paths[track_id] = out_path
         print(f"SAVED {out_path} (region-split, {interp['n_rewritten']}/{interp['n_samplers']} "
               f"samplers rewritten to {interp['interpolation']})")
@@ -1854,6 +2022,7 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
         # estimated from well-observed frames" -- this is the first time that is true.
         "shape_params": shape_vectors_out,
     }
+    guard()
     with open(f"{RESULTS_DIR}/{clip_id}.export-manifest.json", "w") as f:
         json.dump(manifest, f)
 
@@ -1892,6 +2061,8 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
         if not check.valid:
             raise ValueError(f"contract validation failed: {check.errors[:5]}")
         gz = gzip.compress(json.dumps(doc, separators=(",", ":")).encode(), 6)
+        mr_version = storage.content_version(gz)
+        guard()
         with open(f"{RESULTS_DIR}/{clip_id}.motion-result.json.gz", "wb") as f:
             f.write(gz)
         validated = doc["job_id"]
@@ -1901,8 +2072,9 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
         # from it, exactly as it did before. Loud, though -- a lesson stuck on
         # the fallback path is one the sweeper will never reclaim space for.
         print(f"WARNING: could not materialise MotionResult for {clip_id}: {e}")
-        materialised, validated = False, None
+        materialised, validated, mr_version = False, None, None
 
+    guard()
     results.commit()
 
     # Publish the delivered bytes to R2 (infrastructure.md decision 3, migration
@@ -1920,19 +2092,33 @@ def _export_clip_gltf(clip_id: str, job_id: str | None = None):
     # any object R2 does not have (no range requests on that path, but a working
     # lesson beats a failed one). Loud, though -- a lesson stuck on the fallback
     # is one whose video cannot be scrubbed.
-    published = _publish_to_r2(clip_id, list(out_paths.values()), validated)
+    guard()
+    published = _publish_to_r2(clip_id, list(out_paths.values()), validated, mr_version)
 
     return {"clip_id": clip_id, "glb_paths": out_paths, "n_dancers": len(confident_track_ids),
+            "glb_names": [os.path.basename(p) for p in out_paths.values()],
+            "motion_result_version": mr_version,
             "motion_result_materialised": materialised, "r2_published": published}
 
 
-def _publish_to_r2(clip_id: str, glb_paths: list[str], validated: str | None) -> list[str]:
+def _publish_to_r2(clip_id: str, glb_paths: list[str], validated: str | None,
+                   mr_version: str | None = None) -> list[str]:
     """Upload this lesson's GLBs and MotionResult to R2. Returns the keys written.
 
     `validated` is the job_id the materialised MotionResult was contract-
-    validated for, or None when there is none to publish."""
+    validated for, or None when there is none to publish.
+
+    The MotionResult goes up twice: once immutable under its version (what a
+    browser is redirected to), then as the "latest" copy whose `version`
+    metadata points at it (what api.py heads and reads). The latest copy is
+    written LAST, so it never names a version that is not there yet -- that
+    write is the moment the lesson switches to the new export.
+
+    A removal between the check before this and the end of it is caught by the
+    re-check after: the keys just written are deleted by the caller's sweep."""
     import sys
     sys.path.insert(0, "/app")
+    import retention
     import storage
 
     if not storage.enabled():
@@ -1946,19 +2132,23 @@ def _publish_to_r2(clip_id: str, glb_paths: list[str], validated: str | None) ->
             written.append(storage.put_file(
                 storage.glb_key(os.path.basename(path)), path, "model/gltf-binary"))
         if validated:
+            mr_path = f"{RESULTS_DIR}/{clip_id}.motion-result.json.gz"
+            # Stored gzipped; declaring the encoding is what lets a browser
+            # (and api.py's passthrough) decompress it transparently instead
+            # of handing the caller a bag of bytes.
+            gz = {"content_encoding": "gzip"}
+            if mr_version:
+                written.append(storage.put_file(
+                    storage.motion_result_key(clip_id, mr_version), mr_path, "application/json",
+                    metadata={"validated": validated}, **gz))
             written.append(storage.put_file(
-                storage.motion_result_key(clip_id),
-                f"{RESULTS_DIR}/{clip_id}.motion-result.json.gz",
-                "application/json",
-                # Stored gzipped; declaring the encoding is what lets a browser
-                # (and api.py's passthrough) decompress it transparently instead
-                # of handing the caller a bag of bytes.
-                content_encoding="gzip",
-                metadata={"validated": validated},
-            ))
+                storage.motion_result_key(clip_id), mr_path, "application/json",
+                metadata={"validated": validated, **({"version": mr_version} if mr_version else {})},
+                cache_control=storage.MUTABLE_CACHE_CONTROL, **gz))
         print(f"[r2] published {len(written)} objects for {clip_id}")
     except Exception as e:  # noqa: BLE001 -- never fail a good job on a storage blip
         print(f"WARNING: R2 publish incomplete for {clip_id} ({len(written)} written): {e}")
+    retention.ensure_not_removed(results, clip_id)
     return written
 
 
@@ -1987,7 +2177,7 @@ def sweep_expired(dry_run: bool = False):
 
 
 def _sweep_expired(dry_run: bool):
-    """Retention, on a clock. Two jobs, both of which only ever delete.
+    """Retention, on a clock. Three jobs, all of which only ever delete.
 
     **1. Reap superseded npz files.** A clip whose `.motion-result.json.gz`
     exists has nothing left that reads its npz, so the npz goes. Deliberately
@@ -2042,31 +2232,43 @@ def _sweep_expired(dry_run: bool):
     # An npz is superseded once its replacement exists; skip the ones whose
     # whole lesson is about to go anyway.
     reap_npz = sorted((have_npz & materialised) - removed - set(expired))
+    # **3. Re-sweep removed lessons that something wrote to after removal**
+    # (job_6037...). The writers now stop at the tombstone and sweep up after
+    # themselves; this catches the rest (a cancelled container, a crash between
+    # a write and its re-check) within a day instead of whenever someone looks.
+    # Volume-only on purpose -- one listing, no per-lesson R2 call; the R2 side
+    # of a Volume leftover goes with it, and audit_removed.py checks R2 too.
+    uploads_listing = {e.path.lstrip("/") for e in uploads.listdir("/")}
+    leftovers = sorted(c for c in removed if f"{c}.mp4" in uploads_listing or any(
+        n != f"{c}.removed.json" and n.startswith((f"{c}.", f"{c}_track", f"job_{c}."))
+        for n in listing))
 
     print(f"sweep: {len(reap_npz)} superseded npz, {len(expired)} lessons past "
           f"{retention.TTL_DAYS}d since last open, {len(live) - len(expired)} kept "
           f"(dry_run={dry_run})")
     for clip_id, age in expired.items():
         print(f"  expired {clip_id}  ({age}d since last open)")
+    for clip_id in leftovers:
+        print(f"  removed {clip_id} has files written after its removal")
 
     events = _rollup_events(dry_run)
     if dry_run:
         return {"dry_run": True, "would_reap_npz": reap_npz, "events": events,
-                "would_expire": sorted(expired), "kept": len(live) - len(expired)}
+                "would_expire": sorted(expired), "would_resweep": leftovers,
+                "kept": len(live) - len(expired)}
 
     for clip_id in reap_npz:
-        try:
-            results.remove_file(f"/{clip_id}.npz")
-        except FileNotFoundError:
-            pass
+        retention.remove_if_present(results, f"/{clip_id}.npz")
     for clip_id in expired:
         # The same deletion path a takedown uses, on purpose: if these two ever
         # disagree about what a lesson is made of, the weaker one is a leak.
         retention.delete_clip(uploads, results, clip_id, f"job_{clip_id}", "expired")
+    for clip_id in leftovers:
+        retention.delete_clip(uploads, results, clip_id, f"job_{clip_id}", "")  # keeps the tombstone
     # No commit(): every delete above went through the client API and is
     # already durable. See retention.delete_clip.
     return {"dry_run": False, "reaped_npz": reap_npz, "events": events,
-            "expired": sorted(expired), "kept": len(live) - len(expired)}
+            "expired": sorted(expired), "resweep": leftovers, "kept": len(live) - len(expired)}
 
 
 def _rollup_events(dry_run: bool) -> dict:

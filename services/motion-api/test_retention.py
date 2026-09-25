@@ -42,6 +42,10 @@ def _removal(api, relationship="i_am_in_it", reason=""):
     return api.RemovalRequest(relationship=relationship, reason=reason)
 
 
+class InvalidError(Exception):
+    """Stands in for modal.exception.InvalidError."""
+
+
 class FakeVolume:
     """Enough of modal.Volume for these handlers: the parts that move bytes."""
 
@@ -79,7 +83,10 @@ class FakeVolume:
 
     def remove_file(self, path, recursive=False):
         if path not in self.files:
-            raise FileNotFoundError(path)
+            # What the real client raises for a missing file -- NOT
+            # FileNotFoundError (measured, modal 1.5.5). Faking the friendlier
+            # one hid a removal that aborted at the first absent artifact.
+            raise InvalidError("No such file or directory.")
         del self.files[path]
 
     def commit(self):
@@ -108,8 +115,12 @@ def api(monkeypatch):
     fake_modal.Dict = types.SimpleNamespace(from_name=lambda *a, **k: handoff)
     fake_modal.Cls = types.SimpleNamespace(
         from_name=lambda app, name, **k: lambda: types.SimpleNamespace(
-            run=types.SimpleNamespace(spawn=lambda **kw: spawned.append(kw)),
+            run=types.SimpleNamespace(spawn=lambda **kw: spawned.append(kw) or types.SimpleNamespace(
+                object_id=f"fc-run-{len(spawned)}")),
             run_when_handed=types.SimpleNamespace(spawn=prewarmed.append)))
+    cancelled: list[str] = []
+    fake_modal.FunctionCall = types.SimpleNamespace(
+        from_id=lambda call_id: types.SimpleNamespace(cancel=lambda: cancelled.append(call_id)))
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
     for mod in ("api", "retention", "motion_result", "fingerprint"):
         sys.modules.pop(mod, None)
@@ -120,6 +131,7 @@ def api(monkeypatch):
     api_mod._TOUCHED.clear()
     api_mod._spawned = spawned
     api_mod._prewarmed, api_mod._handoff_dict = prewarmed, handoff
+    api_mod._cancelled = cancelled
     return api_mod
 
 
@@ -525,3 +537,345 @@ def test_finished_status_rechecks_removal_after_the_cache_window(api, monkeypatc
     with pytest.raises(HTTPException) as e:
         api.get_job_status("job_abc")
     assert e.value.status_code == 410
+
+
+# --------------------------------------------------------------------------
+# job_6037: nothing may write a lesson after its removal
+# --------------------------------------------------------------------------
+
+class FakeR2:
+    """Enough of the S3 client for storage.list_keys / delete / head."""
+
+    def __init__(self, keys=()):
+        self.objects = {k: {} for k in keys}
+
+    def get_paginator(self, _name):
+        r2 = self
+        return types.SimpleNamespace(paginate=lambda Bucket, Prefix: [
+            {"Contents": [{"Key": k} for k in sorted(r2.objects) if k.startswith(Prefix)]}])
+
+    def delete_object(self, Bucket, Key):
+        self.objects.pop(Key, None)
+
+    def head_object(self, Bucket, Key):
+        if Key not in self.objects:
+            raise FileNotFoundError(Key)
+        return {"Metadata": self.objects[Key]}
+
+
+@pytest.fixture()
+def r2(monkeypatch):
+    import storage
+    fake = FakeR2()
+    monkeypatch.setattr(storage, "enabled", lambda: True)
+    monkeypatch.setattr(storage, "client", lambda: fake)
+    monkeypatch.setattr(storage, "bucket", lambda: "b")
+    return fake
+
+
+def _late_writes(api, clip_id, job_id):
+    """What the worker (and the racing dispatch) wrote AFTER job_6037's removal."""
+    api.uploads_volume.files[f"/{clip_id}.mp4"] = b"video-bytes"
+    r = api.results_volume.files
+    r[f"/{clip_id}.npz"] = b"npz"
+    r[f"/{clip_id}.performance.json"] = b"{}"
+    r[f"/{clip_id}_track1.0123456789ab.glb"] = b"glb"
+    r[f"/{job_id}.job-meta.json"] = json.dumps({"clip_id": clip_id}).encode()
+    r[f"/{job_id}.job-status.json"] = b"{}"
+
+
+def test_delete_clip_is_idempotent_and_takes_back_a_late_write(api):
+    import retention
+    _seed_lesson(api, "abc", "job_abc")
+    first = retention.delete_clip(api.uploads_volume, api.results_volume, "abc", "job_abc",
+                                  "mine", "i_am_in_it")
+    tomb = api.results_volume.files["/abc.removed.json"]
+    assert first["deleted"]
+
+    _late_writes(api, "abc", "job_abc")
+    again = retention.delete_clip(api.uploads_volume, api.results_volume, "abc", "job_abc", "")
+    assert [p for p in api.results_volume.files if "abc" in p] == ["/abc.removed.json"]
+    assert api.uploads_volume.files == {}
+    assert "/abc.npz" in again["deleted"] and "/abc.mp4" in again["deleted"]
+    assert api.results_volume.files["/abc.removed.json"] == tomb, \
+        "a re-sweep must keep the original tombstone (its time and reason are the record)"
+
+    assert retention.delete_clip(api.uploads_volume, api.results_volume, "abc", "job_abc", "")["deleted"] == []
+
+
+def test_a_second_removal_request_sweeps_what_came_back(api):
+    _seed_lesson(api, "abc", "job_abc")
+    api.remove_lesson("abc", _removal(api), NO_REQUEST)
+    _late_writes(api, "abc", "job_abc")
+    again = api.remove_lesson("abc", _removal(api), NO_REQUEST)
+    assert "/abc.mp4" in again.removed
+    assert [p for p in api.results_volume.files if "abc" in p] == ["/abc.removed.json"]
+
+
+def test_removal_writes_the_tombstone_before_deleting(api, monkeypatch):
+    """So a writer checking between two deletions already sees it."""
+    import retention
+    _seed_lesson(api, "abc", "job_abc")
+    seen = []
+    real = api.uploads_volume.remove_file
+    monkeypatch.setattr(api.uploads_volume, "remove_file",
+                        lambda p, **k: seen.append("/abc.removed.json" in api.results_volume.files) or real(p))
+    retention.delete_clip(api.uploads_volume, api.results_volume, "abc", "job_abc", "", "other")
+    assert seen == [True]
+
+
+def test_removal_deletes_every_version_in_r2_and_on_the_volume(api, r2):
+    _seed_lesson(api, "abc", "job_abc")
+    api.results_volume.files["/abc_track1.0123456789ab.glb"] = b"v1"
+    api.results_volume.files["/abc_track1.ba9876543210.glb"] = b"v2"
+    r2.objects.update({k: {} for k in (
+        "video/abc.mp4", "glb/abc_track1.glb", "glb/abc_track1.0123456789ab.glb",
+        "glb/abc_track1.ba9876543210.glb", "motion-result/abc.json.gz",
+        "motion-result/abc.0123456789ab.json.gz", "glb/other_track1.glb", "video/abcd.mp4")})
+    out = api.remove_lesson("abc", _removal(api), NO_REQUEST)
+    assert sorted(r2.objects) == ["glb/other_track1.glb", "video/abcd.mp4"], "another lesson was touched"
+    assert "r2:motion-result/abc.0123456789ab.json.gz" in out.removed
+    assert not [p for p in api.results_volume.files if p.startswith("/abc_track")]
+
+
+def test_removal_forgets_the_job_rows(api, monkeypatch):
+    import jobstore
+    forgot = []
+    monkeypatch.setattr(jobstore, "forget", lambda job_id, clip_id=None: forgot.append((job_id, clip_id)))
+    _seed_lesson(api, "abc", "job_abc")
+    api.remove_lesson("abc", _removal(api), NO_REQUEST)
+    assert forgot == [("job_abc", "abc")]
+
+
+def test_removal_cancels_the_running_calls(api):
+    """The GPU run and the beat proposal are cancelled and an unclaimed
+    hand-off is dropped, instead of paying for work every write of which the
+    tombstone would refuse."""
+    api._dispatch_run(types.SimpleNamespace(state=types.SimpleNamespace()),
+                      clip_id="abc", job_id="job_abc", beats_call_id="fc-beats")
+    _seed_lesson(api, "abc", "job_abc")
+    api.remove_lesson("abc", _removal(api), NO_REQUEST)
+    assert api._cancelled == ["fc-run-1", "fc-beats"]
+    assert "calls:job_abc" not in api._handoff_dict
+
+
+def test_removal_drops_a_handoff_the_container_has_not_picked_up(api):
+    state = types.SimpleNamespace(gpu_token="tok", gpu_call_id="fc-warm")
+    api._dispatch_run(types.SimpleNamespace(state=state), clip_id="abc", job_id="job_abc",
+                      beats_call_id=None)
+    assert "tok" in api._handoff_dict
+    _seed_lesson(api, "abc", "job_abc")
+    api.remove_lesson("abc", _removal(api), NO_REQUEST)
+    assert "tok" not in api._handoff_dict and api._cancelled == ["fc-warm"]
+
+
+def test_link_dispatch_that_lost_a_race_with_removal_leaves_nothing(api, tmp_path):
+    """A link's clip_id is derived, so it can be removed while the request is
+    still downloading. The dispatch must not leave the bytes it just stored
+    (the job_6037 shape) and must not spend a GPU."""
+    from fastapi import HTTPException
+    import retention
+    clip = tmp_path / "c.mp4"
+    clip.write_bytes(b"video")
+    retention.write_tombstone(api.results_volume, "linked", "", "i_am_in_it")
+    with pytest.raises(HTTPException) as e:
+        api._store_and_dispatch(str(clip), "linked", {"sha256": "0" * 64, "frames": 0}, NO_REQUEST,
+                                source_key="tiktok:1")
+    assert e.value.status_code == 410
+    assert api._spawned == [] and api.uploads_volume.files == {}
+    assert [p for p in api.results_volume.files if "linked" in p] == ["/linked.removed.json"]
+    assert retention.read_index(api.results_volume) == []
+
+
+def test_status_mirror_does_not_resurrect_a_removed_jobs_row(api, monkeypatch):
+    import jobstore
+    import retention
+    writes = []
+    monkeypatch.setattr(jobstore, "postgres_enabled", lambda: True)
+    monkeypatch.setattr(jobstore, "_pg_read", lambda job_id: None)   # forget deleted it
+    monkeypatch.setattr(jobstore, "_pg_write", lambda *a, **k: writes.append(a))
+    api.results_volume.files["/job_abc.job-status.json"] = json.dumps({
+        "schema_version": "1.0.0", "job_id": "job_abc", "state": "failed", "stage_message": "",
+        "progress": None, "retry_count": 0,
+        "error": {"code": "export_error", "message": "x", "retryable": True}}).encode()
+    retention.write_tombstone(api.results_volume, "abc", "", "other")
+    jobstore.read_status(api.results_volume, "job_abc", lambda j: "abc")
+    assert writes == [], "a removed job's row was written back"
+
+
+def test_last_access_is_not_recorded_after_a_removal(api):
+    import retention
+    retention.write_tombstone(api.results_volume, "abc", "", "other")
+    api._touch("abc")
+    assert "/abc.last-access.json" not in api.results_volume.files
+
+
+# --- the workers (modal_app), against a Volume whose mount and client agree --
+
+class DirVolume:
+    """A Volume that is both a mount (a real directory the worker writes to
+    through open()) and a client (read_file_into_fileobj/remove_file), backed
+    by the same bytes -- which is what the tombstone check relies on."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        root.mkdir(parents=True, exist_ok=True)
+
+    def read_file_into_fileobj(self, path, buf):
+        p = self.root / path.lstrip("/")
+        if not p.exists():
+            raise FileNotFoundError(path)
+        buf.write(p.read_bytes())
+
+    def listdir(self, path, **k):
+        return [types.SimpleNamespace(path=p.name, mtime=0) for p in self.root.iterdir()]
+
+    def remove_file(self, path, **k):
+        p = self.root / path.lstrip("/")
+        if not p.exists():
+            raise InvalidError("No such file or directory.")  # as FakeVolume
+        p.unlink()
+
+    def batch_upload(self, force=False):
+        vol = self
+
+        class _Batch:
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, *a):
+                return False
+
+            def put_file(self_inner, local, remote):
+                (vol.root / remote.lstrip("/")).write_bytes(Path(local).read_bytes())
+
+        return _Batch()
+
+    def commit(self):
+        pass
+
+    def reload(self):
+        pass
+
+    def names(self):
+        return sorted(p.name for p in self.root.iterdir())
+
+
+@pytest.fixture()
+def worker(monkeypatch, tmp_path):
+    import modal_app
+    results, uploads = DirVolume(tmp_path / "results"), DirVolume(tmp_path / "uploads")
+    monkeypatch.setattr(modal_app, "results", results)
+    monkeypatch.setattr(modal_app, "uploads", uploads)
+    monkeypatch.setattr(modal_app, "RESULTS_DIR", str(results.root))
+    monkeypatch.setattr(modal_app, "UPLOADS_DIR", str(uploads.root))
+    modal_app._test_volumes = (results, uploads)
+    return modal_app
+
+
+def test_job_status_is_never_written_for_a_removed_lesson(worker):
+    import retention
+    results, _ = worker._test_volumes
+    worker._write_job_status("job_abc", "processing", "", 0.5, 0, clip_id="abc")
+    assert "job_abc.job-status.json" in results.names()
+    retention.write_tombstone(results, "abc", "", "other")
+    with pytest.raises(retention.Removed):
+        worker._write_job_status("job_abc", "failed", "", None, 0, clip_id="abc",
+                                 error={"code": "export_error", "message": "x", "retryable": True})
+    assert json.loads((results.root / "job_abc.job-status.json").read_text())["state"] == "processing"
+
+
+def test_beat_proposal_stops_at_the_tombstone(worker):
+    """Before starting, and again before its one write."""
+    import dataclasses
+    import retention
+    results, uploads = worker._test_volumes
+    (uploads.root / "abc.mp4").write_bytes(b"v")
+
+    @dataclasses.dataclass
+    class Grid:
+        seconds_per_count: float = 0.5
+        bpm: float = 120.0
+        count_one_s: float = 0.0
+        confidence: float = 1.0
+        warnings: tuple = ()
+
+    def removed_while_listening(path):
+        retention.write_tombstone(results, "abc", "", "other")  # the takedown lands mid-proposal
+        return Grid()
+
+    with pytest.raises(retention.Removed):
+        worker._propose_counts("abc", removed_while_listening)
+    assert "abc.beats.json" not in results.names()
+    with pytest.raises(retention.Removed):
+        worker._propose_counts("abc", lambda p: pytest.fail("started work on a removed lesson"))
+
+
+def test_worker_sweep_takes_back_uncommitted_local_writes(worker):
+    """A file written through the mount but not yet committed would be
+    committed by Modal at container exit -- after the server-side sweep -- so
+    the worker deletes its own local writes first."""
+    import retention
+    results, uploads = worker._test_volumes
+    retention.write_tombstone(results, "abc", "", "other")
+    for name in ("abc.npz", "abc.performance.json", "job_abc.job-status.json", "abc_track1.0123456789ab.glb"):
+        (results.root / name).write_bytes(b"late")
+    (uploads.root / "abc.mp4").write_bytes(b"v")
+    out = retention.stop_and_sweep(uploads, results, "abc", "job_abc",
+                                   {str(results.root): results, str(uploads.root): uploads})
+    assert out["removed"] is True
+    assert results.names() == ["abc.removed.json"] and uploads.names() == []
+
+
+def test_reexport_prunes_superseded_versions_and_keeps_the_new_ones(worker, r2, monkeypatch):
+    results, _ = worker._test_volumes
+    monkeypatch.setattr(worker, "OLD_VERSION_GRACE_S", 0)
+    for name in ("abc_track1.glb", "abc_track1.0123456789ab.glb", "abc_track1.ba9876543210.glb",
+                 "other_track1.glb"):
+        (results.root / name).write_bytes(b"x")
+    r2.objects.update({k: {} for k in (
+        "video/abc.mp4", "glb/abc_track1.glb", "glb/abc_track1.0123456789ab.glb",
+        "glb/abc_track1.ba9876543210.glb", "motion-result/abc.json.gz",
+        "motion-result/abc.0123456789ab.json.gz", "motion-result/abc.ba9876543210.json.gz")})
+    new = ["glb/abc_track1.ba9876543210.glb", "motion-result/abc.ba9876543210.json.gz",
+           "motion-result/abc.json.gz"]
+    worker._prune_old_versions("abc", {"glb_names": ["abc_track1.ba9876543210.glb"],
+                                       "motion_result_materialised": True, "r2_published": new})
+    assert results.names() == ["abc_track1.ba9876543210.glb", "other_track1.glb"]
+    assert sorted(r2.objects) == sorted(new + ["video/abc.mp4"])
+
+
+def test_no_pruning_while_the_old_document_is_still_the_one_served(worker, r2, monkeypatch):
+    """If the new MotionResult did not reach R2, the old one still names the
+    old GLBs -- they must stay."""
+    results, _ = worker._test_volumes
+    monkeypatch.setattr(worker, "OLD_VERSION_GRACE_S", 0)
+    (results.root / "abc_track1.glb").write_bytes(b"x")
+    r2.objects["glb/abc_track1.glb"] = {}
+    worker._prune_old_versions("abc", {"glb_names": ["abc_track1.ba9876543210.glb"],
+                                       "motion_result_materialised": True, "r2_published": []})
+    assert "abc_track1.glb" in results.names() and "glb/abc_track1.glb" in r2.objects
+
+
+# --- versioned asset names ----------------------------------------------------
+
+def test_versioned_name_is_stable_for_identical_bytes_and_changes_with_them():
+    import storage
+    a = storage.versioned_name("abc_track1.glb", b"glb-bytes")
+    assert a == storage.versioned_name("abc_track1.glb", b"glb-bytes")
+    assert a != storage.versioned_name("abc_track1.glb", b"glb-bytes!")
+    assert a.startswith("abc_track1.") and a.endswith(".glb")
+    # The versioned name is still an asset id the API resolves to its lesson.
+    assert storage.clip_id_for_asset(a) == "abc"
+    assert storage.key_for_asset(a) == f"glb/{a}"
+
+
+def test_result_redirect_follows_the_version_and_old_lessons_fall_back(api, monkeypatch, r2):
+    """The browser is sent to the immutable versioned MotionResult; a lesson
+    exported before versioning (no `version` metadata) keeps its old key."""
+    monkeypatch.setattr(api.storage, "url_for", lambda key: f"https://r2.example/{key}")
+    r2.objects["motion-result/new.json.gz"] = {"validated": "job_new", "version": "0123456789ab"}
+    r2.objects["motion-result/old.json.gz"] = {"validated": "job_old"}
+    assert api._validated_r2_url("job_new", "new") == \
+        "https://r2.example/motion-result/new.0123456789ab.json.gz"
+    assert api._validated_r2_url("job_old", "old") == "https://r2.example/motion-result/old.json.gz"
