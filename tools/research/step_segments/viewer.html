@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Step boundaries</title>
+<style>
+:root{--bg:#111;--fg:#eee;--mut:#999;--acc:#E8952F;--chunk:#2b6;--line:#444}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif;padding:12px 16px}
+select,button{font:inherit;background:#222;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+.top{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.wrap{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:16px}
+@media(max-width:800px){.wrap{grid-template-columns:1fr}}
+video{width:100%;max-height:42vh;background:#000;border-radius:8px}
+.list{overflow-x:auto}
+#tl{position:relative;height:84px;background:#1a1a1a;border-radius:6px;margin:8px 0;cursor:pointer;overflow:hidden}
+#tl canvas{position:absolute;inset:0;width:100%;height:100%}
+#now{font-variant-numeric:tabular-nums;color:var(--mut)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+td,th{border-bottom:1px solid #2a2a2a;padding:3px 6px;text-align:left;vertical-align:top}
+tr.chunk td{background:#16241b;color:#8d8}
+tr.cur td{background:#3a2a12}
+tr{cursor:pointer}
+.list{max-height:72vh;overflow:auto}
+.poses{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.poses figure{margin:0;text-align:center;font-size:11px;color:var(--mut)}
+.poses canvas{width:120px;height:150px;background:#000;border-radius:4px}
+</style></head><body>
+<div class="top">
+  <select id="lesson"></select>
+  <button id="play">Play</button>
+  <label><input type="checkbox" id="loop" checked> loop selected step</label>
+  <select id="rate"><option>1</option><option>0.75</option><option selected>0.5</option><option>0.25</option></select>
+  <span id="now"></span>
+</div>
+<div class="wrap">
+  <div>
+    <video id="v" playsinline muted preload="auto"></video>
+    <div id="tl"><canvas id="c"></canvas></div>
+    <div id="info" style="color:var(--mut);font-size:12px"></div>
+    <div class="poses" id="poses"></div>
+  </div>
+  <div class="list"><table id="tab"></table></div>
+</div>
+<script>
+const DATA = /*DATA*/null;
+const V = document.getElementById('v'), C = document.getElementById('c'), T = document.getElementById('tab');
+const sel = document.getElementById('lesson');
+let L = null, cur = null, dur = 1;
+for (const k of Object.keys(DATA)) sel.add(new Option(k + ' — ' + DATA[k].job_id.slice(0, 12), k));
+sel.onchange = () => load(sel.value);
+document.getElementById('rate').onchange = e => V.playbackRate = +e.target.value;
+document.getElementById('play').onclick = () => V.paused ? V.play() : V.pause();
+
+function load(k) {
+  L = DATA[k]; cur = null;
+  V.src = 'https://stepwise.sreshta-talluri.workers.dev/api/jobs/' + L.job_id + '/video';
+  V.playbackRate = +document.getElementById('rate').value;
+  V.onloadedmetadata = () => { dur = V.duration; draw(); };
+  const a = L.alignment;
+  document.getElementById('info').textContent =
+    `${L.bpm.toFixed(1)} BPM · ${L.steps.length} steps · ${L.chunks.length} chunks · energy by count phase (0=count, 4=and): ${a.fold_pct.join(' ')}`;
+  let h = '<tr><th>#</th><th>time</th><th>counts</th><th>leads / direction</th><th>whole body</th><th>quality</th><th>cut</th></tr>';
+  L.chunks.forEach((c, ci) => {
+    h += `<tr class="chunk" data-c="${ci}"><td colspan="7">Chunk ${ci + 1} · counts ${c.counts} · ${c.start_s.toFixed(2)}–${c.end_s.toFixed(2)} s</td></tr>`;
+    for (const si of c.steps) {
+      const s = L.steps[si];
+      h += `<tr data-s="${si}"><td>${si + 1}</td><td>${s.start_s.toFixed(2)}–${s.end_s.toFixed(2)}</td><td>${s.counts}</td>` +
+        `<td>${s.moves.join('; ') || '—'}${s.uncertain_parts.length ? ' <i>(unsure: ' + s.uncertain_parts.join(', ') + ')</i>' : ''}</td>` +
+        `<td>${s.whole_body.join(', ') || ''}</td><td>${s.quality}</td><td>${s.end_cue.toFixed(2)}</td></tr>`;
+    }
+  });
+  T.innerHTML = h;
+  T.onclick = e => {
+    const tr = e.target.closest('tr'); if (!tr) return;
+    if (tr.dataset.s) pick({ a: L.steps[+tr.dataset.s].start_s, b: L.steps[+tr.dataset.s].end_s, row: tr });
+    if (tr.dataset.c) { const c = L.chunks[+tr.dataset.c]; pick({ a: c.start_s, b: c.end_s, row: tr }); poses(c); }
+  };
+  draw();
+}
+function pick(r) {
+  cur = r; document.querySelectorAll('tr.cur').forEach(x => x.classList.remove('cur')); r.row.classList.add('cur');
+  V.currentTime = r.a; V.play(); draw();
+}
+// Frames at each cut of a chunk: the pose a teacher would "land" on.
+async function poses(c) {
+  const box = document.getElementById('poses'); box.innerHTML = '';
+  const g = document.createElement('video'); g.src = V.src; g.muted = true; g.preload = 'auto';
+  await new Promise(r => g.onloadeddata = r);
+  // every half-beat in the chunk; cuts outlined in orange, so a cut mid-blur is easy to spot
+  const cuts = new Set([c.start_s, ...c.steps.map(i => L.steps[i].end_s)].map(t => t.toFixed(2)));
+  const h = L.seconds_per_count / 2, lab = k => { const n = ((Math.floor(k / 2) % 8) + 8) % 8 + 1; return k % 2 ? n + '&' : '' + n; };
+  for (let k = Math.round((c.start_s - L.count_one_s) / h); L.count_one_s + k * h <= c.end_s + 1e-3; k++) {
+    const t = L.count_one_s + k * h;
+    g.currentTime = t; await new Promise(r => g.onseeked = r);
+    const f = document.createElement('figure'), cv = document.createElement('canvas');
+    cv.width = 240; cv.height = 300; cv.getContext('2d').drawImage(g, 0, 0, 240, 300);
+    if (cuts.has(t.toFixed(2))) cv.style.outline = '3px solid var(--acc)';
+    f.append(cv, Object.assign(document.createElement('figcaption'), { textContent: lab(k) + ' · ' + t.toFixed(2) }));
+    box.append(f);
+  }
+}
+V.ontimeupdate = () => {
+  if (cur && document.getElementById('loop').checked && V.currentTime >= cur.b) V.currentTime = cur.a;
+  document.getElementById('now').textContent = V.currentTime.toFixed(2) + ' s'; draw();
+};
+document.getElementById('tl').onclick = e => { const r = C.getBoundingClientRect(); V.currentTime = (e.clientX - r.left) / r.width * dur; };
+function draw() {
+  if (!L) return;
+  const r = C.getBoundingClientRect(), W = C.width = r.width * devicePixelRatio, H = C.height = r.height * devicePixelRatio, g = C.getContext('2d');
+  const x = t => t / dur * W;
+  // energy curve
+  const e = L.energy, mx = Math.max(...e.map(p => p[1]));
+  g.strokeStyle = '#666'; g.beginPath(); e.forEach(([t, v], i) => { const y = H - 6 - v / mx * (H * 0.55); i ? g.lineTo(x(t), y) : g.moveTo(x(t), y); }); g.stroke();
+  // counts: tall tick on count, short on "and"
+  for (let k = 0; ; k++) { const t = L.count_one_s + (k - 64) * L.seconds_per_count / 2; if (t > dur) break; if (t < 0) continue;
+    const on = (k % 2 === 0); g.fillStyle = on ? '#555' : '#333'; g.fillRect(x(t), 0, 1, on ? 12 : 6); }
+  // steps and chunks
+  L.steps.forEach(s => { g.fillStyle = `rgba(232,149,47,${0.3 + 0.7 * Math.min(1, s.end_cue)})`; g.fillRect(x(s.end_s) - 1, 14, 2, H * 0.35); });
+  L.chunks.forEach(c => { g.fillStyle = '#2b6'; g.fillRect(x(c.start_s) - 1.5, 0, 3, H); });
+  if (cur) { g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(x(cur.a), 0, x(cur.b) - x(cur.a), H); }
+  g.fillStyle = '#fff'; g.fillRect(x(V.currentTime || 0), 0, 2, H);
+}
+addEventListener('resize', draw);
+load(sel.value);
+</script></body></html>

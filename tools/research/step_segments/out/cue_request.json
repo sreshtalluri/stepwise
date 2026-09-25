@@ -1,0 +1,52 @@
+{
+ "model": "claude-sonnet-5",
+ "max_tokens": 2000,
+ "system": "You write short practice cues for a dance-learning site, like a teacher calling out steps.\nYou only see MEASURED features of each step, never the video. Rules:\n- Use only what the features state: body parts, the dancer's own left/right, direction, travel, turn, level, quality.\n- Left/right are always the DANCER's. Never say \"your left\" unless the feature says so; say \"their\" or the part name.\n- Do not name a dance move (\"a shoulder pop\", \"a two-step\") unless it follows directly from the features. Prefer plain verbs.\n- If a step lists uncertain_parts, do not describe those parts in detail.\n- If the features are too thin for a useful cue, return an empty cue. An empty cue is better than a guess.\n- Max 8 words per cue. Counts are given; you may prefix the cue with them (\"5-6:\").",
+ "output_config": {
+  "effort": "low",
+  "format": {
+   "type": "json_schema",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cues": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "step": {
+         "type": "integer"
+        },
+        "cue": {
+         "type": "string"
+        },
+        "grounded_in": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        }
+       },
+       "required": [
+        "step",
+        "cue",
+        "grounded_in"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    "required": [
+     "cues"
+    ],
+    "additionalProperties": false
+   }
+  }
+ },
+ "messages": [
+  {
+   "role": "user",
+   "content": "{\"steps\": [{\"step\": 9, \"counts\": \"5&–6\", \"lead\": [\"right leg\", \"right arm\"], \"moves\": [\"right leg to their left\", \"right arm to their left\"], \"whole_body\": [], \"quality\": \"smooth / even\", \"uncertain_parts\": []}, {\"step\": 10, \"counts\": \"6–6&\", \"lead\": [\"right leg\", \"left arm\"], \"moves\": [\"right leg to their right\", \"left arm up\"], \"whole_body\": [], \"quality\": \"—\", \"uncertain_parts\": []}, {\"step\": 11, \"counts\": \"6&–7&\", \"lead\": [\"right leg\", \"right arm\"], \"moves\": [\"right leg to their right and back\", \"right arm down\"], \"whole_body\": [], \"quality\": \"—\", \"uncertain_parts\": []}, {\"step\": 12, \"counts\": \"7&–8&\", \"lead\": [\"left arm\", \"right arm\"], \"moves\": [\"left arm up\", \"right arm to their right & up & back\"], \"whole_body\": [], \"quality\": \"—\", \"uncertain_parts\": []}, {\"step\": 13, \"counts\": \"8&–1\", \"lead\": [\"right arm\", \"left arm\"], \"moves\": [\"right arm up\", \"left arm in place\"], \"whole_body\": [], \"quality\": \"smooth / even\", \"uncertain_parts\": []}]}"
+  }
+ ]
+}
