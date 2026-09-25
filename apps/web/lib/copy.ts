@@ -208,7 +208,9 @@ export const processing = {
   heartbeat: "A steady count to wait by. It is not the music's beat.",
   heartbeatDone: "Counted in.",
 
+  // The tag on the clip says what it is doing: "playing now" only while it plays.
   videoLabel: "Your clip, playing now",
+  videoLabelIdle: "Your clip",
   paused: "Paused. Tap to play.",
   soundOn: "Sound on",
   soundOff: "Sound off",
@@ -218,6 +220,7 @@ export const processing = {
   steps: {
     clip: "Clip",
     playing: "Playing now",
+    clipPaused: "Paused",
     dancers: "Dancers",
     looking: "Looking frame by frame",
     dancersFound: (n: number) => (n === 1 ? "1 dancer" : `${n} dancers`),
