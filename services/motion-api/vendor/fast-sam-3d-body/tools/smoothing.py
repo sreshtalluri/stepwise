@@ -888,6 +888,126 @@ def smooth_track(
     )
 
 
+# ---------------------------------------------------------------------------
+# Orientation detours: the front/back (and left/right) flip
+# ---------------------------------------------------------------------------
+#
+# SAM 3D Body sometimes turns the whole body round for a single frame and
+# puts it back on the next -- the monocular front/back ambiguity, worst when
+# the silhouette carries no facing cue (a hood up, back-lit, at night).
+# Measured on job_a10682 (hoodie, night, 196 samples): at t=6.40 s the root
+# swings 100 deg off the path between its neighbours, which themselves sit
+# only 43 deg apart, the legs come back L/R-swapped, and the next frame
+# returns. Every other detour across six lessons (2,509 samples) at spans
+# of up to four samples stays at or under ~40 deg. Real turns -- including
+# a10682's own full 360 at 3.0-4.1 s -- never trip it, because a real turn
+# moves along the path between its neighbours rather than away and back.
+#
+# The rule: a span of observed samples no longer than DETOUR_MAX_SPAN_S whose
+# root orientation is more than DETOUR_MIN_DEG off the slerp between the two
+# observed samples around it -- at every sample of the span -- and whose
+# neighbours are closer to each other than half that detour (it came back;
+# a fast spin does not). The span's pose is replaced by interpolating every
+# joint's local rotation (slerp) and bone offset/scale (lerp) between those
+# neighbours. The replaced samples are marked by the caller as interpolated,
+# never observed.
+#
+# ponytail: a flip that persists longer than DETOUR_MAX_SPAN_S is left alone:
+# with no "came back" there is no local evidence which side is the wrong one.
+# The upgrade is a 2D tie-breaker from the detector's own shoulder/hip order
+# or face keypoints -- RTMO shares the same hood ambiguity, so measure first.
+
+DETOUR_MIN_DEG = 60.0  # measured: the one real flip is 100 deg, the worst non-flip 40 deg
+DETOUR_MAX_SPAN_S = 0.2  # 3 samples at 15 fps; a "flicker", not a held pose
+
+
+def find_orientation_detours(sample_times_s, root_quats, observed) -> np.ndarray:
+    """(F,) bool: samples whose root orientation is a short-lived detour.
+
+    `root_quats` is (F, 4) xyzw world rotations of the root joint, `observed`
+    (F,) bool. Shortest spans are tried first, so one bad sample is never
+    widened into its neighbours.
+    """
+    t = np.asarray(sample_times_s, dtype=np.float64)
+    ok = np.asarray(observed, dtype=bool).copy()
+    F = len(t)
+    q = np.asarray(root_quats, dtype=np.float64).copy()
+    q[~ok] = (0.0, 0.0, 0.0, 1.0)  # never read: brackets and spans must be observed
+    rot = Rotation.from_quat(q)
+    bad = np.zeros(F, dtype=bool)
+    dt = float(np.median(np.diff(t))) if F > 1 else 1.0 / 15.0
+    max_len = max(1, int(round(DETOUR_MAX_SPAN_S / dt)))
+    for n in range(1, max_len + 1):
+        for a in range(1, F - n):
+            b = a + n  # exclusive end; neighbours are a-1 and b
+            if not (ok[a - 1] and ok[b] and ok[a:b].all()) or bad[a - 1:b + 1].any():
+                continue
+            gap = rot[a - 1].inv() * rot[b]
+            w = (t[a:b] - t[a - 1]) / (t[b] - t[a - 1])
+            path = rot[a - 1] * Rotation.from_rotvec(np.outer(w, gap.as_rotvec()))
+            dev = np.degrees((path.inv() * rot[a:b]).magnitude()).min()
+            if dev > DETOUR_MIN_DEG and np.degrees(gap.magnitude()) < 0.5 * dev:
+                bad[a:b] = True
+    return bad
+
+
+def repair_orientation_detours(sample_times_s, skel_states, observed, parents, root: int):
+    """Replace each detour span's whole pose with the interpolation between
+    its observed neighbours. Returns (repaired (F, J, 8) float32, (F,) bool mask).
+    Unflagged samples come back byte-identical."""
+    skel_states = np.asarray(skel_states)
+    t = np.asarray(sample_times_s, dtype=np.float64)
+    bad = find_orientation_detours(t, skel_states[:, root, 3:7], observed)
+    out = skel_states.astype(np.float32, copy=True)
+    if not bad.any():
+        return out, bad
+    off, lq, ls = decompose(skel_states, parents)
+    idx = np.flatnonzero(bad)
+    # contiguous runs -> (first, last)
+    for run in np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1):
+        a, b = int(run[0]) - 1, int(run[-1]) + 1
+        w = (t[run] - t[a]) / (t[b] - t[a])
+        for j in range(lq.shape[1]):
+            ra = Rotation.from_quat(lq[a, j])
+            step = (ra.inv() * Rotation.from_quat(lq[b, j])).as_rotvec()
+            lq[run, j] = (ra * Rotation.from_rotvec(np.outer(w, step))).as_quat()
+        off[run] = off[a] + w[:, None, None] * (off[b] - off[a])
+        ls[run] = ls[a] + w[:, None] * (ls[b] - ls[a])
+        out[run] = recompose(off[run], lq[run], ls[run], parents)
+    return out, bad
+
+
+def repair_clip_orientation(result: dict, hierarchy: Optional[dict] = None) -> dict:
+    """In place on `result["per_frame"]`: every consumer (GLB export,
+    MotionResult, smoothing) reads `skel_state` from there. A repaired person
+    keeps its estimate as `skel_state_raw` and gets `orientation_repaired`,
+    which motion_result.py turns into interpolated/uncertain. Returns
+    {track_id: [repaired sample indices]}."""
+    hierarchy = hierarchy or load_joint_hierarchy()
+    parents = np.array([j["parent_index"] for j in hierarchy["joints"]])
+    root = int(hierarchy.get("root_joint_index", 1))
+    per_frame = result["per_frame"]
+    F, J = len(per_frame), len(parents)
+    report = {}
+    for track_id in result["confident_track_ids"]:
+        track_id = int(track_id)
+        skel = np.zeros((F, J, 8), dtype=np.float32)
+        observed = np.zeros(F, dtype=bool)
+        for i, frame in enumerate(per_frame):
+            person = frame.get(track_id) if isinstance(frame, dict) else None
+            if person is not None and "skel_state" in person:
+                skel[i] = np.asarray(person["skel_state"], dtype=np.float32)
+                observed[i] = True
+        fixed, bad = repair_orientation_detours(result["sample_times_s"], skel, observed, parents, root)
+        for i in np.flatnonzero(bad):
+            person = per_frame[i][track_id]
+            person["skel_state_raw"] = person["skel_state"]
+            person["skel_state"] = fixed[i]
+            person["orientation_repaired"] = True
+        report[track_id] = np.flatnonzero(bad).tolist()
+    return report
+
+
 def smooth_clip_result(result: dict, hierarchy: Optional[dict] = None) -> dict:
     """Run the chain over every dancer in a `process_clip()` result.
 

@@ -323,7 +323,12 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                     "provenance": {"observed": False, "interpolated": False, "suppressed": "out_of_frame"},
                 })
             else:
-                provenance = {"observed": observed, "interpolated": not observed, "suppressed": None if observed else "low_confidence"}
+                # A front/back flip the pipeline replaced with the pose between
+                # its neighbours (smoothing.repair_clip_orientation) is served
+                # like a gap: interpolated, never observed.
+                repaired = observed and bool(person.get("orientation_repaired"))
+                shown = observed and not repaired
+                provenance = {"observed": shown, "interpolated": not shown, "suppressed": None if shown else "low_confidence"}
                 # ponytail: every joint in a reconstructed frame gets the SAME
                 # observed/uncertain state -- SAM 3D Body reconstructs a whole
                 # body per frame, it doesn't classify per-joint occlusion.
@@ -332,7 +337,7 @@ def build_motion_result(job_id: str, clip_id: str, npz_bytes: bytes | None,
                 # not built here. Held (non-observed) frames render as
                 # "uncertain", never "observed" or "absent" -- a frozen pose
                 # is honestly disclosed, not claimed as tracked motion.
-                visibility = "observed" if observed else "uncertain"
+                visibility = "observed" if shown else "uncertain"
                 # skel_state carries WORLD rotations; the contract wants each
                 # joint's own bend relative to its parent. Convert once per
                 # sample, not per joint -- see _local_rotations.

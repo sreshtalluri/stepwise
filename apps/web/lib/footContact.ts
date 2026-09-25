@@ -29,7 +29,7 @@ export const FOOT_LIFT_M = { ankle: 0.09, ball: 0.06 };
 type V3 = [number, number, number];
 type Q = readonly number[]; // [x, y, z, w]
 
-function qmul(a: Q, b: Q): [number, number, number, number] {
+export function qmul(a: Q, b: Q): [number, number, number, number] {
   const [ax, ay, az, aw] = a, [bx, by, bz, bw] = b;
   return [
     aw * bx + ax * bw + ay * bz - az * by,
@@ -39,7 +39,7 @@ function qmul(a: Q, b: Q): [number, number, number, number] {
   ];
 }
 
-function qrot(q: Q, v: readonly number[]): V3 {
+export function qrot(q: Q, v: readonly number[]): V3 {
   const [x, y, z, w] = q;
   // v + 2w(q×v) + 2 q×(q×v)
   const tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
