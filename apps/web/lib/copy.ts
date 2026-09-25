@@ -671,9 +671,9 @@ export const privacy = {
       heading: "No accounts, and how limits work",
       items: [
         // ratelimit._ip_hash, 001_init.sql events has no ip column
-        "To stop one person using up the day's processing, each new lesson and each removal is counted against a keyed hash of your IP address. The key changes every day, so one day's counts cannot be matched to the next. The address itself is not written to our database, and these counts are kept after a lesson is deleted.",
+        "To stop one person using up the day's processing, each new lesson and each removal is counted against a keyed hash of your IP address. The key is random, is used for one day and is then deleted, so one day's counts cannot be matched to the next, even by us. The address itself is not written to our database, and these counts are kept after a lesson is deleted.",
         // wrangler.jsonc (Cloudflare Worker), modal_app.py, storage.py (R2), layout.tsx (Google Fonts, Fontshare)
-        "The site runs on Cloudflare, processing runs on Modal, and files are stored on Modal and Cloudflare. Fonts load from Google Fonts and Fontshare. Like any web host, these services see your requests, including your IP address.",
+        "The site runs on Cloudflare, processing runs on Modal, files are stored on Modal and Cloudflare, and our database runs on Neon. Fonts load from Google Fonts and Fontshare. Like any web host, these services see your requests, including your IP address.",
       ],
     },
     {
@@ -699,7 +699,7 @@ export const privacy = {
       heading: "Error reports",
       items: [
         // observability.py scrub(), lib/scrub.ts, instrumentation-client.ts
-        "When something breaks, an error report goes to Sentry, our error tracker. Before it leaves, links, email addresses and @handles in it are replaced with placeholders. Addresses of pages on this site are kept, without anything after the question mark, so we can tell which lesson broke.",
+        "When something breaks, an error report goes to Sentry, our error tracker. Before it leaves, links, email addresses and @handles in it are replaced with placeholders. Addresses of pages on this site are kept, without anything after the question mark, so we can tell which lesson broke. Sentry also gets timings for about one in ten requests to our server, with the same placeholders, so we can see what is slow.",
         // api.remove_lesson -> observability.message("lesson removed", relationship, clip_id)
         "When a lesson is removed we get an alert with the lesson's id and which option was picked. The words you typed are not in it.",
       ],
@@ -710,7 +710,7 @@ export const privacy = {
         // retention.TTL_DAYS == 180, modal_app.sweep_expired daily
         "We keep the clip while the lesson exists. Lessons nobody opens for six months are deleted, and a removal request deletes one straight away.",
         // retention.delete_clip tombstone {clip_id, removed_at, reason, relationship}
-        "After a deletion we keep a short note that the lesson was removed — when, the option picked and anything typed — so the link can say it was removed instead of pretending it never existed.",
+        "After a deletion we keep a short note that the lesson was removed — when, the option picked and anything typed — so the link can say it was removed instead of pretending it never existed. The usage counts above keep the lesson's id (not the video, the 3D or anything from it) for as long as those counts are kept.",
       ],
     },
     {
