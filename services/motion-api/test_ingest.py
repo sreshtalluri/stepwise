@@ -460,7 +460,7 @@ def test_every_refusal_is_a_valid_job_status_error():
         assert not any(w in message.lower() for w in ("sorry", "oops", "apolog")), message
         assert "!" not in message
     # Codes that only exist on the structured (non-string-matched) path.
-    assert codes | {"clip_too_long", "live_stream", "fetch_failed", "invite_required"}
+    assert codes | {"clip_too_long", "live_stream", "fetch_failed", "invite_required", "invite_invalid"}
 
 
 # ---------------------------------------------------------------------------
@@ -478,13 +478,15 @@ def test_invite_gate_is_closed_by_default(api, fake_ytdlp, monkeypatch):
 
 def test_wrong_or_missing_code_is_refused(api, fake_ytdlp):
     from fastapi import HTTPException
-    for code in (None, "", "nope", "let-me-in "):
-        if code == "let-me-in ":
-            continue  # whitespace is stripped, so this one is valid
+    for code, why in ((None, "invite_required"), ("", "invite_required"), ("  ", "invite_required"),
+                      ("nope", "invite_invalid")):
         with pytest.raises(HTTPException) as e:
             _paste(api, code=code)
         assert e.value.status_code == 403, code
+        assert e.value.detail["error"]["code"] == why, code
+    assert "isn't right" in e.value.detail["error"]["message"]
     assert fake_ytdlp.probes == 0
+    assert _paste(api, code="let-me-in ").job_id  # whitespace is stripped, so this one is valid
 
 
 def test_file_upload_is_not_gated(api, monkeypatch, tmp_path):

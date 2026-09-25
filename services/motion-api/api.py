@@ -465,12 +465,19 @@ def ingest_clip_link(request: LinkRequest, http: Request,
                      x_invite_code: str | None = Header(default=None)) -> DispatchResponse:
     if not ingest.invite_code_ok(x_invite_code):
         # Not 404-disguised: someone who was given a code and typed it wrong
-        # deserves to know which thing failed. File upload is still open, and
-        # the message says so rather than leaving them stuck.
+        # deserves to know which thing failed, so a missing code and a wrong
+        # one are told apart. File upload is still open, and a missing code's
+        # message says so rather than leaving them stuck.
+        if x_invite_code and x_invite_code.strip():
+            raise HTTPException(403, detail={"error": {
+                "code": "invite_invalid",
+                "message": "That invite code isn't right. Check it and try again.",
+                "retryable": False,
+            }})
         raise HTTPException(403, detail={"error": {
             "code": "invite_required",
-            "message": "Links are open to invited testers right now. "
-                       "You can still add a video file.",
+            "message": "Links need an invite code while we try this out. "
+                       "Enter yours, or add a video file instead.",
             "retryable": False,
         }})
 
