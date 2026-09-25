@@ -49,6 +49,7 @@
 .radio input {
   width: 20px;
   height: 20px;
+  flex-shrink: 0; /* a two-line label must not squeeze the radio */
   accent-color: var(--ink);
 }
 

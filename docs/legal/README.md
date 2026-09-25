@@ -11,13 +11,22 @@ open lawyer questions are listed in each doc. New legal research goes in this fo
 - [`system-review-2026-09.md`](system-review-2026-09.md): the code on `main` (2026-09-25) checked
   against the law and the two docs above, one moving part at a time, including where `/privacy`
   no longer matches the code.
+- [`body-shape-decision.md`](body-shape-decision.md): keep, drop or coarsen the estimated body
+  shape in the lesson GLB (tracker item 28), with measurements on public lessons.
+- [`audio-rights-paths.md`](audio-rights-paths.md): every legitimate way for a lesson to keep the
+  original song (embed-first, "your copy stays on your phone", §512 uploads, creator and label
+  licences, TikTok partnership), compared, with a recommendation per stage.
+- [`abuse-report-runbook.md`](abuse-report-runbook.md): what the owner does when a lesson is
+  reported as child sexual abuse material or intimate images shared without consent (preserve,
+  report to NCMEC, 48-hour removal), and how to use `quarantine.py`.
 - Related, in `docs/research/`: [`link-ingestion.md`](../research/link-ingestion.md), the platform
   terms analysis for fetching TikTok and YouTube links.
 
 ## Tracker
 
 Every action item from the docs. **R&P** = `rights-and-privacy.md`, **LPL** =
-`legal-public-learning.md`, **SR** = `system-review-2026-09.md` (§3 row numbers). Status is one of done, partial, todo, or needs owner decision.
+`legal-public-learning.md`, **SR** = `system-review-2026-09.md` (§3 row numbers), **ARP** =
+`audio-rights-paths.md`. Status is one of done, partial, todo, or needs owner decision.
 
 | # | Item | Source | Stage | Status | Where |
 |---|---|---|---|---|---|
@@ -48,15 +57,24 @@ Every action item from the docs. **R&P** = `rights-and-privacy.md`, **LPL** =
 | 25 | Right of publicity review before any paid tier or marketing use | R&P §8.4; LPL §5 | before library | todo | |
 | 26 | `/privacy` says the rate-limit IP hash key "changes every day"; `ratelimit._ip_hash` used a fixed key; now uses the daily random analytics salt | SR row 19 | beta | done (2026-09-25) | `services/motion-api/ratelimit.py` `_ip_hash`; `apps/web/lib/copy.ts` `privacy` |
 | 27 | `/privacy`: say that usage notes and removal rows about a removed lesson stay until they expire (Neon 13 months, PostHog its own period); mention backend performance traces (10%) or turn them off; name Neon | SR rows 18, 20, 24 | beta | done (2026-09-25) | `apps/web/lib/copy.ts` `privacy`; `observability.py` `traces_sample_rate` |
-| 28 | Body shape baked into every GLB: say so on `/privacy`, update R&P §2, then decide whether to keep it or coarsen it | SR row 7; R&P §6.7 | beta (copy) / before public launch (decision) | needs owner decision | `modal_app.py` `_character_with_shape`; `export-manifest.json` `shape_params` |
+| 28 | Body shape baked into every GLB: say so on `/privacy`, update R&P §2, then decide whether to keep it or coarsen it | SR row 7; R&P §6.7; [`body-shape-decision.md`](body-shape-decision.md) | beta (copy) / before public launch (decision) | needs owner decision (2026-09-25: research done, see `body-shape-decision.md`. Recommends a generic surface plus the dancer-sized skeleton for beta and launch, and saying so on `/privacy`. The surface shape is a few-mm mesh corrective with no effect on the moves. Limb lengths come from the skeleton, which was always dancer-sized) | `modal_app.py` `_character_with_shape`; `export-manifest.json` `shape_params` |
 | 29 | Remove live lesson `job_id`s from the public repo's eval labels (use opaque ids) | SR row 22 | beta | done (2026-09-25) | `evaluation/labels/count_one.json` |
-| 30 | CSAM / intimate-image runbook: preserve and report to NCMEC (18 U.S.C. §2258A, 1-year preservation) instead of instant deletion; 48-hour NCII removal (TAKE IT DOWN Act) | SR row 6 | beta | todo | Removal path today deletes at once (`retention.delete_clip`) |
+| 30 | CSAM / intimate-image runbook: preserve and report to NCMEC (18 U.S.C. §2258A, 1-year preservation) instead of instant deletion; 48-hour NCII removal (TAKE IT DOWN Act) | SR row 6 | beta | partial | [`abuse-report-runbook.md`](abuse-report-runbook.md). Removal dialog box `illegal_sexual_content` and `/owner` Remove > Quarantine take the lesson down and move its bytes to the `stepwise-quarantine` Volume (`retention.quarantine_clip`, manifest + sha256, blocklist, Sentry fatal alert); every other reason still deletes at once. `services/motion-api/quarantine.py` lists, exports and purges. Open: lawyer review (covered-platform status, runbook), NCMEC ESP registration |
 | 31 | Processor register: DPA, region and transfer mechanism for Modal, Cloudflare, Neon, PostHog and Sentry; confirm PostHog "Discard client IP data", the Sentry region and IP storage,  | SR rows 18, 20, 24 | beta | todo | |
 | 32 | Self-host fonts (Google Fonts and Fontshare get the visitor's IP today) | SR row 24 | before public launch | todo | `apps/web/app/layout.tsx`, `global-error.tsx` |
 | 33 | YouTube links and §1201 (*Yout v. RIAA* pending): ask counsel; consider TikTok-only links or YouTube via download-then-upload | SR row 1 | before public launch | needs owner decision | `ingest.ALLOWED_HOSTS` |
 | 34 | A DMCA-shaped option in the removal flow (§512(c)(3) fields go to email); cap the tombstone free text's retention and say so | SR row 16 | before public launch | todo | `api.py` `RemovalRequest`; `retention.write_tombstone` |
 | 35 | Retention rule for the `stepwise-eval` Volume (TikToks marked `rights: untested`, kept indefinitely) | SR row 23 | before public launch | todo | `evaluation/fetch.py`, `modal_app.py` `eval_clips` |
 | 36 | Share clip: silent export only, with sound added inside TikTok; marketing uses only `permission-granted` clips and Commercial Music Library or royalty-free audio | SR rows 12, 13 | before library | todo | DESIGN §7g (not built) |
+| 37 | Spike: TikTok embed time-sync (`onCurrentTime` cadence, drift on iPhone Safari and Android Chrome) before committing to embed-first | ARP §2.4, §8(a) | beta | todo | |
+| 38 | Spike: on-device lesson playback from the learner's own file (IndexedDB/OPFS, iOS eviction) | ARP §3, §8(a) | beta | todo | |
+| 39 | "Your copy stays on your phone": lessons play audio/video from the learner's own saved file at 0.25–1.25×; server keeps only derived data; embed fallback for everyone else | ARP §3, §8(b) | before public launch | needs owner decision | |
+| 40 | Embed-first rules: 3D beside the player, never overlaid; no audio-only or background YouTube; TikTok slow practice = 3D + click, song at 1× | ARP §2 | before public launch | todo | Extends item 14 |
+| 41 | Copy and marketing sell the 3D and counts, never "the song" or "upload any TikTok dance" (*Capitol v. Vimeo* inducement risk) | ARP §5 | beta | todo | `apps/web/lib/copy.ts` |
+| 42 | "Made with permission" wording: licenses video and choreography only, never a label's music | ARP §5, §8(c) | before library | todo | Refines item 21 |
+| 43 | Label promo licence pilot (one track, slow-down and loop named in the grant, publishers too) | ARP §7, §8(c) | scale | todo | After first retention numbers |
+| 44 | TikTok for Developers: Login Kit, Display API, Share Kit / Green Screen Kit ("post your practice back to TikTok") | ARP §6 | public launch → scale | todo | Also answers item 36 |
+| 45 | Lawyer questions in ARP §9 (own-file playback, transient processing copy, inducement, embed sync, promo-licence language) | ARP §9 | before public launch | todo | Bundle with item 11 |
 
 **A note on item 3.** `robots.txt` disallows only `/api/`. Lesson and job pages are
 left crawlable so crawlers can see their `noindex`; blocking them in `robots.txt` would hide the

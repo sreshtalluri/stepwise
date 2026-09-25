@@ -90,6 +90,10 @@ export default function OwnerPage() {
       .catch(() => setError("Could not reach the API."));
   }, [key]);
 
+  const onRemoved = useCallback((jobId: string) => {
+    setJobs((prev) => prev && prev.filter((j) => j.job_id !== jobId));
+  }, []);
+
   const onSaved = useCallback((jobId: string, countOneS: number) => {
     setSavedNow((prev) => new Set(prev).add(jobId));
     setJobs((prev) => prev && prev.map((j) => (j.job_id === jobId ? { ...j, confirmed: true, count_one_s: countOneS } : j)));
@@ -148,13 +152,15 @@ export default function OwnerPage() {
       )}
       {!jobs && !error && <p className="meta">Loading…</p>}
       {shown.map((j) => (
-        <Card key={j.job_id} job={j} ownerKey={key} onSaved={onSaved} />
+        <Card key={j.job_id} job={j} ownerKey={key} onSaved={onSaved} onRemoved={onRemoved} />
       ))}
     </main>
   );
 }
 
-function Card({ job, ownerKey, onSaved }: { job: Job; ownerKey: string; onSaved: (jobId: string, t: number) => void }) {
+function Card({ job, ownerKey, onSaved, onRemoved }: {
+  job: Job; ownerKey: string; onSaved: (jobId: string, t: number) => void; onRemoved: (jobId: string) => void;
+}) {
   const video = useRef<HTMLVideoElement>(null);
   const countEl = useRef<HTMLDivElement>(null);
   const origin = useRef<number | null>(null);
@@ -178,7 +184,7 @@ function Card({ job, ownerKey, onSaved }: { job: Job; ownerKey: string; onSaved:
   if (!spc || job.count_one_s === null || pickAtLoad === null) {
     return (
       <section className={s.card}>
-        <Meta job={job} duration={duration} />
+        <Meta job={job} duration={duration} ownerKey={ownerKey} onRemoved={onRemoved} />
         <p className="meta">No beat grid for this clip, so there is nothing to set.</p>
       </section>
     );
@@ -281,7 +287,7 @@ function Card({ job, ownerKey, onSaved }: { job: Job; ownerKey: string; onSaved:
         {lead && <div className={s.lead}>{lead}</div>}
       </div>
       <div className={s.body}>
-        <Meta job={job} duration={duration} />
+        <Meta job={job} duration={duration} ownerKey={ownerKey} onRemoved={onRemoved} />
         <label className={s.small}>
           <input type="checkbox" checked={clicks}
             onChange={(e) => { setClicks(e.target.checked); clicksOn.current = e.target.checked; }} />
@@ -332,7 +338,9 @@ function Card({ job, ownerKey, onSaved }: { job: Job; ownerKey: string; onSaved:
   );
 }
 
-function Meta({ job, duration }: { job: Job; duration: number | null }) {
+function Meta({ job, duration, ownerKey, onRemoved }: {
+  job: Job; duration: number | null; ownerKey: string; onRemoved: (jobId: string) => void;
+}) {
   const when = job.created_at ? new Date(job.created_at * 1000).toLocaleString(undefined, {
     day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : null;
   return (
@@ -343,6 +351,7 @@ function Meta({ job, duration }: { job: Job; duration: number | null }) {
         </a>
         <span className={job.confirmed ? s.badgeOn : s.badge}>{job.confirmed ? "confirmed" : "not yet confirmed"}</span>
       </h2>
+      <RemoveButton job={job} ownerKey={ownerKey} onRemoved={onRemoved} />
       <p className="meta">
         {[
           job.bpm ? `${Math.round(job.bpm)} counts a minute` : null,
@@ -353,5 +362,76 @@ function Meta({ job, duration }: { job: Job; duration: number | null }) {
         ].filter(Boolean).join(" · ")}
       </p>
     </div>
+  );
+}
+
+/**
+ * The owner's takedown (POST /owner/jobs/{job_id}/remove). "Delete" is the
+ * normal removal; "Quarantine" is for apparent child sexual abuse material or
+ * intimate images shared without consent: taken down the same way, but kept
+ * for the report the law requires (docs/legal/abuse-report-runbook.md).
+ * Nothing quarantined is ever shown on this page.
+ */
+function RemoveButton({ job, ownerKey, onRemoved }: {
+  job: Job; ownerKey: string; onRemoved: (jobId: string) => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [mode, setMode] = useState<"delete" | "quarantine">("delete");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setStatus("");
+    try {
+      const r = await fetch(`/api/owner/jobs/${encodeURIComponent(job.job_id)}/remove`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-stepwise-owner-key": ownerKey },
+        body: JSON.stringify({ mode, note: note.trim() }),
+      });
+      if (!r.ok) return setStatus(`Not removed (${r.status}).`);
+      ref.current?.close();
+      onRemoved(job.job_id);
+    } catch {
+      setStatus("Not removed: could not reach the API.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => ref.current?.showModal()}>Remove</button>
+      <dialog ref={ref} className={s.removeDialog} aria-labelledby={`rm-${job.job_id}`}>
+        <form className={s.removeForm} onSubmit={submit}>
+          <h3 id={`rm-${job.job_id}`}>Remove this lesson for everyone?</h3>
+          <label className={s.small}>
+            <input type="radio" name="mode" checked={mode === "delete"} onChange={() => setMode("delete")} />
+            <span><b>Delete</b>: off-topic, not a dance, spam, or anything else that should not be here.
+              Deletes the video and the 3D lesson at once. It cannot be undone.</span>
+          </label>
+          <label className={s.small}>
+            <input type="radio" name="mode" checked={mode === "quarantine"} onChange={() => setMode("quarantine")} />
+            <span><b>Quarantine</b>: only for sexual content involving a minor, or intimate images shared without
+              consent. Takes it down the same way but keeps a copy where no page can reach it, for the report the
+              law requires. Do not watch it again. Follow docs/legal/abuse-report-runbook.md.</span>
+          </label>
+          <label className={s.small} htmlFor={`rm-note-${job.job_id}`}>Note, kept with the record (optional)</label>
+          <textarea id={`rm-note-${job.job_id}`} maxLength={500} rows={2} value={note}
+            onChange={(e) => setNote(e.target.value)} />
+          {status && <p className={s.error} role="alert">{status}</p>}
+          <div className={s.row}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => ref.current?.close()} disabled={busy}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-sm" disabled={busy} aria-busy={busy}>
+              {mode === "quarantine" ? "Quarantine for everyone" : "Delete for everyone"}
+            </button>
+          </div>
+        </form>
+      </dialog>
+    </>
   );
 }

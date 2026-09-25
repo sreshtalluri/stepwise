@@ -108,17 +108,22 @@ def ensure_not_removed(results_volume, clip_id: str, reload: bool = False) -> No
 
 
 def write_tombstone(results_volume, clip_id: str, reason: str,
-                    relationship: str | None = None) -> bool:
+                    relationship: str | None = None, quarantined: bool = False) -> bool:
     """Write the tombstone if there is none yet. True if this call wrote it.
 
     An existing one is never rewritten: its timestamp and the requester's
     reason are the record, and a later sweep must not overwrite them.
+    `quarantined` marks a report of illegal sexual content: from then on every
+    sweep of this lesson MOVES its bytes to quarantine instead of deleting them
+    (see `quarantine_clip`).
     """
     if is_removed(results_volume, clip_id):
         return False
     tomb = {"clip_id": clip_id, "removed_at": time.time(), "reason": reason}
     if relationship:
         tomb["relationship"] = relationship
+    if quarantined:
+        tomb["quarantined"] = True
     write_json(results_volume, tombstone_path(clip_id), tomb)
     return True
 
@@ -270,6 +275,11 @@ def delete_clip(uploads_volume, results_volume, clip_id: str, job_id: str | None
     notice; `audit_removed.py --fix` makes it for anything else).
     """
     write_tombstone(results_volume, clip_id, reason, relationship)
+    if is_quarantined(results_volume, clip_id):
+        # Evidence we may be required to preserve (18 U.S.C. 2258A): every
+        # caller of this function -- a repeat removal, a worker's stop_and_sweep,
+        # the sweeper's re-sweep, audit_removed --fix -- moves, never deletes.
+        return quarantine_clip(uploads_volume, results_volume, clip_id, job_id)
 
     try:
         listing = [e.path.lstrip("/") for e in results_volume.listdir("/")]
@@ -311,11 +321,14 @@ def stop_and_sweep(uploads_volume, results_volume, clip_id: str, job_id: str | N
     """
     import os
     swept = []
+    # A quarantined lesson's late writes are committed, not deleted, so the
+    # server-side sweep below moves them into quarantine with the rest.
+    quarantined = is_quarantined(results_volume, clip_id)
     for mount, volume in (mounts or {}).items():
         try:
             paths = clip_artifact_paths(os.listdir(mount), clip_id, job_id)
             for path in sorted(set(paths["uploads"]) | set(paths["results"])):
-                if os.path.exists(mount + path):
+                if not quarantined and os.path.exists(mount + path):
                     os.remove(mount + path)
                     swept.append(path)
             volume.commit()
@@ -398,14 +411,188 @@ def write_json(volume, path: str, doc: dict) -> None:
     anything on a hot path.
     """
     import json
+    write_bytes(volume, path, json.dumps(doc).encode())
+
+
+def write_bytes(volume, path: str, data: bytes) -> None:
     import os
     import tempfile
 
-    fd, tmp = tempfile.mkstemp(suffix=".json")
+    fd, tmp = tempfile.mkstemp()
     try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(doc, f)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
         with volume.batch_upload(force=True) as batch:
             batch.put_file(tmp, path)
     finally:
         os.unlink(tmp)
+
+
+def read_bytes(volume, path: str) -> bytes | None:
+    """A file's bytes through the client API, or None if it is not there
+    (the client says so either way: see `remove_if_present`)."""
+    import io
+    buf = io.BytesIO()
+    try:
+        volume.read_file_into_fileobj(path, buf)
+    except FileNotFoundError:
+        return None
+    except Exception as e:  # noqa: BLE001 -- narrowed by the message just below
+        if "No such file" in str(e):
+            return None
+        raise
+    return buf.getvalue()
+
+
+# --- quarantine: a report of illegal sexual content --------------------------
+#
+# docs/legal/abuse-report-runbook.md. When a report says a lesson shows sexual
+# content involving a minor, or intimate images shared without consent, the
+# lesson goes exactly as a removal does for everyone else (tombstone, 410
+# everywhere, nothing left where any route or R2 URL can reach it) -- but its
+# bytes are MOVED to their own Volume instead of deleted. A provider that learns
+# of apparent CSAM must report it to NCMEC and preserve it for a year
+# (18 U.S.C. 2258A, REPORT Act 2024); deleting it at once destroys the evidence.
+#
+# No API route and no page reads the quarantine Volume. The API writes to it
+# here and reads only /blocklist.json (hashes, so a re-upload of the same video
+# is refused). Everything else is the owner's, through quarantine.py. Nothing in
+# this module deletes from it; only `quarantine.py purge` does.
+
+QUARANTINE_RELATIONSHIP = "illegal_sexual_content"
+QUARANTINE_VOLUME = "stepwise-quarantine"
+PRESERVE_DAYS = 365  # REPORT Act: one year. Counted from quarantine, which is before any report.
+BLOCKLIST_PATH = "/blocklist.json"
+_quarantine_vol = None
+
+
+def quarantine_volume():
+    """The quarantine Volume, created on first use (client API, no mount)."""
+    global _quarantine_vol
+    if _quarantine_vol is None:
+        import modal
+        _quarantine_vol = modal.Volume.from_name(QUARANTINE_VOLUME, create_if_missing=True)
+    return _quarantine_vol
+
+
+def manifest_path(clip_id: str) -> str:
+    return f"/{clip_id}/manifest.json"
+
+
+def is_quarantined(results_volume, clip_id: str) -> bool:
+    tomb = read_json(results_volume, tombstone_path(clip_id))
+    return bool(tomb and tomb.get("quarantined"))
+
+
+def _keep(qvol, manifest: dict, source: str, dest: str, data: bytes) -> None:
+    """Copy one file into quarantine and prove it landed, or raise. Never
+    overwrites: a second, different file under the same name (a late writer's
+    new job status) is kept beside the first."""
+    import hashlib
+    sha = hashlib.sha256(data).hexdigest()
+    files = manifest["files"]
+    if any(f["source"] == source and f["sha256"] == sha for f in files):
+        return  # already kept by an earlier sweep
+    if any(f["path"] == dest for f in files):
+        dest = f"{dest}.{sha[:12]}"
+    write_bytes(qvol, dest, data)
+    back = read_bytes(qvol, dest)
+    if back is None or hashlib.sha256(back).hexdigest() != sha:
+        raise RuntimeError(f"quarantine copy of {source} did not verify; nothing was deleted")
+    files.append({"source": source, "path": dest, "sha256": sha, "bytes": len(data),
+                  "kept_at": time.time()})
+
+
+def quarantine_clip(uploads_volume, results_volume, clip_id: str, job_id: str | None,
+                    reason: str = "", relationship: str | None = None) -> dict:
+    """`delete_clip`'s twin for a quarantined lesson: the same set of files
+    leaves the same public places, but is copied (and verified) into the
+    quarantine Volume first, with a manifest of what, from where, when and
+    sha256. Idempotent like delete_clip: a re-run adds whatever a late writer
+    put back and keeps the first manifest's time, reason and relationship.
+
+    Copy everything, write the manifest, and only then delete the originals:
+    a failure anywhere before the last step leaves the originals where they
+    were (410 everywhere regardless, and the next sweep tries again) rather
+    than losing a byte.
+
+    ponytail: whole files in memory (an upload is at most 200 MB). Stream
+    through a temp file if that ever matters for a path this rare.
+    """
+    qvol = quarantine_volume()
+    now = time.time()
+    manifest = read_json(qvol, manifest_path(clip_id)) or {
+        "clip_id": clip_id, "job_id": job_id, "quarantined_at": now,
+        "preserve_until": now + PRESERVE_DAYS * 86400, "reason": reason,
+        "relationship": relationship, "files": [], "fingerprints": [], "exports": []}
+    try:
+        listing = [e.path.lstrip("/") for e in results_volume.listdir("/")]
+    except Exception:  # noqa: BLE001 -- the named artifacts below still move
+        listing = []
+    paths = clip_artifact_paths(listing, clip_id, job_id)
+
+    originals, missing = [], []   # (label, remove) per original, removed last
+    for volume, key in ((uploads_volume, "uploads"), (results_volume, "results")):
+        for path in paths[key]:
+            data = read_bytes(volume, path)
+            if data is None:
+                missing.append(path)
+                continue
+            _keep(qvol, manifest, f"{key}:{path}", f"/{clip_id}/{key}{path}", data)
+            originals.append((path, lambda v=volume, p=path: remove_if_present(v, p)))
+
+    try:
+        import storage
+        r2 = storage.enabled()
+    except ImportError:  # a worker image without storage.py
+        r2 = False
+    if r2:
+        try:
+            keys = storage.clip_keys(clip_id)
+        except Exception as e:  # noqa: BLE001 -- left in place, behind the tombstone; next sweep retries
+            print(f"[quarantine] WARNING: could not list R2 objects of {clip_id}: {e}")
+            keys = []
+        for k in keys:
+            data = storage.client().get_object(Bucket=storage.bucket(), Key=k)["Body"].read()
+            _keep(qvol, manifest, f"r2:{k}", f"/{clip_id}/r2/{k}", data)
+            originals.append((f"r2:{k}", lambda k=k: storage.client().delete_object(
+                Bucket=storage.bucket(), Key=k) or True))
+
+    # The fingerprint leaves the public index (as on any removal) and joins the
+    # blocklist, with the source video's own sha256 so even a lesson with no
+    # index entry is refused on a byte-identical re-upload.
+    fps = [e for e in read_index(results_volume) if e.get("clip_id") == clip_id]
+    fps += [{"sha256": f["sha256"], "clip_id": clip_id} for f in manifest["files"]
+            if f["source"] == f"uploads:/{clip_id}.mp4"]
+    new_fps = [e for e in fps if e not in manifest["fingerprints"]]
+    manifest["fingerprints"] += new_fps
+    if new_fps:
+        block = (read_json(qvol, BLOCKLIST_PATH) or {}).get("entries", [])
+        write_json(qvol, BLOCKLIST_PATH, {"entries": block + new_fps})
+    write_json(qvol, manifest_path(clip_id), manifest)
+
+    moved = [label for label, remove in originals if remove()]
+    remove_fingerprint(results_volume, clip_id)
+    _forget_jobs(clip_id, job_id)
+    print(f"[quarantine] {clip_id}: moved {len(moved)} files to {QUARANTINE_VOLUME}")
+    return {"clip_id": clip_id, "deleted": moved, "already_absent": missing, "quarantined": True}
+
+
+def is_blocked(fp: dict | None = None, source_key: str | None = None) -> bool:
+    """Is this upload (by content) or link (by source) a quarantined video?
+
+    Fails open, loudly: a Volume hiccup must not take every upload down, and
+    a re-upload that slips through is a new lesson anyone can report again.
+    """
+    try:
+        doc = read_json(quarantine_volume(), BLOCKLIST_PATH)
+    except Exception as e:  # noqa: BLE001
+        print(f"[quarantine] WARNING: blocklist unreadable, not checked: {type(e).__name__}: {e}")
+        return False
+    import fingerprint
+    for entry in (doc or {}).get("entries", []):
+        if source_key and entry.get("source_key") == source_key:
+            return True
+        if fp and fingerprint.same_clip(entry, fp):
+            return True
+    return False
