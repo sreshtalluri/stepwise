@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Guided steps mockup</title>
+<style>
+:root{--paper:#F2EFE9;--sunk:#E7E1D6;--line:#D8D0C3;--stage:#1C1917;--ink:#221E1C;--mut:#6B635C;--faint:#9A9188;--acc:#F2891D}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.4 system-ui,sans-serif;padding:16px}
+h2{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);margin:24px 0 8px}
+.row{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+.phone{width:360px;max-width:100%;border:1px solid var(--line);border-radius:18px;padding:12px;background:var(--paper)}
+.desk{flex:1;min-width:320px;max-width:980px;border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;grid-template-columns:200px 1fr;gap:12px}
+@media(max-width:700px){.desk{grid-template-columns:1fr}}
+.stage{background:var(--stage);border-radius:8px;height:170px;color:#bbb;display:flex;align-items:center;justify-content:center;font-size:12px}
+.stages{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.path{display:flex;gap:4px;margin:10px 0 6px;flex-wrap:wrap}
+.path span{font-size:12px;padding:3px 8px;border-radius:99px;background:var(--sunk);color:var(--mut)}
+.path span.on{background:var(--ink);color:var(--paper)}
+.path span.done{color:var(--ink)}
+.card{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0;background:#fff8}
+.card .counts{font-size:28px;font-weight:650;font-variant-numeric:tabular-nums}
+.card .cue{font-size:17px;margin:2px 0}
+.tag{font-size:11px;color:var(--faint)}
+.strip{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums;color:var(--mut);margin:10px 2px 2px}
+.strip b{color:var(--ink)}
+.bar{height:22px;background:var(--sunk);border-radius:4px;position:relative;margin-bottom:8px}
+.bar i{position:absolute;top:0;bottom:0;border-left:2px solid var(--ink)}
+.bar .cur{position:absolute;top:0;bottom:0;background:var(--acc);opacity:.85;border-radius:3px}
+.btns{display:flex;gap:6px;flex-wrap:wrap}
+button{font:inherit;border:1px solid var(--line);background:var(--paper);border-radius:10px;padding:10px 12px;min-height:48px}
+button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.side li{list-style:none;padding:6px 8px;border-radius:6px;font-size:13px}
+.side ul{padding:0;margin:0}
+.side li.on{background:var(--sunk);font-weight:600}
+.side li small{color:var(--faint)}
+.edit{font-size:13px;color:var(--mut);display:flex;gap:10px;margin-top:6px}
+.edit u{cursor:pointer}
+</style></head><body>
+
+<h2>1 · Entry: a loop is selected in free practice (unchanged page)</h2>
+<div class="phone">
+  <div class="stages"><div class="stage">3D</div><div class="stage">video</div></div>
+  <div class="strip"><span>1</span><span>2</span><span>3</span><span>4</span><b>5</b><span>6</span><span>7</span><span>8</span></div>
+  <div class="btns"><button>0.5×</button><button>Mirror on</button><button>Loop 1–8</button></div>
+  <div class="card"><b>Learn this in steps</b><div class="tag">We found 7 places this loop could split. You can change them.</div>
+  <div class="btns" style="margin-top:6px"><button class="primary">Start: step 1 of 7</button></div></div>
+</div>
+
+<h2>2 · Phone: a step card (loops only this step)</h2>
+<div class="row">
+<div class="phone">
+  <div class="path"><span class="done">1</span><span class="on">2</span><span>1+2</span><span>3</span><span>1–3</span><span>4</span><span>…</span><span>Chunk at speed</span></div>
+  <div class="stages"><div class="stage">3D · side view</div><div class="stage">video</div></div>
+  <div class="bar"><i style="left:0"></i><i style="left:12%"></i><div class="cur" style="left:12%;width:13%"></div><i style="left:25%"></i><i style="left:44%"></i><i style="left:56%"></i><i style="left:75%"></i><i style="left:88%"></i></div>
+  <div class="card">
+    <div class="tag">Step 2 of 7</div>
+    <div class="counts">1& – 2</div>
+    <div class="cue">Right leg out to their right, left arm up.</div>
+    <div class="tag">Suggested from the 3D. Edit it if you call it something else.</div>
+    <div class="edit"><u>Rename</u><u>Split</u><u>Merge with next</u><u>Skip</u></div>
+  </div>
+  <div class="btns"><button>0.5×</button><button>Mirror on</button><button>Watch again</button><button class="primary">Got it · next</button></div>
+</div>
+
+<div class="phone">
+  <div class="path"><span class="done">1</span><span class="done">2</span><span class="on">1+2</span><span>3</span><span>1–3</span><span>4</span><span>…</span></div>
+  <div class="stages"><div class="stage">3D</div><div class="stage">video</div></div>
+  <div class="card">
+    <div class="tag">Put it together</div>
+    <div class="counts">1 – 2</div>
+    <div class="cue">Steps 1 and 2, back to back.</div>
+    <div class="tag">Loops 4 times at 0.5×, then asks.</div>
+  </div>
+  <div class="btns"><button>0.5×</button><button>Count out loud</button><button class="primary">Got it · add step 3</button></div>
+</div>
+
+<div class="phone">
+  <div class="path"><span class="done">…</span><span class="on">Chunk at speed</span><span>Next chunk</span></div>
+  <div class="stages"><div class="stage">3D</div><div class="stage">video</div></div>
+  <div class="card">
+    <div class="tag">Chunk 1 · all 7 steps</div>
+    <div class="counts">1 – 4</div>
+    <div class="cue">Build up: 0.5× → 0.75× → 1×, two loops each.</div>
+  </div>
+  <div class="btns"><button>Build up on</button><button>Metronome on</button><button class="primary">Add the next chunk (5–8)</button></div>
+</div>
+</div>
+
+<h2>3 · Desktop: steps rail replaces the parts rail while guided</h2>
+<div class="desk">
+  <div class="side">
+    <div class="tag" style="margin:4px 8px">Chunk 1 · counts 1–4</div>
+    <ul>
+      <li>1 · <small>1–1&</small> Both arms up</li>
+      <li class="on">2 · <small>1&–2</small> Right leg out, left arm up</li>
+      <li>1 + 2</li>
+      <li>3 · <small>2–3</small> Drop, arms down</li>
+      <li>1 – 3</li>
+      <li>4 · <small>3–4</small> <i style="color:var(--faint)">(no cue — rename?)</i></li>
+      <li>Chunk at speed</li>
+    </ul>
+    <div class="tag" style="margin:10px 8px">Chunk 2 · counts 5–8 <br>locked until chunk 1 is looped at speed (skip any time)</div>
+    <div class="edit" style="margin:8px"><u>Exit to free practice</u></div>
+  </div>
+  <div>
+    <div class="stages"><div class="stage" style="height:240px">video</div><div class="stage" style="height:240px">3D · side (estimated)</div></div>
+    <div class="strip"><span>1</span><b>1&</b><span>2</span><span>2&</span><span>3</span><span>4</span></div>
+    <div class="bar"><div class="cur" style="left:12%;width:13%"></div><i style="left:12%"></i><i style="left:25%"></i><i style="left:44%"></i><i style="left:62%"></i></div>
+    <div class="btns"><button>0.5×</button><button>Mirror on</button><button>Loop step 2</button><button>← step 1</button><button class="primary">Got it · next →</button><span class="tag" style="align-self:center">⌨ N next · B back · E edit cue · ␣ play</span></div>
+  </div>
+</div>
+</body></html>
