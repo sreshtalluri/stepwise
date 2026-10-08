@@ -6,11 +6,15 @@ Upload a short video filmed on one front-facing camera. Get the dancer back as a
 stylized 3D body you can orbit, mirror, slow down, and step through part by part
 and count by count — alongside the original video.
 
-**Status: rebuild in progress.** This branch is a fresh start. The previous
-implementation is preserved at tag `archive/mock-pipeline-2026-03` and branch
-`archive/v1`; it used mock adapters and never had a working CV pipeline, because
-every viable model depended on SMPL (non-commercial) and the planned detector was
-AGPL. Both problems are now solved — see `docs/PRD.md`.
+**Status: v1 complete.** The full pipeline (detection, tracking, 3D body
+reconstruction, smoothing, beat and count alignment, GLB export) and the web
+viewer are built and deployed end to end. Private beta is opening soon.
+
+This is a rebuild from scratch. An earlier prototype is preserved at tag
+`archive/mock-pipeline-2026-03` and branch `archive/v1`; it used mock adapters
+and never had a working CV pipeline, because every viable model depended on SMPL
+(non-commercial) and the planned detector was AGPL. Both problems are solved in
+this version; see `docs/PRD.md`.
 
 ## What it does, honestly
 
