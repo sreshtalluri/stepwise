@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Click timing probe · stepwise</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #F2EFE9; color: #221E1C;
+         font: 18px/1.4 system-ui, sans-serif; text-align: center; padding: 24px; box-sizing: border-box; }
+  button { font: 700 20px system-ui; background: #F2891D; border: 0; border-radius: 999px; padding: 16px 28px; }
+  .big { font: 800 64px system-ui; margin: 8px 0; }
+  .small { color: rgba(34,30,28,.6); font-size: 14px; }
+  video { display: none; }
+</style>
+</head>
+<body>
+<main id="m">
+  <p>Measures how far this browser's video clock is from the sound it plays,<br>so stepwise's click can land on the beat.</p>
+  <button id="go">Run (about 20 s, sound on)</button>
+</main>
+<script>
+/*
+ * A test video with a 4 ms 2 kHz blip every 0.5 s from 1 s is played through an
+ * AudioContext. A ScriptProcessor timestamps each blip in context time, and every
+ * 25 ms the page notes (context time, video.currentTime). The gap between where a
+ * click booked from currentTime would go and where the blip really is, is the lead
+ * hooks.ts `clickLeadS` needs. The ScriptProcessor adds its own buffering delay, so
+ * it runs twice (256 and 1024 frames) and extrapolates to a zero-size buffer.
+ */
+function video() {
+  const v = document.createElement("video");
+  v.src = "click-probe.mp4"; v.playsInline = true; v.crossOrigin = "anonymous";
+  document.body.append(v);
+  return v;
+}
+
+async function run(ctx, v, buf) {
+  const sp = ctx.createScriptProcessor(buf, 1, 1);
+  const hits = [], polls = [];
+  let last = -1;
+  sp.onaudioprocess = (e) => {
+    const x = e.inputBuffer.getChannelData(0);
+    for (let i = 0; i < x.length; i++) if (Math.abs(x[i]) > 0.3) {
+      const t = e.playbackTime + i / ctx.sampleRate;
+      if (t - last > 0.2) hits.push(t);
+      last = t; break;
+    }
+    e.outputBuffer.getChannelData(0).set(x);
+  };
+  ctx.createMediaElementSource(v).connect(sp).connect(ctx.destination);
+  v.currentTime = 0;
+  await v.play();
+  const id = setInterval(() => { if (!v.paused) polls.push([ctx.currentTime, v.currentTime]); }, 25);
+  await new Promise((r) => setTimeout(r, 8000));
+  clearInterval(id); v.pause(); sp.disconnect(); v.remove();
+  const gaps = hits.map((h) => {
+    const p = polls.filter((q) => q[0] <= h && q[0] > h - 0.15).pop();
+    if (!p) return null;
+    const blip = Math.round((p[1] + (h - p[0]) - 1) / 0.5) * 0.5 + 1;
+    return (p[0] + (blip - p[1]) - h) * 1000;
+  }).filter((g) => g !== null).sort((a, b) => a - b);
+  return gaps[gaps.length >> 1];
+}
+
+document.getElementById("go").onclick = async () => {
+  const m = document.getElementById("m");
+  m.innerHTML = "<p>Listening… keep this tab open.</p>";
+  try {
+    // iOS lets a video play only from inside the tap, so both start (muted) here.
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const vids = [video(), video()];
+    const unlocked = vids.map((v) => { v.muted = true; return v.play().then(() => { v.pause(); v.muted = false; }); });
+    await ctx.resume();
+    await Promise.all(unlocked);
+    const a = await run(ctx, vids[0], 256), b = await run(ctx, vids[1], 1024);
+    const lead = Math.round(a - (b - a) / 3);
+    m.innerHTML = `<p>Click lead for this browser</p><div class="big">${lead} ms</div>
+      <p>Send this number to Claude.</p>
+      <p class="small">raw ${a.toFixed(0)} / ${b.toFixed(0)} ms · ${navigator.userAgent}</p>`;
+  } catch (e) {
+    m.innerHTML = `<p>Couldn't measure: ${e}</p>`;
+  }
+};
+</script>
+</body>
+</html>

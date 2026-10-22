@@ -190,6 +190,43 @@ export function unlockAudio() {
   return audio;
 }
 
+const routed = new WeakSet<HTMLVideoElement>();
+
+/**
+ * Play the video's sound through the click's AudioContext. On two paths (the
+ * `<video>`'s own, the context's) each sound leaves with its own output delay, and
+ * Safari reports the context's as 0, so nothing could compensate: the click landed
+ * ~170 ms after the music on a MacBook's speakers (the owner's labels, 2026-10-21).
+ * On one path, speakers or Bluetooth delay both equally. Once routed the video is
+ * only heard while the context runs, so any play resumes it. Needs CORS on the
+ * video (`crossOrigin` + R2's ACAO), or the element feeds the graph silence.
+ */
+function routeVideo(ctx: AudioContext, video: HTMLVideoElement) {
+  if (routed.has(video)) return;
+  try {
+    ctx.createMediaElementSource(video).connect(ctx.destination);
+  } catch {
+    return; // already a source in another context: leave it on its own path
+  }
+  routed.add(video);
+  video.addEventListener("play", () => void ctx.resume().catch(() => {}));
+}
+
+/**
+ * How early to book a click so it meets the routed music: `video.currentTime` vs the
+ * audio actually flowing through the graph, measured with a click-track video and a
+ * timestamping tap in the graph (public/dev/click-probe.html), 2026-10-21. Chromium
+ * 0 ms (headless, macOS). WebKit ~115 ms (iOS 26.5 Simulator): its `currentTime`
+ * trails the samples it has already handed to Web Audio. `?clickLead=<ms>` overrides.
+ * ponytail: per-engine constants; re-run the probe on a device that disagrees.
+ */
+function clickLeadS(): number {
+  const knob = new URLSearchParams(window.location.search).get("clickLead");
+  if (knob !== null && Number.isFinite(Number(knob))) return Number(knob) / 1000;
+  const ua = navigator.userAgent;
+  return /AppleWebKit/.test(ua) && !/Chrome|Chromium|Edg/.test(ua) ? 0.115 : 0;
+}
+
 /** How far ahead clicks are booked, in wall seconds. Short, so a pause or seek cuts in fast. */
 const LOOKAHEAD_S = 0.12;
 const TICK_MS = 25;
@@ -224,6 +261,8 @@ export function useMetronome(
     if (!a) return;
     const { ctx, out } = a;
     out.gain.value = volume * volume;
+    routeVideo(ctx, video);
+    const lead = clickLeadS();
     let booked: { when: number; node: GainNode }[] = [];
     let last = -Infinity;
 
@@ -260,8 +299,9 @@ export function useMetronome(
       const now = ctx.currentTime;
       const rate = video.playbackRate;
       const gap = (0.4 * (mode === "ands" ? 0.5 : 1) * grid.secondsPerCount) / rate;
-      for (const c of clicksAhead({ grid, loop: loopRef.current, t: video.currentTime, rate, lookahead: LOOKAHEAD_S, mode })) {
-        const when = now + c.in;
+      for (const c of clicksAhead({ grid, loop: loopRef.current, t: video.currentTime, rate, lookahead: LOOKAHEAD_S + lead, mode })) {
+        const when = now + c.in - lead;
+        if (when < now) continue; // too late to sound on time
         if (when < last + gap) continue; // already booked on an earlier tick
         blip(when, c.label);
         last = when;
