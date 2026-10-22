@@ -132,3 +132,38 @@ What to integrate (production code wasn't touched in this task):
 Later, only if a drifting clip still looks wrong at about 90 ms: pass
 per-beat times (`beat_times_s`) through the contract instead of one constant
 `secondsPerCount`.
+
+## Addendum 2026-10-21: half-time, newer models, training our own
+
+**The miss that prompted this.** The 2026-10-06 TikTok (~124 BPM) shipped as
+69 BPM with count 1 at 1.70 s, between two counts. Beat This! `final0` heard
+half-time beats (0.97 s apart, plus a few real 0.48 s ones), but its downbeats
+fell every 2 of those beats: one correct 4/4 bar at ~124 BPM. `_fit_grid` then
+rounded the 0.48 s gaps up to a whole count and smeared the fit. Fixed in
+`propose.py`: below the 70 BPM floor, count in half gaps and score count 1
+on the full grid. It now reads 123.3 BPM, count 1 at 1.285 s, on the model's
+first bar line. Count-1 confidence is 0.33 (kick tie, model decides): unlabelled.
+
+**Newer models since the 2026-09-24 survey.**
+
+| model | what it adds | weights | worth trying? |
+|---|---|---|---|
+| Explore This! (CPJKU, arXiv 2610.14817, Oct 2026) | Beat This! backbone + learned tatum grid; downbeat CMLt +5, AMLt +7 on GTZAN; beat F1 -1. Models 1-4 tatums/beat jointly, built for half/double ambiguity, but Viterbi barely beat thresholding | code at github.com/CPJKU/explore_this; checkpoints not stated | yes, once checkpoints exist: cheap to score on our 11 clips |
+| Masked diffusion (arXiv 2608.04624) | Beat This! backbone, coherence via diffusion | not released | no |
+| BeatFM, HingeNet (arXiv 2508.09790 / .09788) | fine-tuned music foundation models (MERT/MusicFM), SOTA GTZAN claims | not found | no; foundation-model licences and GPU cost |
+
+**Train our own?** Not from scratch. Beat This! ships its weights, its
+training code and its 15 datasets (MIT), and the newer papers still use it as
+the backbone. Our errors are metrical level (half-time; which beat a dancer
+calls 1), which is about what dancers count, not about hearing beats. The
+path that could actually beat it for us:
+
+1. **Labels first.** 11 owner-labelled clips is an eval set, not a training
+   set. Grow it to ~100 via the existing owner page ("Set count 1" plus a tap
+   for tempo), over varied genres (bhangra, K-pop, hip-hop, TikTok edits).
+2. **Score candidates on it** (Beat This! `final0`/`small0` + our rules,
+   Explore This!) before any training.
+3. **Then fine-tune Beat This! `small0`** on public data plus our labels,
+   with the dance tempo band as a prior. That's a single-GPU job (hours, not
+   days); 100 clips is enough to shift metrical level, not enough for a new
+   model.
