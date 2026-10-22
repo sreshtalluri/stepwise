@@ -159,6 +159,15 @@ def test_half_time_beats_are_doubled_and_count_one_is_the_bar_line(tmp_path, fak
     assert any("half-time" in w for w in result.warnings)
 
 
+def test_genuinely_slow_song_with_four_beat_bars_is_not_doubled(tmp_path, fake_model):
+    """65 BPM with downbeats every 4 beats is a slow song, not half-time."""
+    beats = np.arange(0.3, 20, 60 / 65)
+    fake_model(beats, beats[::4])
+    result = propose_grid(_render(tmp_path / "slow.wav", 20.0, hats=beats, kicks=beats[::4]), clip_duration_s=20.0)
+    assert abs(result.bpm - 65) < 0.5
+    assert not any("half-time" in w for w in result.warnings)
+
+
 def test_real_model_on_synthesized_solo02_shape(tmp_path):
     """The one test that runs Beat This! itself. Skipped unless torch,
     beat-this and the cached final0 checkpoint are all present (CI caches it;

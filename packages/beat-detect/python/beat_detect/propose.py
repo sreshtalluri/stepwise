@@ -244,11 +244,14 @@ def propose_grid(source: str | Path, *, clip_duration_s: float | None = None) ->
         count_one_confidence = 0.0
     else:
         median_gap = float(np.median(np.diff(beat_times)))
-        if 60.0 / median_gap < _PLAUSIBLE_BPM[0]:
-            # Beat This! tracked half-time (the 2026-10-06 TikTok: beats 0.97 s
-            # apart, a few real 0.48 s ones, downbeats every 2 beats = one 4/4
-            # bar at ~124 BPM). Count in half gaps, then score count 1 on the
-            # full grid: the model's beats only sit on every other count.
+        bar_beats = float(np.median(np.diff(downbeat_times))) / median_gap if len(downbeat_times) > 2 else 4.0
+        if 60.0 / median_gap < _PLAUSIBLE_BPM[0] and round(bar_beats) == 2:
+            # Beat This! tracked half-time: slow beats AND its own bars only 2
+            # of them long, i.e. a 4/4 bar heard as two beats (the 2026-10-06
+            # TikTok: beats 0.97 s apart, a few real 0.48 s ones, downbeats
+            # 1.94 s apart = ~124 BPM). A genuinely slow song keeps 4-beat
+            # bars and is left alone. Count in half gaps, then score count 1
+            # on the full grid: the model's beats only sit on every other count.
             seconds_per_count, phase_s, idx = _fit_grid(beat_times, median_gap / 2)
             count_idx = np.arange(int(idx[-1]) + 1)
             count_times = phase_s + seconds_per_count * count_idx
