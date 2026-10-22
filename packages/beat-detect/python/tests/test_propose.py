@@ -145,6 +145,29 @@ def test_weak_kick_margin_defers_to_the_model_downbeat(tmp_path, fake_model):
     assert any("weak guess" in w for w in result.warnings)
 
 
+def test_half_time_beats_are_doubled_and_count_one_is_the_bar_line(tmp_path, fake_model):
+    """Beat This!'s real output on the 2026-10-06 TikTok (~124 BPM): beats a
+    half-time 0.97 s apart plus a few real 0.48 s ones, downbeats every 2nd
+    beat. It shipped as 69 BPM with count 1 at 1.70 s, between two counts."""
+    beats = [0.32, 1.28, 2.26, 3.22, 4.2, 5.18, 6.14, 7.12, 8.12, 9.08, 10.04, 11.02,
+             12.0, 12.48, 12.98, 13.94, 14.44, 14.92, 15.9, 16.82]
+    downbeats = [1.28, 3.22, 5.18, 7.12, 9.08, 11.02, 12.98, 14.92, 16.82]
+    fake_model(beats, downbeats)
+    result = propose_grid(_render(tmp_path / "hats.wav", 17.5, hats=beats), clip_duration_s=17.5)
+    assert 120 < result.bpm < 127
+    assert abs(result.count_one_s - 1.28) < 0.05
+    assert any("half-time" in w for w in result.warnings)
+
+
+def test_genuinely_slow_song_with_four_beat_bars_is_not_doubled(tmp_path, fake_model):
+    """65 BPM with downbeats every 4 beats is a slow song, not half-time."""
+    beats = np.arange(0.3, 20, 60 / 65)
+    fake_model(beats, beats[::4])
+    result = propose_grid(_render(tmp_path / "slow.wav", 20.0, hats=beats, kicks=beats[::4]), clip_duration_s=20.0)
+    assert abs(result.bpm - 65) < 0.5
+    assert not any("half-time" in w for w in result.warnings)
+
+
 def test_real_model_on_synthesized_solo02_shape(tmp_path):
     """The one test that runs Beat This! itself. Skipped unless torch,
     beat-this and the cached final0 checkpoint are all present (CI caches it;
