@@ -116,9 +116,11 @@ interface DancerProps {
    * instead of remounting (no GLB suspend, no sole-lift re-measure).
    */
   look: DancerLook;
+  /** Drawn over the video: the pose stays where the reconstruction put it, no floor lift. */
+  overlay?: boolean;
 }
 
-function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, focusRef, glbUrl, look }: DancerProps) {
+function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, focusRef, glbUrl, look, overlay = false }: DancerProps) {
   const gltf = useGLTF(glbUrl);
   const ramp = useMemo(toonRamp, []);
 
@@ -238,14 +240,17 @@ function Dancer({ doc, personIndex, selectedIndex, timeRef, mirrored, onAbsent, 
    * JOINTS; the drawn sole hangs ~3 cm under them, so without this the feet sink
    * into the floor on almost every frame. Only for a placed dancer on a grounded
    * floor — a never-placed dancer has no position relative to any floor to correct.
+   * Never over the video: there the reconstruction already sits on the dancer's
+   * pixels, and lifting the soles onto an estimated floor moved the whole body off
+   * them (a floor fitted a few cm high read as the mesh floating above the dancer).
    */
   const floor = useMemo(() => {
     const plane = doc.grounding.status === "none" ? null : doc.grounding.floor_plane;
-    if (!plane || !placed) return null;
+    if (!plane || !placed || overlay) return null;
     const feet = ["foot_l", "foot_r"].flatMap((id) => regionMeshes.get(id) ?? []);
     if (!feet.length) return null;
     return { normal: new THREE.Vector3(...plane.normal).normalize(), point: new THREE.Vector3(...plane.point), feet };
-  }, [doc, placed, regionMeshes]);
+  }, [doc, placed, regionMeshes, overlay]);
   const lift = useRef<number[] | null>(null);
 
   /**
@@ -828,6 +833,7 @@ export default function Stage3D({
           look={dancerLook(i, selectedIndex, showEveryone)}
           onAbsent={i === selectedIndex ? onAbsent : undefined}
           focusRef={i === selectedIndex ? focusRef : undefined}
+          overlay={overlay}
         />
       ))}
       {/* No `selectedIndex` in the key any more: a remount is a hard cut, and with
