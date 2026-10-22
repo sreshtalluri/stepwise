@@ -205,6 +205,10 @@ function clickLeadS(): number {
   const knob = new URLSearchParams(window.location.search).get("clickLead");
   if (knob !== null && Number.isFinite(Number(knob))) return Number(knob) / 1000;
   const ua = navigator.userAgent;
+  // iPhone Safari, measured 2026-10-22: the click already sounds 102 ms BEFORE the
+  // music with no lead, so it is booked later, not earlier. Other WebKit keeps the
+  // 115 ms interim. Per-platform guesses; the real fix is one audio clock, see the PR description of this change.
+  if (/iPhone|iPad/.test(ua)) return -0.1;
   return /AppleWebKit/.test(ua) && !/Chrome|Chromium|Edg/.test(ua) ? 0.115 : 0;
 }
 
@@ -279,7 +283,7 @@ export function useMetronome(
       const now = ctx.currentTime;
       const rate = video.playbackRate;
       const gap = (0.4 * (mode === "ands" ? 0.5 : 1) * grid.secondsPerCount) / rate;
-      for (const c of clicksAhead({ grid, loop: loopRef.current, t: video.currentTime, rate, lookahead: LOOKAHEAD_S + lead, mode })) {
+      for (const c of clicksAhead({ grid, loop: loopRef.current, t: video.currentTime, rate, lookahead: LOOKAHEAD_S + Math.max(lead, 0), mode })) {
         const when = now + c.in - lead;
         if (when < now) continue; // too late to sound on time
         if (when < last + gap) continue; // already booked on an earlier tick
