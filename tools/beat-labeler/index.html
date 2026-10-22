@@ -371,11 +371,16 @@ function click(at, accent) {
 setInterval(() => {
   if (!clickOn || !audio || video.paused || !work) return;
   const t = video.currentTime, rate = video.playbackRate;
+  // The audio device plays a click this long after it is scheduled (~170 ms on
+  // Bluetooth), while the browser already delays the video's own sound to match.
+  // Uncompensated, the clicks land late and every label drifts early to meet them:
+  // the first 13 labels did, by 140-210 ms. Safari has no outputLatency (0).
+  const lat = (audio.outputLatency || 0) + (audio.baseLatency || 0);
   for (let n = countAt(t) + 1; ; n++) {
     const tc = work.one + n * work.spc;
-    if (tc - t > 0.15) break;
+    if (tc - t > 0.15 + lat) break;
     if (lastClick !== null && n <= lastClick) continue;
-    click(audio.currentTime + Math.max(0, (tc - t) / rate), ((n % 8) + 8) % 8 === 0);
+    click(audio.currentTime + Math.max(0, (tc - t) / rate - lat), ((n % 8) + 8) % 8 === 0);
     lastClick = n;
   }
 }, 25);
