@@ -36,21 +36,19 @@ import { clicksAhead, type ClickMode } from "../../lib/metronome";
  * "your turn" gap live on this clock, not on a timer of their own.
  */
 /**
- * How long after this rAF the WebGL canvas reaches the screen. Chrome composites the
- * canvas on the same vsync rVFC's `expectedDisplayTime` names, about one frame out.
- * WebKit (every iOS browser) shows the video through its own layer and the canvas a
- * vsync later, so with the exact `mediaTime` the mesh sat a frame behind the video
- * in the overlay — measured 2026-10-21: the data itself is in sync (+8 ms, mesh vs
- * pixel motion on job_8ffb), so the gap is display, not pipeline.
- * `?meshLead=<ms>` overrides it, to tune on a device by eye.
- * ponytail: a per-engine constant, not measured per device; upgrade if a device disagrees.
+ * `?meshLead=<ms>`: draw the mesh at the video time this many ms after the frame
+ * renders, to line it up with the video on a device that shows the WebGL canvas
+ * later than the `<video>`. Off by default (the exact rVFC `mediaTime`), because
+ * the one place it was measured needs none: iOS 26.5 Simulator Safari, a frame code
+ * burned into the video and a time code drawn into the canvas, ~970 frames per run
+ * (2026-10-21): no lead +4 ms (mesh behind), 33 ms lead -33 ms, 66 ms lead -62 ms.
+ * The learner's iPhone still showed the mesh a tick behind, which the Simulator
+ * (Mac GPU, no hardware video plane) cannot reproduce: tune it there, then bake it in.
  */
-function meshLatencyMs(): number {
-  if (typeof window === "undefined") return 17;
-  const knob = Number(new URLSearchParams(window.location.search).get("meshLead"));
-  if (Number.isFinite(knob) && knob !== 0) return knob;
-  const ua = navigator.userAgent;
-  return /AppleWebKit/.test(ua) && !/Chrome|Chromium|Edg/.test(ua) ? 33 : 17;
+function meshLatencyMs(): number | null {
+  if (typeof window === "undefined") return null;
+  const knob = new URLSearchParams(window.location.search).get("meshLead");
+  return knob !== null && Number.isFinite(Number(knob)) ? Number(knob) : null;
 }
 
 /** The video time on screen at `displayAt` (ms, performance.now() clock), carried
@@ -77,7 +75,7 @@ export function useVideoClock(
     return {
       get current() {
         const a = anchor.current;
-        if (!a || a.video.paused || a.video.seeking) return timeRef.current;
+        if (lead === null || !a || a.video.paused || a.video.seeking) return timeRef.current;
         return meshTimeAt(a, performance.now() + lead, a.video.playbackRate);
       },
     };
