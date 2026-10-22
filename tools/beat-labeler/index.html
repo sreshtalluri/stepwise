@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beat check · stepwise</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #221E1C; --paper: #F2EFE9; --accent: #F2891D; --card: #FBFAF7;
+    --line: rgba(34,30,28,.12); --soft: rgba(34,30,28,.55); --ok: #2F8F5B; --warn: #C2410C;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font-family: "Bricolage Grotesque", system-ui, sans-serif; background: var(--paper); color: var(--ink);
+         display: grid; grid-template-columns: 280px 1fr; grid-template-rows: auto 1fr; }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  kbd { font: 600 11px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px;
+        border-radius: 5px; padding: 1px 5px; background: var(--card); color: var(--soft); }
+
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 20px; padding: 14px 24px;
+           border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 800; font-size: 20px; letter-spacing: -.02em; }
+  .brand span { color: var(--accent); }
+  .progress { color: var(--soft); font-size: 14px; }
+  .score { margin-left: auto; display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .score b { font-weight: 700; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; background: var(--card); white-space: nowrap; }
+  .chip.lead { border-color: var(--accent); }
+
+  aside { border-right: 1px solid var(--line); overflow-y: auto; padding: 10px; }
+  .clip { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; align-items: center; width: 100%;
+          text-align: left; border: 0; background: none; padding: 10px; border-radius: 10px; }
+  .clip:hover { background: rgba(34,30,28,.05); }
+  .clip.on { background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--soft); }
+  .dot.done { background: var(--ok); border-color: var(--ok); }
+  .dot.fixed { background: var(--accent); border-color: var(--accent); }
+  .clip .t { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clip .s { font-size: 12px; color: var(--soft); }
+  .clip .bpm { font-size: 12px; color: var(--soft); font-variant-numeric: tabular-nums; }
+
+  main { overflow-y: auto; padding: 20px 24px 40px; display: grid; grid-template-columns: minmax(320px, 440px) 1fr; gap: 24px; align-content: start; }
+  .stage { position: relative; background: #000; border-radius: 16px; overflow: hidden; aspect-ratio: 9 / 16; height: calc(100vh - 250px); max-width: 100%; margin: 0 auto; }
+  .left { display: grid; gap: 12px; align-content: start; min-width: 0; }
+  .stage video { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .numeral { position: absolute; left: 14px; bottom: 10px; font-weight: 800; font-size: 104px; line-height: 1; color: #fff;
+             text-shadow: 0 2px 18px rgba(0,0,0,.45); font-variant-numeric: tabular-nums; transition: transform .08s; pointer-events: none; }
+  .numeral.one { color: var(--accent); }
+  .numeral.pulse { transform: scale(1.08); }
+  .numeral.pre { opacity: .45; }
+  .eight { position: absolute; right: 14px; bottom: 22px; display: flex; gap: 5px; pointer-events: none; }
+  .eight i { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,.35); }
+  .eight i.on { background: #fff; }
+  .eight i.on:first-child { background: var(--accent); }
+  .playbar { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; gap: 8px; align-items: center; }
+  .pill { background: rgba(0,0,0,.55); color: #fff; border: 0; border-radius: 999px; padding: 6px 12px; font-size: 13px; backdrop-filter: blur(6px); }
+  .pill.on { background: var(--accent); color: var(--ink); }
+  select.pill { appearance: none; -webkit-appearance: none; cursor: pointer; }
+  .time { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  canvas { display: block; width: 100%; border-radius: 12px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; }
+  #zoom { height: 84px; }
+  #over { height: 18px; margin-top: 6px; }
+
+  .panel { display: grid; gap: 16px; align-content: start; }
+  h1 { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
+  .sub { color: var(--soft); font-size: 14px; margin-top: 4px; }
+  h2 { margin: 0 0 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--soft); }
+  .cands { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+  .cand { text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: grid; gap: 4px; }
+  .cand:hover { border-color: rgba(34,30,28,.35); }
+  .cand.base { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .cand .name { font-weight: 700; font-size: 14px; display: flex; justify-content: space-between; gap: 6px; }
+  .cand .big { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .cand .meta { font-size: 12px; color: var(--soft); }
+  .cand .vs { font-size: 12px; font-weight: 600; }
+  .vs.same { color: var(--ok); } .vs.diff { color: var(--warn); }
+  .cand[disabled] { opacity: .45; cursor: default; }
+
+  .editor { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: grid; gap: 14px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .field { display: grid; gap: 2px; min-width: 120px; }
+  .field label { font-size: 12px; color: var(--soft); }
+  .field input { font-size: 26px; font-weight: 800; width: 130px; border: 0; background: none; padding: 0; font-variant-numeric: tabular-nums; }
+  .field input:focus { outline: none; box-shadow: 0 2px 0 var(--accent); }
+  .btn { border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 8px 12px; font-size: 14px; font-weight: 600;
+         display: inline-flex; gap: 8px; align-items: center; }
+  .btn:hover { border-color: rgba(34,30,28,.4); }
+  .btn kbd { margin-left: 2px; }
+  .btn.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .btn.primary kbd { background: transparent; color: rgba(242,239,233,.7); border-color: rgba(242,239,233,.3); }
+  .btn.accent { background: var(--accent); border-color: var(--accent); }
+  .verdict { font-size: 15px; font-weight: 700; }
+  .verdict.same { color: var(--ok); } .verdict.diff { color: var(--warn); }
+  textarea { width: 100%; min-height: 54px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: #fff; resize: vertical; font-size: 14px; }
+  .vol { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--soft); }
+  .vol input { width: 90px; accent-color: var(--accent); }
+  .keys { font-size: 12px; color: var(--soft); display: flex; flex-wrap: wrap; gap: 6px 14px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--soft); margin-top: 8px; }
+  .legend b { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+  .legend .l1 { width: 3px; height: 11px; border-radius: 1px; background: var(--accent); }
+  .legend .lb { background: rgba(34,30,28,.35); } .legend .ld { background: var(--accent); }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; background: var(--ink); color: var(--paper);
+           padding: 10px 16px; border-radius: 999px; font-size: 14px; transition: all .2s; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translateX(-50%); }
+  @media (max-width: 1000px) { body { grid-template-columns: 1fr; } aside { display: none; } main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">stepwise <span>beat check</span></div>
+  <div class="progress" id="progress"></div>
+  <div class="score" id="score" title="Labelled clips where the model's tempo is within 3% and its count 1 is on the same beat of the bar as yours"></div>
+</header>
+<aside id="list" aria-label="Clips"></aside>
+<main>
+  <div class="left">
+  <div class="stage" id="stage">
+    <video id="video" playsinline preload="auto"></video>
+    <div class="playbar">
+      <button class="pill" id="play" aria-label="Play or pause">Play</button>
+      <button class="pill" id="from1" title="Jump to two counts before count 1 (R)">From 1</button>
+      <select class="pill" id="rate" aria-label="Speed"><option value="1">1×</option><option value="0.75">0.75×</option><option value="0.5">0.5×</option></select>
+      <span class="pill time" id="time">0.00 s</span>
+    </div>
+    <div class="numeral" id="numeral">–</div>
+    <div class="eight" id="eight" aria-hidden="true"></div>
+  </div>
+  <div>
+    <canvas id="zoom" aria-label="Beat timeline around the playhead; click to seek"></canvas>
+    <canvas id="over" aria-label="Whole clip; click to seek"></canvas>
+    <div class="legend"><span><b class="l1"></b>your count 1</span><span><b class="lb"></b>model beat</span><span><b class="ld"></b>model downbeat</span><span>click to seek</span></div>
+  </div>
+  </div>
+
+  <section class="panel">
+    <div>
+      <h1 id="title">Loading…</h1>
+      <div class="sub" id="subtitle"></div>
+    </div>
+    <div>
+      <h2>Model guesses: pick the closest, then fix it below</h2>
+      <div class="cands" id="cands"></div>
+    </div>
+    <div class="editor">
+      <div class="row" style="gap:28px">
+        <div class="field"><label for="bpm">Tempo (BPM)</label><input id="bpm" inputmode="decimal"></div>
+        <div class="field"><label for="one">Count 1 at (s)</label><input id="one" inputmode="decimal"></div>
+        <div class="field"><label>Compared with the picked guess</label><div class="verdict" id="verdict"></div></div>
+      </div>
+      <div class="row">
+        <button class="btn" data-act="shift:-1">1 a beat earlier <kbd>←</kbd></button>
+        <button class="btn" data-act="shift:1">1 a beat later <kbd>→</kbd></button>
+        <button class="btn" data-act="shift:4">1 ↔ 5 <kbd>⇧→</kbd></button>
+        <button class="btn" data-act="nudge:-0.01">−10 ms <kbd>,</kbd></button>
+        <button class="btn" data-act="nudge:0.01">+10 ms <kbd>.</kbd></button>
+      </div>
+      <div class="row">
+        <button class="btn" data-act="double">Tempo ×2 <kbd>D</kbd></button>
+        <button class="btn" data-act="half">Tempo ÷2 <kbd>H</kbd></button>
+        <button class="btn" data-act="tap" id="tapBtn">Tap tempo <kbd>T</kbd></button>
+        <button class="btn" data-act="here">Count 1 is here <kbd>O</kbd></button>
+      </div>
+      <div class="row">
+        <button class="btn" id="clickBtn" data-act="click">Click track <kbd>C</kbd></button>
+        <span class="vol">click <input type="range" id="clickVol" min="0" max="1" step="0.05" value="0.6" aria-label="Click volume"></span>
+        <span class="vol">music <input type="range" id="musicVol" min="0" max="1" step="0.05" value="0.8" aria-label="Music volume"></span>
+      </div>
+      <textarea id="notes" placeholder="Anything else? e.g. tempo changes at 12 s, intro has no beat, it's in 3…"></textarea>
+      <div class="row">
+        <button class="btn primary" data-act="save">Save &amp; next <kbd>↵</kbd></button>
+        <button class="btn" data-act="skip">Skip <kbd>N</kbd></button>
+        <span class="sub" id="saved"></span>
+      </div>
+    </div>
+    <div class="keys">
+      <span><kbd>Space</kbd> play</span><span><kbd>R</kbd> from count 1</span><span><kbd>[</kbd><kbd>]</kbd> back / forward 2 s</span>
+      <span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> pick a guess</span><span><kbd>↑</kbd><kbd>↓</kbd> previous / next clip</span>
+    </div>
+  </section>
+
+</main>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const video = $("video");
+const CANDS = [
+  ["shipped", "Live now", "What the lesson uses today"],
+  ["final0", "Beat This! final0", "Production model + half-time fix"],
+  ["small0", "Beat This! small0", "Smaller checkpoint, same rules"],
+  ["owner", "Your label (Sept)", "Count 1 you set on the owner page"],
+];
+let clips = [], labels = {}, idx = 0;
+let work = null;            // { one, spc, base }
+let clickOn = false, taps = [];
+
+const bpmOf = (spc) => 60 / spc;
+const fmt = (x, d = 2) => (x == null ? "–" : x.toFixed(d));
+const cand = (c, key) => {
+  if (key === "owner") return c.owner_label ? { one: c.owner_label.count_one_s, spc: 60 / c.owner_label.bpm } : null;
+  const g = c.candidates[key];
+  return g ? { one: g.count_one_s, spc: g.seconds_per_count, raw: g } : null;
+};
+
+/** How grid b differs from grid a, in a dancer's words. */
+function compare(a, b) {
+  const r = a.spc / b.spc;
+  let tempo = Math.abs(r - 1) < 0.03 ? "same" : Math.abs(r - 2) < 0.06 ? "double" : Math.abs(r - 0.5) < 0.03 ? "half" : "other";
+  if (tempo === "other") return { tempo, text: `tempo ${fmt(bpmOf(b.spc), 1)} vs ${fmt(bpmOf(a.spc), 1)}`, same: false };
+  // Counted in a's beats, the grid being judged: "×2, 1 a beat later" means a beat
+  // of the guess, whatever the new tempo is.
+  const beats = (b.one - a.one) / a.spc;
+  const whole = Math.round(beats);
+  const off = Math.abs(beats - whole) * a.spc;
+  const inBar = ((whole % 4) + 4) % 4;
+  const shift = inBar === 3 ? -1 : inBar;           // -1, 0, 1, 2 beats within the bar
+  const parts = [];
+  if (tempo === "double") parts.push("tempo ×2");
+  if (tempo === "half") parts.push("tempo ÷2");
+  if (off > 0.07) parts.push(Math.abs(off - a.spc / 2) < 0.07 ? "1 moved to an “and”" : `1 moved ${Math.round(off * 1000)} ms off the beat`);
+  else if (shift) parts.push(shift === 2 ? "1 moved 2 beats (1 ↔ 3)" : `1 a beat ${shift > 0 ? "later" : "earlier"}`);
+  return { tempo, shift, offMs: Math.round(off * 1000), same: !parts.length, text: parts.length ? parts.join(", ") : "same grid" };
+}
+
+/** A model is right on a clip when its tempo and its bar phase match the label. */
+function hit(c, key) {
+  const l = labels[c.job_id], g = cand(c, key);
+  if (!l || l.skipped || !g) return null;
+  const v = compare({ one: l.count_one_s, spc: l.seconds_per_count }, g);
+  return v.tempo === "same" && v.offMs <= 70 && !v.shift;
+}
+
+// ------------------------------------------------------------------ render
+function renderList() {
+  $("list").innerHTML = clips.map((c, i) => {
+    const l = labels[c.job_id];
+    const dot = !l ? "" : l.skipped ? "" : l.verdict === "same grid" ? "done" : "fixed";
+    const bpm = l && !l.skipped ? l.bpm : c.candidates.final0.bpm;
+    return `<button class="clip ${i === idx ? "on" : ""}" data-i="${i}"><span class="dot ${dot}"></span>
+      <span><div class="t">${c.title}${c.copy_of ? " · copy" : ""}</div><div class="s">${l ? (l.skipped ? "skipped" : l.verdict) : "not checked"}</div></span>
+      <span class="bpm">${fmt(bpm, 0)}</span></button>`;
+  }).join("");
+  const done = clips.filter((c) => labels[c.job_id] && !labels[c.job_id].skipped).length;
+  $("progress").textContent = `${done} of ${clips.length} checked`;
+  const scores = CANDS.slice(0, 3).map(([key, name]) => {
+    const hs = clips.map((c) => hit(c, key)).filter((h) => h !== null);
+    return { name, n: hs.length, ok: hs.filter(Boolean).length };
+  });
+  const best = Math.max(...scores.map((s) => (s.n ? s.ok / s.n : -1)));
+  $("score").innerHTML = done ? "right so far " + scores.map((s) =>
+    `<span class="chip ${s.n && s.ok / s.n === best ? "lead" : ""}">${s.name.replace("Beat This! ", "")} <b>${s.ok}/${s.n}</b></span>`).join("") : "";
+}
+
+function renderCands() {
+  const c = clips[idx];
+  $("cands").innerHTML = CANDS.map(([key, name, about], i) => {
+    const g = cand(c, key);
+    if (!g) return `<button class="cand" disabled><div class="name">${name}</div><div class="meta">${key === "owner" ? "not labelled before" : "not available for this clip"}</div></button>`;
+    const v = compare(work, g);
+    const conf = g.raw && g.raw.confidence != null ? `grid ${fmt(g.raw.confidence)} · count 1 ${fmt(g.raw.count_one_confidence)}` : about;
+    return `<button class="cand ${work.base === key ? "base" : ""}" data-key="${key}" title="${about}${g.raw && g.raw.warnings && g.raw.warnings.length ? "\n" + g.raw.warnings.join("\n") : ""}">
+      <div class="name"><span>${name}</span>${i < 3 ? `<kbd>${i + 1}</kbd>` : ""}</div>
+      <div class="big">${fmt(bpmOf(g.spc), 1)} <span style="font-size:13px;font-weight:600">BPM</span></div>
+      <div class="meta">count 1 at ${fmt(g.one)} s</div><div class="meta">${conf}</div>
+      <div class="vs ${v.same ? "same" : "diff"}">${v.same ? "= your grid" : v.text}</div></button>`;
+  }).join("");
+}
+
+function renderEditor() {
+  if (document.activeElement !== $("bpm")) $("bpm").value = fmt(bpmOf(work.spc), 2);
+  if (document.activeElement !== $("one")) $("one").value = fmt(work.one, 3);
+  const base = cand(clips[idx], work.base);
+  const v = base ? compare(base, work) : { same: true, text: "" };
+  $("verdict").textContent = v.same ? "unchanged ✓" : v.text;
+  $("verdict").className = "verdict " + (v.same ? "same" : "diff");
+  $("clickBtn").classList.toggle("accent", clickOn);
+  renderCands();
+}
+
+function load(i) {
+  idx = (i + clips.length) % clips.length;
+  const c = clips[idx], l = labels[c.job_id];
+  video.src = "data/" + c.video;
+  video.playbackRate = +$("rate").value;
+  const g = cand(c, l && !l.skipped ? l.base : "final0");
+  work = l && !l.skipped ? { one: l.count_one_s, spc: l.seconds_per_count, base: l.base } : { one: g.one, spc: g.spc, base: "final0" };
+  $("notes").value = (l && l.notes) || "";
+  $("title").textContent = c.title + (c.copy_of ? " (copy)" : "");
+  $("subtitle").textContent = [c.track, `${fmt(c.duration_s, 1)} s`, c.owner_label ? `labelled before as ${c.owner_label.clip}` : null].filter(Boolean).join(" · ");
+  $("saved").textContent = l ? (l.skipped ? "skipped earlier" : `saved ${new Date(l.labelled_at).toLocaleString()}`) : "";
+  taps = [];
+  renderList(); renderEditor();
+  $("list").querySelector(".on")?.scrollIntoView({ block: "nearest" });
+}
+
+// ------------------------------------------------------------------ edits
+function act(a) {
+  const [name, arg] = a.split(":");
+  const c = clips[idx];
+  if (name === "shift") work.one += +arg * work.spc;
+  if (name === "nudge") work.one += +arg;
+  if (name === "double") work.spc /= 2;
+  if (name === "half") work.spc *= 2;
+  if (name === "here") {
+    // Snap to the nearest beat any model heard, within 80 ms: a press is late.
+    const t = video.currentTime;
+    const beats = ["final0", "small0"].flatMap((k) => c.candidates[k]?.beats ?? []);
+    const near = beats.reduce((b, x) => (Math.abs(x - t) < Math.abs(b - t) ? x : b), Infinity);
+    work.one = Math.abs(near - t) < 0.08 ? near : t;
+    toast(Math.abs(near - t) < 0.08 ? "Count 1 set, snapped to the beat" : "Count 1 set (no beat nearby to snap to)");
+  }
+  if (name === "tap") {
+    const now = performance.now();
+    if (taps.length && now - taps[taps.length - 1] > 2000) taps = [];
+    taps.push(now);
+    if (taps.length >= 4) {
+      const gaps = taps.slice(1).map((t, i) => t - taps[i]).sort((x, y) => x - y);
+      work.spc = (gaps[gaps.length >> 1] / 1000) * video.playbackRate;
+      toast(`Tapped ${fmt(bpmOf(work.spc), 1)} BPM (${taps.length} taps)`);
+    } else toast(`Keep tapping… ${taps.length}/4`);
+  }
+  if (name === "click") { clickOn = !clickOn; ensureAudio(); }
+  if (name === "save") return save();
+  if (name === "skip") return save(true);
+  while (work.one < 0) work.one += 8 * work.spc;
+  lastClick = null;
+  renderEditor();
+}
+
+async function save(skipped = false) {
+  const c = clips[idx], base = cand(c, work.base);
+  const v = skipped ? null : compare(base, work);
+  labels[c.job_id] = skipped ? { skipped: true, labelled_at: new Date().toISOString() } : {
+    title: c.title, count_one_s: +work.one.toFixed(3), seconds_per_count: +work.spc.toFixed(5), bpm: +bpmOf(work.spc).toFixed(2),
+    base: work.base, verdict: v.text, tempo_vs_base: v.tempo, shift_beats_vs_base: v.shift ?? null,
+    notes: $("notes").value.trim() || null, labelled_at: new Date().toISOString(),
+  };
+  const r = await fetch("/labels", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(labels) });
+  if (!r.ok) return toast("Couldn't save. Is server.py still running?");
+  toast(skipped ? "Skipped" : `Saved · ${v.same ? "model was right" : v.text}`);
+  const next = clips.findIndex((x, i) => i > idx && !labels[x.job_id]);
+  load(next >= 0 ? next : idx + 1);
+}
+
+// ------------------------------------------------------------------ count + click
+let lastCount = null, lastClick = null, audio = null, clickGain = null;
+const countAt = (t) => Math.floor((t - work.one) / work.spc + 1e-6);
+
+function ensureAudio() {
+  if (audio) return;
+  audio = new AudioContext();
+  clickGain = audio.createGain();
+  clickGain.gain.value = +$("clickVol").value;
+  clickGain.connect(audio.destination);
+}
+function click(at, accent) {
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.frequency.value = accent ? 1760 : 1100;
+  g.gain.setValueAtTime(accent ? 1 : 0.55, at);
+  g.gain.exponentialRampToValueAtTime(0.001, at + 0.05);
+  o.connect(g).connect(clickGain);
+  o.start(at); o.stop(at + 0.06);
+}
+// Lookahead scheduler: clicks are placed on the audio clock from the video's time,
+// so they land on the count even when the main thread is busy drawing.
+setInterval(() => {
+  if (!clickOn || !audio || video.paused || !work) return;
+  const t = video.currentTime, rate = video.playbackRate;
+  for (let n = countAt(t) + 1; ; n++) {
+    const tc = work.one + n * work.spc;
+    if (tc - t > 0.15) break;
+    if (lastClick !== null && n <= lastClick) continue;
+    click(audio.currentTime + Math.max(0, (tc - t) / rate), ((n % 8) + 8) % 8 === 0);
+    lastClick = n;
+  }
+}, 25);
+video.addEventListener("seeking", () => (lastClick = null));
+video.addEventListener("pause", () => (lastClick = null));
+
+const eight = $("eight");
+eight.innerHTML = "<i></i>".repeat(8);
+function frame() {
+  requestAnimationFrame(frame);
+  if (!work) return;
+  const t = video.currentTime, n = countAt(t), k = ((n % 8) + 8) % 8;
+  const num = $("numeral");
+  if (n !== lastCount) {
+    lastCount = n;
+    num.textContent = k + 1;
+    num.className = "numeral" + (k === 0 ? " one" : "") + (n < 0 ? " pre" : "");
+    if (!video.paused) { num.classList.add("pulse"); setTimeout(() => num.classList.remove("pulse"), 90); }
+    [...eight.children].forEach((d, i) => d.classList.toggle("on", i <= k));
+  }
+  $("time").textContent = `${t.toFixed(2)} s`;
+  $("play").textContent = video.paused ? "Play" : "Pause";
+  drawZoom(t); drawOver(t);
+}
+
+// ------------------------------------------------------------------ timelines
+const WINDOW = 6, LEAD = 0.35;
+function sized(cv) {
+  const r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  if (cv.width !== Math.round(r.width * dpr)) { cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, r.width, r.height);
+  return [ctx, r.width, r.height];
+}
+function drawZoom(t) {
+  const [ctx, w, h] = sized($("zoom"));
+  const t0 = t - WINDOW * LEAD, x = (s) => ((s - t0) / WINDOW) * w;
+  const c = clips[idx], base = c.candidates[work.base] ?? c.candidates.final0;
+  // The model's own beats and downbeats, under the grid.
+  ctx.fillStyle = "rgba(34,30,28,.35)";
+  for (const b of base.beats) if (b > t0 - 1 && b < t0 + WINDOW + 1) { ctx.beginPath(); ctx.arc(x(b), h - 12, 3, 0, 7); ctx.fill(); }
+  ctx.fillStyle = "#F2891D";
+  for (const b of base.downbeats) if (b > t0 - 1 && b < t0 + WINDOW + 1) { ctx.beginPath(); ctx.arc(x(b), h - 24, 3.5, 0, 7); ctx.fill(); }
+  // Your grid.
+  ctx.font = "700 13px 'Bricolage Grotesque', system-ui";
+  for (let n = countAt(t0) - 1; work.one + n * work.spc < t0 + WINDOW; n++) {
+    const s = work.one + n * work.spc, k = ((n % 8) + 8) % 8, px = x(s);
+    ctx.fillStyle = k === 0 ? "#F2891D" : k === 4 ? "rgba(34,30,28,.55)" : "rgba(34,30,28,.22)";
+    ctx.fillRect(px - (k === 0 ? 1.5 : 0.5), 8, k === 0 ? 3 : 1, h - 44);
+    ctx.fillStyle = k === 0 ? "#F2891D" : "rgba(34,30,28,.6)";
+    ctx.fillText(String(k + 1), px + 4, 22);
+  }
+  ctx.fillStyle = "#221E1C";
+  ctx.fillRect(x(t) - 1, 0, 2, h);
+}
+function drawOver(t) {
+  const [ctx, w, h] = sized($("over"));
+  const d = clips[idx].duration_s, x = (s) => (s / d) * w;
+  ctx.fillStyle = "rgba(34,30,28,.08)";
+  ctx.fillRect(x(t - WINDOW * LEAD), 0, (WINDOW / d) * w, h);
+  ctx.fillStyle = "#F2891D";
+  for (let s = work.one; s < d; s += 8 * work.spc) ctx.fillRect(x(s) - 1, 4, 2, h - 8);
+  ctx.fillStyle = "#221E1C";
+  ctx.fillRect(x(t) - 1, 0, 2, h);
+}
+$("zoom").addEventListener("click", (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  video.currentTime = Math.max(0, video.currentTime - WINDOW * LEAD + ((e.clientX - r.left) / r.width) * WINDOW);
+});
+$("over").addEventListener("click", (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  video.currentTime = ((e.clientX - r.left) / r.width) * clips[idx].duration_s;
+});
+
+// ------------------------------------------------------------------ wiring
+function toast(msg) {
+  const el = $("toast");
+  el.textContent = msg; el.classList.add("show");
+  clearTimeout(toast.h); toast.h = setTimeout(() => el.classList.remove("show"), 1600);
+}
+const togglePlay = () => { ensureAudio(); audio.resume(); video.paused ? video.play() : video.pause(); };
+const from1 = () => { video.currentTime = Math.max(0, work.one - 2 * work.spc); if (video.paused) togglePlay(); };
+$("play").onclick = togglePlay;
+$("from1").onclick = from1;
+$("stage").addEventListener("click", (e) => { if (e.target === video) togglePlay(); });
+$("rate").onchange = (e) => { video.playbackRate = +e.target.value; e.target.blur(); };
+$("clickVol").oninput = (e) => { ensureAudio(); clickGain.gain.value = +e.target.value; };
+$("musicVol").oninput = (e) => (video.volume = +e.target.value);
+video.volume = +$("musicVol").value;
+$("list").addEventListener("click", (e) => { const b = e.target.closest(".clip"); if (b) load(+b.dataset.i); });
+$("cands").addEventListener("click", (e) => {
+  const b = e.target.closest(".cand[data-key]"); if (!b) return;
+  const g = cand(clips[idx], b.dataset.key);
+  work = { one: g.one, spc: g.spc, base: b.dataset.key }; lastClick = null; renderEditor();
+});
+document.querySelectorAll("[data-act]").forEach((b) => (b.onclick = () => act(b.dataset.act)));
+$("bpm").addEventListener("change", (e) => { const v = parseFloat(e.target.value); if (v > 20 && v < 400) work.spc = 60 / v; lastClick = null; renderEditor(); });
+$("one").addEventListener("change", (e) => { const v = parseFloat(e.target.value); if (v >= 0) work.one = v; lastClick = null; renderEditor(); });
+for (const id of ["bpm", "one"]) $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); });
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input, textarea, select") || e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key;
+  const map = {
+    " ": togglePlay, r: from1, R: from1,
+    ArrowLeft: () => act(e.shiftKey ? "shift:-4" : "shift:-1"), ArrowRight: () => act(e.shiftKey ? "shift:4" : "shift:1"),
+    ",": () => act("nudge:-0.01"), ".": () => act("nudge:0.01"),
+    d: () => act("double"), h: () => act("half"), t: () => act("tap"), o: () => act("here"), c: () => act("click"),
+    "[": () => (video.currentTime = Math.max(0, video.currentTime - 2)), "]": () => (video.currentTime += 2),
+    Enter: () => act("save"), n: () => act("skip"), ArrowUp: () => load(idx - 1), ArrowDown: () => load(idx + 1),
+    1: () => $("cands").querySelector('[data-key="shipped"]')?.click(), 2: () => $("cands").querySelector('[data-key="final0"]')?.click(),
+    3: () => $("cands").querySelector('[data-key="small0"]')?.click(),
+  };
+  const f = map[k] ?? map[k.toLowerCase()];
+  if (f) { e.preventDefault(); f(); }
+});
+
+(async () => {
+  [clips, labels] = await Promise.all([fetch("data/clips.json").then((r) => r.json()), fetch("/labels").then((r) => r.json())]);
+  const first = clips.findIndex((c) => !labels[c.job_id]);
+  load(first >= 0 ? first : 0);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
