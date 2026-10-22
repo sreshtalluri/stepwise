@@ -117,7 +117,7 @@ export function AnglePane({ l, angle, focus }: { l: Lesson; angle: ViewId; focus
         selectedIndex={l.selected}
         view={angle}
         mirrored={l.mirrored}
-        timeRef={l.timeRef}
+        timeRef={l.meshTimeRef}
         follow={l.follow}
         focusRef={focus ? l.focusRef : undefined}
         glbUrls={l.glbUrls}
@@ -170,7 +170,7 @@ export function MainStage({
       {view === "overlay" && (
         // Mirrored by CSS with the video, never on the mesh, so the two flip together.
         <div className="ls-overlay" style={mirrored ? { transform: "scaleX(-1)" } : undefined}>
-          <Stage doc={l.doc} selectedIndex={l.selected} view="overlay" mirrored={false} timeRef={l.timeRef} glbUrls={l.glbUrls} onAbsent={l.setAbsent} showEveryone={l.showEveryone} overlay />
+          <Stage doc={l.doc} selectedIndex={l.selected} view="overlay" mirrored={false} timeRef={l.meshTimeRef} glbUrls={l.glbUrls} onAbsent={l.setAbsent} showEveryone={l.showEveryone} overlay />
         </div>
       )}
       {view === "overlay" && l.multi && <DancerMarkers l={l} />}

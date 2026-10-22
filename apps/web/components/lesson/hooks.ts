@@ -35,6 +35,32 @@ import { clicksAhead, type ClickMode } from "../../lib/metronome";
  * once per wrap, and is what advances the lesson's rounds: the build-up ramp and the
  * "your turn" gap live on this clock, not on a timer of their own.
  */
+/**
+ * How long after this rAF the WebGL canvas reaches the screen. Chrome composites the
+ * canvas on the same vsync rVFC's `expectedDisplayTime` names, about one frame out.
+ * WebKit (every iOS browser) shows the video through its own layer and the canvas a
+ * vsync later, so with the exact `mediaTime` the mesh sat a frame behind the video
+ * in the overlay — measured 2026-10-21: the data itself is in sync (+8 ms, mesh vs
+ * pixel motion on job_8ffb), so the gap is display, not pipeline.
+ * `?meshLead=<ms>` overrides it, to tune on a device by eye.
+ * ponytail: a per-engine constant, not measured per device; upgrade if a device disagrees.
+ */
+function meshLatencyMs(): number {
+  if (typeof window === "undefined") return 17;
+  const knob = Number(new URLSearchParams(window.location.search).get("meshLead"));
+  if (Number.isFinite(knob) && knob !== 0) return knob;
+  const ua = navigator.userAgent;
+  return /AppleWebKit/.test(ua) && !/Chrome|Chromium|Edg/.test(ua) ? 33 : 17;
+}
+
+/** The video time on screen at `displayAt` (ms, performance.now() clock), carried
+ * forward from the last rVFC frame. Clamped to 0.1 s: a stalled video must not run
+ * the mesh off on its own. */
+export function meshTimeAt(anchor: { media: number; at: number }, displayAt: number, rate: number): number {
+  const ahead = ((displayAt - anchor.at) / 1000) * rate;
+  return anchor.media + Math.min(Math.max(ahead, 0), 0.1);
+}
+
 export function useVideoClock(
   video: HTMLVideoElement | null,
   loopRef: React.RefObject<[number, number] | null>,
@@ -42,6 +68,20 @@ export function useVideoClock(
 ) {
   const timeRef = useRef(0);
   const [displayTime, setDisplayTime] = useState(0);
+  // The video time on screen when the mesh drawn now gets there: the last rVFC
+  // frame, carried forward at the playback rate. Only the 3D view reads it; counts,
+  // loops and crops stay on `timeRef`. Paused, seeking or without rVFC: `timeRef`.
+  const anchor = useRef<{ media: number; at: number; video: HTMLVideoElement } | null>(null);
+  const [meshTimeRef] = useState(() => {
+    const lead = meshLatencyMs();
+    return {
+      get current() {
+        const a = anchor.current;
+        if (!a || a.video.paused || a.video.seeking) return timeRef.current;
+        return meshTimeAt(a, performance.now() + lead, a.video.playbackRate);
+      },
+    };
+  });
 
   useEffect(() => {
     if (!video) return;
@@ -58,6 +98,7 @@ export function useVideoClock(
       if (loop && t >= loop[1] && !video.paused) {
         // Set, not stepped, so no arithmetic accumulates over forty minutes of loops.
         video.currentTime = loop[0];
+        anchor.current = null;
         t = loop[0];
         timeRef.current = t;
         onWrapRef.current?.();
@@ -70,9 +111,10 @@ export function useVideoClock(
     };
 
     const hasRvfc = typeof (video as any).requestVideoFrameCallback === "function";
-    const step = (_now: number, meta: { mediaTime: number }) => {
+    const step = (now: number, meta: { mediaTime: number; expectedDisplayTime?: number }) => {
       if (cancelled) return;
       lastFrameAt = performance.now();
+      anchor.current = { media: meta.mediaTime, at: meta.expectedDisplayTime ?? now, video };
       publish(meta.mediaTime);
       rvfcHandle = (video as any).requestVideoFrameCallback(step);
     };
@@ -86,12 +128,16 @@ export function useVideoClock(
 
     // rVFC does not fire while paused, so a scrub with the video stopped would leave
     // the body on the old pose without this.
-    const onSeek = () => publish(video.currentTime);
+    const onSeek = () => {
+      anchor.current = null;
+      publish(video.currentTime);
+    };
     video.addEventListener("seeked", onSeek);
     video.addEventListener("loadedmetadata", onSeek);
 
     return () => {
       cancelled = true;
+      anchor.current = null;
       if (hasRvfc && rvfcHandle) (video as any).cancelVideoFrameCallback(rvfcHandle);
       cancelAnimationFrame(rafHandle);
       video.removeEventListener("seeked", onSeek);
@@ -99,7 +145,7 @@ export function useVideoClock(
     };
   }, [video, loopRef, onWrapRef]);
 
-  return { timeRef, displayTime };
+  return { timeRef, meshTimeRef, displayTime };
 }
 
 /**

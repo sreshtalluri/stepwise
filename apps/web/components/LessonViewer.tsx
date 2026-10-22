@@ -277,7 +277,7 @@ function useLesson(
   const loopRef = useRef<[number, number] | null>(null);
   loopRef.current = loopTimes(loop);
   const onWrapRef = useRef<(() => void) | null>(null);
-  const { timeRef, displayTime } = useVideoClock(video, loopRef, onWrapRef);
+  const { timeRef, meshTimeRef, displayTime } = useVideoClock(video, loopRef, onWrapRef);
   const [playing, setPlayingState] = useState(false);
   const playingRef = useRef(false);
   const setPlaying = useCallback((p: boolean) => {
@@ -521,7 +521,7 @@ function useLesson(
 
   return {
     doc, title, videoUrl, credit, glbUrls, lessonId, endS, aspect, wide,
-    video, setVideo, timeRef, displayTime, playing, setPlaying, play, pause, togglePlay, seek,
+    video, setVideo, timeRef, meshTimeRef, displayTime, playing, setPlaying, play, pause, togglePlay, seek,
     structure, editStructure, authored, countsFrom, oneUnsure, oneChecked, tapOne, nudgeOne, tryOne, alternates,
     eights, loop, setLoop, loopEight, here, hereCount, stepLoop, loopLen, setLoopLen, next, done, sameSpan,
     speed, speedPick, pickSpeed, cycleSpeed, nudgeSpeed, buildUp, setBuildUp, passes, setHoldSlow,
