@@ -18,6 +18,7 @@ import {
 import { dancerBox, stillCrop } from "../../lib/dancers";
 import { countAtTime, type CountGrid } from "../../../../packages/navigation/src/core";
 import { clicksAhead, type ClickMode } from "../../lib/metronome";
+import { audioContext, clockEvents, clockRef } from "./audioClock";
 
 /**
  * The video is the clock. `requestVideoFrameCallback` hands back the exact
@@ -177,16 +178,14 @@ let audio: { ctx: AudioContext; out: GainNode } | null = null;
  * Chrome's autoplay policy) only let audio start from a user gesture.
  */
 export function unlockAudio() {
-  if (typeof window === "undefined") return null;
+  const ctx = audioContext();
+  if (!ctx) return null;
   if (!audio) {
-    const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
-    if (!Ctx) return null;
-    const ctx: AudioContext = new Ctx();
     const out = ctx.createGain();
     out.connect(ctx.destination);
     audio = { ctx, out };
   }
-  if (audio.ctx.state !== "running") void audio.ctx.resume().catch(() => {});
+  if (ctx.state !== "running") void ctx.resume().catch(() => {});
   return audio;
 }
 
@@ -246,7 +245,7 @@ export function useMetronome(
     if (!a) return;
     const { ctx, out } = a;
     out.gain.value = volume * volume;
-    const lead = clickLeadS();
+    const videoLead = clickLeadS();
     let booked: { when: number; node: GainNode }[] = [];
     let last = -Infinity;
 
@@ -279,11 +278,17 @@ export function useMetronome(
     };
 
     const tick = () => {
-      if (video.paused || video.seeking || ctx.state !== "running") return;
+      if (ctx.state !== "running") return;
       const now = ctx.currentTime;
-      const rate = video.playbackRate;
+      // With the music on the audio clock, clicks are booked on the same mapping:
+      // exact by construction, no lead. Otherwise from the video, with the lead.
+      const clock = clockRef.current?.engaged ? clockRef.current : null;
+      if (!clock && (video.paused || video.seeking)) return;
+      const rate = clock ? clock.rate : video.playbackRate;
+      const t = clock ? clock.mediaAt(now) : video.currentTime;
+      const lead = clock ? 0 : videoLead;
       const gap = (0.4 * (mode === "ands" ? 0.5 : 1) * grid.secondsPerCount) / rate;
-      for (const c of clicksAhead({ grid, loop: loopRef.current, t: video.currentTime, rate, lookahead: LOOKAHEAD_S + Math.max(lead, 0), mode })) {
+      for (const c of clicksAhead({ grid, loop: loopRef.current, t, rate, lookahead: LOOKAHEAD_S + Math.max(lead, 0), mode })) {
         const when = now + c.in - lead;
         if (when < now) continue; // too late to sound on time
         if (when < last + gap) continue; // already booked on an earlier tick
@@ -297,14 +302,21 @@ export function useMetronome(
 
     const id = window.setInterval(tick, TICK_MS);
     const onSeeked = () => (drop(), tick());
+    // With the music on the audio clock, only the clock's own changes move the clicks:
+    // the video's events include the clock's easing (playbackRate) and catch-up seeks.
+    const fromVideo = (f: () => void) => () => { if (!clockRef.current?.engaged) f(); };
+    const videoDrop = fromVideo(drop);
+    const videoSeeked = fromVideo(onSeeked);
     const events = ["seeking", "pause", "ratechange"] as const;
-    events.forEach((e) => video.addEventListener(e, drop));
-    video.addEventListener("seeked", onSeeked);
+    events.forEach((e) => video.addEventListener(e, videoDrop));
+    video.addEventListener("seeked", videoSeeked);
     video.addEventListener("playing", tick);
+    clockEvents?.addEventListener("change", onSeeked);
     return () => {
+      clockEvents?.removeEventListener("change", onSeeked);
       clearInterval(id);
-      events.forEach((e) => video.removeEventListener(e, drop));
-      video.removeEventListener("seeked", onSeeked);
+      events.forEach((e) => video.removeEventListener(e, videoDrop));
+      video.removeEventListener("seeked", videoSeeked);
       video.removeEventListener("playing", tick);
       last = -Infinity;
       drop();

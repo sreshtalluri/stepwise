@@ -44,6 +44,7 @@ import {
 } from "../../../packages/navigation/src/core";
 import type { LessonStructure, LoopSpan } from "../../../packages/navigation/src/core";
 import { PHONE_QUERY, unlockAudio, useMedia, useMetronome, useVideoClock, useVideoCrop } from "./lesson/hooks";
+import { useAudioClock } from "./lesson/audioClock";
 import DesktopLesson from "./lesson/DesktopLesson";
 import PhoneLesson from "./lesson/PhoneLesson";
 import { addPlay, referrerHost, track } from "../lib/analytics";
@@ -355,7 +356,7 @@ function useLesson(
     // Play starts inside the loop, not wherever the playhead drifted.
     if (lp && (video.currentTime < lp[0] - 0.05 || video.currentTime >= lp[1])) video.currentTime = lp[0];
     if (!lp && video.currentTime >= endS - 0.05) video.currentTime = 0;
-    if (clickOnRef.current) unlockAudio(); // inside the tap: iOS suspends audio between plays
+    unlockAudio(); // inside the tap: iOS only starts audio from a gesture, and the music is on it
     void video.play().catch(() => {});
   }, [video, endS]);
   const pause = useCallback(() => video?.pause(), [video]);
@@ -472,6 +473,7 @@ function useLesson(
   useEffect(() => {
     if (video) video.volume = musicVol;
   }, [video, musicVol]);
+  useAudioClock(video, videoUrl, speed, musicVol);
   useMetronome(video, loopRef, structure.grid, clickOn, clickMode, clickVol);
 
   // ---- the "&" between the counts on screen: per device, and apart from the click's own "and"s
