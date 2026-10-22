@@ -16,70 +16,99 @@
 </head>
 <body>
 <main id="m">
-  <p>Measures how far this browser's video clock is from the sound it plays,<br>so stepwise's click can land on the beat.</p>
-  <button id="go">Run (about 20 s, sound on)</button>
+  <p>Measures how late stepwise's click sounds against the music on this device,<br>by listening with the microphone. Volume up, quiet room, phone face up.</p>
+  <button id="go">Run (about 12 s)</button>
 </main>
 <script>
 /*
- * A test video with a 4 ms 2 kHz blip every 0.5 s from 1 s is played through an
- * AudioContext. A ScriptProcessor timestamps each blip in context time, and every
- * 25 ms the page notes (context time, video.currentTime). The gap between where a
- * click booked from currentTime would go and where the blip really is, is the lead
- * hooks.ts `clickLeadS` needs. The ScriptProcessor adds its own buffering delay, so
- * it runs twice (256 and 1024 frames) and extrapolates to a zero-size buffer.
+ * The test video has a 4 ms 2 kHz blip every 0.5 s of media time, from 1 s. It plays
+ * the normal way (the <video>'s own audio path). Alongside, Web Audio books a 700 Hz
+ * click 100 ms after every blip, the way hooks.ts `useMetronome` books clicks: from
+ * video.currentTime, with NO lead. The microphone hears both. Split by pitch (two
+ * band-pass filters), each blip-to-click gap minus 100 ms is how late the click path
+ * is: the lead hooks.ts `clickLeadS` needs. Mic delay hits both sounds equally.
  */
-function video() {
-  const v = document.createElement("video");
-  v.src = "click-probe.mp4"; v.playsInline = true; v.crossOrigin = "anonymous";
-  document.body.append(v);
-  return v;
-}
-
-async function run(ctx, v, buf) {
-  const sp = ctx.createScriptProcessor(buf, 1, 1);
-  const hits = [], polls = [];
-  let last = -1;
-  sp.onaudioprocess = (e) => {
-    const x = e.inputBuffer.getChannelData(0);
-    for (let i = 0; i < x.length; i++) if (Math.abs(x[i]) > 0.3) {
-      const t = e.playbackTime + i / ctx.sampleRate;
-      if (t - last > 0.2) hits.push(t);
-      last = t; break;
-    }
-    e.outputBuffer.getChannelData(0).set(x);
-  };
-  ctx.createMediaElementSource(v).connect(sp).connect(ctx.destination);
-  v.currentTime = 0;
-  await v.play();
-  const id = setInterval(() => { if (!v.paused) polls.push([ctx.currentTime, v.currentTime]); }, 25);
-  await new Promise((r) => setTimeout(r, 8000));
-  clearInterval(id); v.pause(); sp.disconnect(); v.remove();
-  const gaps = hits.map((h) => {
-    const p = polls.filter((q) => q[0] <= h && q[0] > h - 0.15).pop();
-    if (!p) return null;
-    const blip = Math.round((p[1] + (h - p[0]) - 1) / 0.5) * 0.5 + 1;
-    return (p[0] + (blip - p[1]) - h) * 1000;
-  }).filter((g) => g !== null).sort((a, b) => a - b);
-  return gaps[gaps.length >> 1];
-}
+const GAP = 0.1;
 
 document.getElementById("go").onclick = async () => {
   const m = document.getElementById("m");
-  m.innerHTML = "<p>Listening… keep this tab open.</p>";
+  m.innerHTML = "<p>Listening… keep quiet for 12 s.</p>";
   try {
-    // iOS lets a video play only from inside the tap, so both start (muted) here.
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const vids = [video(), video()];
-    const unlocked = vids.map((v) => { v.muted = true; return v.play().then(() => { v.pause(); v.muted = false; }); });
+    const v = document.createElement("video");
+    v.src = "click-probe.mp4"; v.playsInline = true;
+    document.body.append(v);
+    const playing = v.play();  // inside the tap, for iOS
     await ctx.resume();
-    await Promise.all(unlocked);
-    const a = await run(ctx, vids[0], 256), b = await run(ctx, vids[1], 1024);
-    const lead = Math.round(a - (b - a) / 3);
-    m.innerHTML = `<p>Click lead for this browser</p><div class="big">${lead} ms</div>
+    const mic = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+    await playing;
+    v.pause(); v.currentTime = 0;
+
+    // Mic -> two band-passes -> one stereo ScriptProcessor that timestamps envelopes.
+    const src = ctx.createMediaStreamSource(mic);
+    const merge = ctx.createChannelMerger(2);
+    for (const [hz, ch] of [[2000, 0], [700, 1]]) {
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass"; bp.frequency.value = hz; bp.Q.value = 8;
+      src.connect(bp).connect(merge, 0, ch);
+    }
+    const sp = ctx.createScriptProcessor(256, 2, 1);
+    const env = [[], []];  // [time, level] per 256-sample block, per band
+    sp.onaudioprocess = (e) => {
+      for (const ch of [0, 1]) {
+        const x = e.inputBuffer.getChannelData(ch);
+        let peak = 0, at = 0;
+        for (let i = 0; i < x.length; i++) if (Math.abs(x[i]) > peak) { peak = Math.abs(x[i]); at = i; }
+        env[ch].push([e.playbackTime + at / ctx.sampleRate, peak]);
+      }
+    };
+    const sink = ctx.createGain(); sink.gain.value = 0;
+    merge.connect(sp).connect(sink).connect(ctx.destination);
+
+    // The clicks, booked from the video clock exactly as the app does (no lead).
+    let booked = -1;
+    const tick = setInterval(() => {
+      if (v.paused) return;
+      const t = v.currentTime;
+      for (let k = Math.max(0, Math.ceil((t - 1 - GAP) / 0.5)); ; k++) {
+        const media = 1 + k * 0.5 + GAP;
+        if (media - t > 0.15) break;
+        if (k <= booked) continue;
+        const when = ctx.currentTime + Math.max(0, media - t);
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.value = 700;
+        g.gain.setValueAtTime(0, when); g.gain.linearRampToValueAtTime(1, when + 0.002);
+        g.gain.exponentialRampToValueAtTime(0.001, when + 0.03);
+        o.connect(g).connect(ctx.destination); o.start(when); o.stop(when + 0.04);
+        booked = k;
+      }
+    }, 25);
+    await v.play();
+    await new Promise((r) => setTimeout(r, 11000));
+    clearInterval(tick); v.pause(); mic.getTracks().forEach((t) => t.stop());
+
+    // Onsets: blocks above 40% of that band's loudest, at least 300 ms apart.
+    const onsets = (e) => {
+      const max = Math.max(...e.map((b) => b[1]));
+      const out = [];
+      for (const [t, lvl] of e) if (lvl > 0.4 * max && (!out.length || t - out[out.length - 1] > 0.3)) out.push(t);
+      return out;
+    };
+    const blips = onsets(env[0]), clicks = onsets(env[1]);
+    const lates = blips.map((b) => {
+      const c = clicks.find((c) => c > b - 0.2 && c < b + 0.45);
+      return c === undefined ? null : (c - b - GAP) * 1000;
+    }).filter((x) => x !== null).sort((a, b) => a - b);
+    if (lates.length < 6) throw new Error(`only heard ${blips.length} beeps and ${clicks.length} clicks (mic peak ${Math.max(0, ...env[0].map((b) => b[1])).toFixed(4)} / ${Math.max(0, ...env[1].map((b) => b[1])).toFixed(4)}, ${env[0].length} blocks); turn the volume up`);
+    const lead = Math.round(lates[lates.length >> 1]);
+    const spread = Math.round(lates[Math.floor(lates.length * 0.9)] - lates[Math.floor(lates.length * 0.1)]);
+    m.innerHTML = `<p>The click sounds this late on this device</p><div class="big">${lead} ms</div>
       <p>Send this number to Claude.</p>
-      <p class="small">raw ${a.toFixed(0)} / ${b.toFixed(0)} ms · ${navigator.userAgent}</p>`;
+      <p class="small">${lates.length} pairs, spread ${spread} ms · ${navigator.userAgent}</p>`;
   } catch (e) {
-    m.innerHTML = `<p>Couldn't measure: ${e}</p>`;
+    m.innerHTML = `<p>Couldn't measure: ${e.message || e}</p>`;
   }
 };
 </script>
