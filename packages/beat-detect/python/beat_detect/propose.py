@@ -129,18 +129,20 @@ def _track_beats(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
     return np.asarray(beats, float), np.asarray(downbeats, float)
 
 
-def _fit_grid(beats: np.ndarray) -> tuple[float, float, np.ndarray]:
+def _fit_grid(beats: np.ndarray, unit: float | None = None) -> tuple[float, float, np.ndarray]:
     """(seconds_per_count, phase_s, idx): the least-squares constant grid
     `phase_s + seconds_per_count * idx` through the model's beats.
 
-    `idx` is each beat's count number, stepped by the rounded gap so a beat
-    the model skipped (or doubled) does not shift every later count.
+    `idx` is each beat's count number, stepped by the gap rounded to `unit`
+    (default: the median gap) so a beat the model skipped (or doubled) does
+    not shift every later count. propose_grid passes half the median when the
+    model tracked half-time.
     ponytail: one constant tempo (the contract's grid). A drifting track
     (solo-07, 125 -> 129 BPM) ends up to ~90 ms off at its ends; pass per-beat
     times through the contract if that ever shows.
     """
     gaps = np.diff(beats)
-    steps = np.maximum(1, np.round(gaps / np.median(gaps))).astype(int)
+    steps = np.maximum(1, np.round(gaps / (unit or np.median(gaps)))).astype(int)
     idx = np.concatenate([[0], np.cumsum(steps)])
     spc, phase = np.polyfit(idx, beats, 1)
     return float(spc), float(phase), idx
@@ -241,9 +243,21 @@ def propose_grid(source: str | Path, *, clip_duration_s: float | None = None) ->
         confidence = 0.0
         count_one_confidence = 0.0
     else:
-        seconds_per_count, phase_s, idx = _fit_grid(beat_times)
+        median_gap = float(np.median(np.diff(beat_times)))
+        if 60.0 / median_gap < _PLAUSIBLE_BPM[0]:
+            # Beat This! tracked half-time (the 2026-10-06 TikTok: beats 0.97 s
+            # apart, a few real 0.48 s ones, downbeats every 2 beats = one 4/4
+            # bar at ~124 BPM). Count in half gaps, then score count 1 on the
+            # full grid: the model's beats only sit on every other count.
+            seconds_per_count, phase_s, idx = _fit_grid(beat_times, median_gap / 2)
+            count_idx = np.arange(int(idx[-1]) + 1)
+            count_times = phase_s + seconds_per_count * count_idx
+            warnings.append("the beat tracker heard half-time; counts were doubled")
+        else:
+            seconds_per_count, phase_s, idx = _fit_grid(beat_times)
+            count_idx, count_times = idx, beat_times
         count_one_s, downbeat_margin, count_one_confidence, count_one_alternates = _count_one(
-            y, sr, beat_times, idx, downbeat_times, seconds_per_count, phase_s)
+            y, sr, count_times, count_idx, downbeat_times, seconds_per_count, phase_s)
         if downbeat_margin < 1.1:
             warnings.append("no beat of the bar is clearly accented; count 1 is a weak guess")
         # Regularity: tight, evenly-spaced intervals -> high confidence.
