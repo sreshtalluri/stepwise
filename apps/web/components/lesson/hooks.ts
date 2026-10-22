@@ -190,35 +190,16 @@ export function unlockAudio() {
   return audio;
 }
 
-const routed = new WeakSet<HTMLVideoElement>();
-
 /**
- * Play the video's sound through the click's AudioContext. On two paths (the
- * `<video>`'s own, the context's) each sound leaves with its own output delay, and
- * Safari reports the context's as 0, so nothing could compensate: the click landed
- * ~170 ms after the music on a MacBook's speakers (the owner's labels, 2026-10-21).
- * On one path, speakers or Bluetooth delay both equally. Once routed the video is
- * only heard while the context runs, so any play resumes it. Needs CORS on the
- * video (`crossOrigin` + R2's ACAO), or the element feeds the graph silence.
- */
-function routeVideo(ctx: AudioContext, video: HTMLVideoElement) {
-  if (routed.has(video)) return;
-  try {
-    ctx.createMediaElementSource(video).connect(ctx.destination);
-  } catch {
-    return; // already a source in another context: leave it on its own path
-  }
-  routed.add(video);
-  video.addEventListener("play", () => void ctx.resume().catch(() => {}));
-}
-
-/**
- * How early to book a click so it meets the routed music: `video.currentTime` vs the
- * audio actually flowing through the graph, measured with a click-track video and a
- * timestamping tap in the graph (public/dev/click-probe.html), 2026-10-21. Chromium
- * 0 ms (headless, macOS). WebKit ~115 ms (iOS 26.5 Simulator): its `currentTime`
- * trails the samples it has already handed to Web Audio. `?clickLead=<ms>` overrides.
- * ponytail: per-engine constants; re-run the probe on a device that disagrees.
+ * How early to book a click so it sounds with the music. The click plays on Web Audio
+ * and the music from the `<video>`: two output paths with different delays, and
+ * Safari reports Web Audio's as 0, so it can't be read, only measured: by ear-free
+ * microphone timing on /dev/click-probe (the music's blips vs a click booked with no
+ * lead). The video is NOT routed through Web Audio to share one path: on a real
+ * iPhone a routed video went choppy at any speed but 1×, and stayed routed (and
+ * choppy) after the click was turned off (PR #64, reverted 2026-10-21).
+ * `?clickLead=<ms>` overrides.
+ * ponytail: per-engine constants from the probe; re-measure on a device that disagrees.
  */
 function clickLeadS(): number {
   const knob = new URLSearchParams(window.location.search).get("clickLead");
@@ -261,7 +242,6 @@ export function useMetronome(
     if (!a) return;
     const { ctx, out } = a;
     out.gain.value = volume * volume;
-    routeVideo(ctx, video);
     const lead = clickLeadS();
     let booked: { when: number; node: GainNode }[] = [];
     let last = -Infinity;
