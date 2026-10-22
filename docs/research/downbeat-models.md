@@ -164,6 +164,6 @@ path that could actually beat it for us:
 2. **Score candidates on it** (Beat This! `final0`/`small0` + our rules,
    Explore This!) before any training.
 3. **Then fine-tune Beat This! `small0`** on public data plus our labels,
-   with the dance tempo band as a prior. That's a single-GPU job (hours, not
-   days); 100 clips is enough to shift metrical level, not enough for a new
+   with the dance tempo band as a prior. Likely a single-GPU job (unmeasured;
+   check Beat This!'s training README first); 100 clips might shift metrical level, not enough for a new
    model.
