@@ -1269,6 +1269,13 @@ def get_job_video(job_id: str) -> Response:
     return get_asset(f"video:{_clip_id_for(job_id)}")
 
 
+@app.get("/jobs/{job_id}/audio")
+def get_job_audio(job_id: str) -> Response:
+    """The lesson's song as plain AAC-LC (lesson_audio.py), for the page's audio
+    clock. 404 when the lesson has none; same tombstone check as the video."""
+    return get_asset(f"audio:{_clip_id_for(job_id)}")
+
+
 @app.get("/jobs/{job_id}/detections")
 def get_job_detections(job_id: str) -> Response:
     """The detector's 2D pass (milestones.build_detections), for the skeleton
@@ -1303,6 +1310,10 @@ def get_asset(asset_id: str) -> Response:
         except Exception as e:  # noqa: BLE001 -- R2 unreachable: fall through, do not 500
             print(f"[r2] lookup failed for {asset_id}, falling back to the Volume: {e}")
 
+    if asset_id.startswith("audio:"):
+        # R2 only, and optional: a lesson from before lesson_audio.py (or whose
+        # clip has no sound) has none, and the page then uses the video's.
+        raise HTTPException(404, "No separate audio for this lesson.")
     if asset_id.startswith("video:"):
         video = _volume_read_bytes(uploads_volume, f"/{clip_id}.mp4") or _volume_read_bytes(eval_volume, f"/{clip_id}.mp4")
         if video is None:

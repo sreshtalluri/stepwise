@@ -1050,15 +1050,17 @@ beat_image = (
     # No apt ffmpeg: bookworm's 5.1 double-trims HE-AAC priming (count 1 115 ms
     # early on solo-02). propose_grid runs imageio-ffmpeg's pinned 7.x build.
     .pip_install("librosa>=0.10", "numpy>=1.26", "soundfile>=0.12", "imageio-ffmpeg==0.6.0",
-                 "beat-this==1.1.0")
+                 "beat-this==1.1.0", "boto3")
     .run_commands("python -c \"from beat_this.inference import load_model; load_model('final0')\"")
     .add_local_dir(BEAT_DETECT_DIR, remote_path="/app/beat_detect")
     .add_local_file(os.path.join(os.path.dirname(__file__), "retention.py"), "/app/retention.py")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "storage.py"), "/app/storage.py")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "lesson_audio.py"), "/app/lesson_audio.py")
 )
 
 
 @app.function(image=beat_image, volumes={CLIPS_DIR: eval_clips, UPLOADS_DIR: uploads, RESULTS_DIR: results},
-              timeout=600)
+              secrets=optional_secret("stepwise-r2"), timeout=600)
 def propose_counts(clip_id: str) -> dict | None:
     """Propose a count grid from the clip's audio. A PROPOSAL, never a decision.
 
@@ -1094,6 +1096,66 @@ def propose_counts(clip_id: str) -> dict | None:
         return None
 
 
+def publish_lesson_audio(clip_id: str, video_path: str) -> str | None:
+    """The clip's song to R2 as plain AAC-LC (lesson_audio.py). Returns the key,
+    or None when there is nothing to publish or nowhere to publish it. Never
+    fails the caller: without it the page plays the video's own sound. A
+    removal still stops it (retention.Removed), before anything is written."""
+    import sys
+    sys.path.insert(0, "/app")
+    import lesson_audio
+    import retention
+    import storage
+
+    if not storage.enabled():
+        return None
+    path = lesson_audio.extract(video_path)
+    if path is None:
+        return None
+    try:
+        retention.ensure_not_removed(results, clip_id)
+        key = storage.put_file(storage.audio_key(clip_id), path, "audio/mp4")
+        print(f"[audio] {clip_id}: published {key} ({os.path.getsize(path) / 1e6:.2f} MB)")
+        return key
+    except retention.Removed:
+        raise
+    except Exception as e:  # noqa: BLE001 -- an R2 blip costs this lesson its small audio file, nothing else
+        print(f"[audio] {clip_id}: not published ({type(e).__name__}: {e})")
+        return None
+    finally:
+        os.unlink(path)
+
+
+@app.function(image=beat_image, volumes={UPLOADS_DIR: uploads, RESULTS_DIR: results},
+              secrets=optional_secret("stepwise-r2"), timeout=3600)
+def backfill_lesson_audio(clip_id: str = "", dry_run: bool = True) -> list[str]:
+    """Publish the audio file for lessons made before lesson_audio.py. Adds one
+    R2 object per lesson and changes nothing else.
+
+        modal run modal_app.py::backfill_lesson_audio                 # lists what it would do
+        modal run modal_app.py::backfill_lesson_audio --no-dry-run    # every lesson without one
+        modal run modal_app.py::backfill_lesson_audio --clip-id X --no-dry-run
+    """
+    import sys
+    sys.path.insert(0, "/app")
+    import retention
+    import storage
+
+    clips = [clip_id] if clip_id else [e["clip_id"] for e in retention.read_index(results)]
+    done = []
+    for c in dict.fromkeys(clips):
+        path = f"{UPLOADS_DIR}/{c}.mp4"
+        if retention.is_removed(results, c) or not os.path.exists(path) or storage.exists(storage.audio_key(c)):
+            continue
+        if dry_run:
+            print(f"[audio] would publish {storage.audio_key(c)}")
+            done.append(c)
+        elif publish_lesson_audio(c, path):
+            done.append(c)
+    print(f"[audio] {'would publish' if dry_run else 'published'} {len(done)} of {len(clips)} lessons")
+    return done
+
+
 def _propose_counts(clip_id: str, propose_grid) -> dict | None:
     import json
     import os
@@ -1109,6 +1171,10 @@ def _propose_counts(clip_id: str, propose_grid) -> dict | None:
     if not os.path.exists(video_path):
         print(f"[beats] {clip_id}: no video to read")
         return None
+
+    # Here because this is the stage that already has the clip, the right
+    # ffmpeg, and time: it runs beside the GPU job, never in front of it.
+    publish_lesson_audio(clip_id, video_path)
 
     try:
         grid = asdict(propose_grid(video_path))

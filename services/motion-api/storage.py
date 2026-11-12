@@ -122,6 +122,12 @@ def video_key(clip_id: str) -> str:
     return f"video/{clip_id}.mp4"
 
 
+def audio_key(clip_id: str) -> str:
+    """The lesson's song on its own (lesson_audio.py). Under `video/{clip}.` on
+    purpose: clip_prefixes already sweeps that, so a removal takes it too."""
+    return f"video/{clip_id}.audio.m4a"
+
+
 def glb_key(glb_name: str) -> str:
     """`glb_name` is `{clip_id}_track{n}.{version}.glb` (or, for a lesson
     exported before versioning, `{clip_id}_track{n}.glb`), per
@@ -157,6 +163,8 @@ def key_for_asset(asset_id: str) -> Optional[str]:
     """
     if asset_id.startswith("video:"):
         return video_key(asset_id[len("video:"):])
+    if asset_id.startswith("audio:"):
+        return audio_key(asset_id[len("audio:"):])
     if asset_id.endswith(".glb"):
         return glb_key(asset_id)
     return None
@@ -165,7 +173,7 @@ def key_for_asset(asset_id: str) -> Optional[str]:
 def clip_id_for_asset(asset_id: str) -> Optional[str]:
     """Which lesson an asset belongs to -- the tombstone check needs this
     before handing out any URL at all."""
-    if asset_id.startswith("video:"):
+    if asset_id.startswith(("video:", "audio:")):
         return asset_id[len("video:"):]
     if asset_id.endswith(".glb"):
         return asset_id.rsplit("_track", 1)[0]
@@ -287,6 +295,8 @@ def url_for(key: str) -> str:
 def _self_check() -> None:
     """The smallest thing that fails if the id<->key mapping breaks."""
     assert key_for_asset("video:abc") == "video/abc.mp4"
+    assert key_for_asset("audio:abc") == "video/abc.audio.m4a" and clip_id_for_asset("audio:abc") == "abc"
+    assert any(audio_key("abc").startswith(p) for p in clip_prefixes("abc")), "a removal must sweep the audio"
     assert key_for_asset("abc_track1.glb") == "glb/abc_track1.glb"
     assert key_for_asset("nonsense") is None
     assert clip_id_for_asset("video:abc") == "abc"
