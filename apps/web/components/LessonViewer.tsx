@@ -84,6 +84,8 @@ export interface LessonViewerProps {
   doc: MotionResult;
   title: string;
   videoUrl: string;
+  /** The song on its own (lib/lessons.ts `audioUrl`); the video's audio when absent. */
+  audioUrl?: string | null;
   /** Who made the original video, for a link lesson; null for an upload. */
   credit?: Credit | null;
   /** One GLB URL per entry in `doc.persons`. */
@@ -133,7 +135,7 @@ export default function LessonViewer(props: LessonViewerProps) {
 export type Lesson = ReturnType<typeof useLesson>;
 
 function useLesson(
-  { doc, title, videoUrl, credit = null, glbUrls, lessonId, onRemoveFromMyLessons, onReportOrRemove }: LessonViewerProps,
+  { doc, title, videoUrl, audioUrl = null, credit = null, glbUrls, lessonId, onRemoveFromMyLessons, onReportOrRemove }: LessonViewerProps,
   phone: boolean,
 ) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
@@ -286,7 +288,7 @@ function useLesson(
   const loopRef = useRef<[number, number] | null>(null);
   loopRef.current = loopTimes(loop);
   const onWrapRef = useRef<(() => void) | null>(null);
-  const { timeRef, meshTimeRef, musicTimeRef, displayTime } = useVideoClock(video, loopRef, onWrapRef);
+  const { timeRef, meshTimeRef, smoothTimeRef, displayTime } = useVideoClock(video, loopRef, onWrapRef);
   const [playing, setPlayingState] = useState(false);
   const playingRef = useRef(false);
   const setPlaying = useCallback((p: boolean) => {
@@ -485,7 +487,9 @@ function useLesson(
   const [syncOffsetMs, setSyncOffsetState] = useState(0);
   useEffect(() => setSyncOffsetState(loadSyncOffsetMs()), []);
   const setSyncOffset = useCallback((ms: number) => (setSyncOffsetState(ms), saveSyncOffsetMs(ms)), []);
-  useAudioClock(video, videoUrl, speed, musicVol, loopRef, onWrapRef, loopRef.current?.join("-") ?? "", syncOffsetMs);
+  // Not while "Who are you learning?" is up: fetching and decoding the song then
+  // competes with the dancers' stills and the 3D bodies for the phone.
+  useAudioClock(pickerOpen ? null : video, videoUrl, speed, musicVol, loopRef, onWrapRef, loopRef.current?.join("-") ?? "", syncOffsetMs, audioUrl);
   useMetronome(video, loopRef, structure.grid, clickOn, clickMode, clickVol);
 
   // ---- the "&" between the counts on screen: per device, and apart from the click's own "and"s
@@ -531,11 +535,16 @@ function useLesson(
   useOnChange(buildUp, (on) => track("build_up_toggled", { on }, lessonId));
   useOnChange(`${clickOn}|${clickMode}`, () => track("click_toggled", { on: clickOn, mode: clickMode }, lessonId));
 
-  const crop = useVideoCrop(video, doc, focusRef, timeRef, selected, follow && panels.includes("video"), mirrored);
+  // The video keeps its whole frame. Following the picked dancer with a moving crop
+  // (`follow && panels.includes("video")`) is off: on a two-dancer lesson it read as the
+  // video zooming and sliding about (owner, 2026-11-12). Follow still frames the 3D views.
+  // ponytail: the crop code stays behind this `false`; delete it, or make it one steady
+  // window per dancer, once the owner has decided.
+  const crop = useVideoCrop(video, doc, focusRef, timeRef, selected, false, mirrored);
 
   return {
     doc, title, videoUrl, credit, glbUrls, lessonId, endS, aspect, wide,
-    video, setVideo, timeRef, meshTimeRef, musicTimeRef, displayTime, playing, setPlaying, play, pause, togglePlay, seek,
+    video, setVideo, timeRef, meshTimeRef, smoothTimeRef, displayTime, playing, setPlaying, play, pause, togglePlay, seek,
     structure, editStructure, authored, countsFrom, oneUnsure, oneChecked, tapOne, nudgeOne, tryOne, alternates,
     eights, loop, setLoop, loopEight, here, hereCount, stepLoop, loopLen, setLoopLen, next, done, sameSpan,
     speed, speedPick, pickSpeed, cycleSpeed, nudgeSpeed, buildUp, setBuildUp, passes, setHoldSlow,

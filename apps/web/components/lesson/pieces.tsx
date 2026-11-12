@@ -118,7 +118,7 @@ export function AnglePane({ l, angle, focus }: { l: Lesson; angle: ViewId; focus
         selectedIndex={l.selected}
         view={angle}
         mirrored={l.mirrored}
-        timeRef={l.musicTimeRef}
+        timeRef={l.smoothTimeRef}
         follow={l.follow}
         focusRef={focus ? l.focusRef : undefined}
         glbUrls={l.glbUrls}
@@ -941,6 +941,10 @@ export function CountOneTools({ l }: { l: Lesson }) {
         </button>
         <button type="button" className="ls-chip" onClick={() => l.nudgeOne(1)} aria-label={copy.countOne.laterLabel}>
           {copy.countOne.later}
+        </button>
+        {/* The tracker finds the bar, not which of an eight's two bars comes first. */}
+        <button type="button" className="ls-chip" onClick={() => l.nudgeOne(4)} aria-label={copy.countOne.swapLabel}>
+          {copy.countOne.swap}
         </button>
       </div>
       {!unsure && altRow}

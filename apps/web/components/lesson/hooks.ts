@@ -55,6 +55,10 @@ function meshLatencyMs(): number | null {
 /** The video time on screen at `displayAt` (ms, performance.now() clock), carried
  * forward from the last rVFC frame. Clamped to 0.1 s: a stalled video must not run
  * the mesh off on its own. */
+/** No video frame for this long (the video is off screen, so rVFC is silent): the
+ * last frame is no longer worth carrying forward; `timeRef` has the watchdog's time. */
+const STALE_FRAME_MS = 250;
+
 export function meshTimeAt(anchor: { media: number; at: number }, displayAt: number, rate: number): number {
   const ahead = ((displayAt - anchor.at) / 1000) * rate;
   return anchor.media + Math.min(Math.max(ahead, 0), 0.1);
@@ -76,21 +80,25 @@ export function useVideoClock(
     return {
       get current() {
         const a = anchor.current;
-        if (lead === null || !a || a.video.paused || a.video.seeking) return timeRef.current;
+        if (lead === null || !a || a.video.paused || a.video.seeking || performance.now() - a.at > STALE_FRAME_MS) return timeRef.current;
         return meshTimeAt(a, performance.now() + lead, a.video.playbackRate);
       },
     };
   });
-  // The 3D views draw the body from the music itself while the audio clock plays it:
-  // every screen refresh at any speed (a video frame at 0.25x lasts eight of them),
-  // straight through loop wraps, and on the sound even where the picture trails it.
-  // The mesh over the video stays on `meshTimeRef`: there it must match the pixels.
-  const [musicTimeRef] = useState(() => {
+  // The 3D views draw the body between video frames too: the last frame carried
+  // forward at the playback rate, so it moves on every screen refresh at any speed (a
+  // video frame at 0.25x lasts eight of them). On the PICTURE, not the music: beside
+  // the video the eye compares the body with the dancer, and on Safari the picture
+  // sits up to ~30 ms either side of the sound (measured on the owner's iPhone,
+  // 2026-11-12), so a body drawn from the music read as lagging the dance.
+  const [smoothTimeRef] = useState(() => {
     const lead = meshLatencyMs() ?? 0;
     return {
       get current() {
-        const clock = clockRef.current;
-        return clock?.engaged ? clock.heardAt(performance.now() + lead) : meshTimeRef.current;
+        const a = anchor.current;
+        const now = performance.now();
+        if (!a || a.video.paused || a.video.seeking || now - a.at > STALE_FRAME_MS) return timeRef.current;
+        return meshTimeAt(a, now + lead, a.video.playbackRate);
       },
     };
   });
@@ -159,7 +167,7 @@ export function useVideoClock(
     };
   }, [video, loopRef, onWrapRef]);
 
-  return { timeRef, meshTimeRef, musicTimeRef, displayTime };
+  return { timeRef, meshTimeRef, smoothTimeRef, displayTime };
 }
 
 /**

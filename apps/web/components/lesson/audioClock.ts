@@ -67,7 +67,27 @@ export const syncStats = {
   baseLatencyMs: NaN,
   /** The browser reports when a sample reaches the speaker (else the context's own time). */
   outputTimestamp: false,
+  /** Where the audio clock has got to: off, loading, waiting for a tap, starting, ready, failed: why. */
+  stage: "off",
+  /** Where the music was decoded from: the lesson's own audio file, or the video. */
+  source: "",
+  ctx: "",
+  shiftMs: 0,
 };
+
+/**
+ * `?audioShift=<ms>`: the decoded song sits this many ms LATE in its buffer. Safari
+ * (Apple's decoder) does not trim HE-AAC's encoder delay the way the `<video>`
+ * element and ffmpeg do: on the owner's TikTok lesson of 2026-11-12 (HE-AACv2, an
+ * edit list skipping 7106 samples) afconvert's decode came out 43.5 ms later than
+ * ffmpeg's, Chromium's 0.0. The click and the counts are on the video's timeline, so
+ * there they sounded ~44 ms off the music. The fix is in the pipeline (store plain
+ * AAC-LC: 0.0 ms in both decoders); this knob is for proving it on a device.
+ */
+function audioShiftS(): number {
+  const v = Number(new URLSearchParams(window.location.search).get("audioShift"));
+  return Number.isFinite(v) ? v / 1000 : 0;
+}
 
 /** Fired on `clockEvents` whenever the time mapping changes (start, stop, seek, rate). */
 export const clockEvents = typeof window === "undefined" ? null : new EventTarget();
@@ -92,18 +112,28 @@ export function audioContext(): AudioContext | null {
   return shared;
 }
 
-/** Decoded once per URL: a layout switch remounts the <video>, not the song. */
+/**
+ * Decoded once per lesson: a layout switch remounts the <video>, not the song.
+ * `urls` are tried in order: the lesson's own audio file (plain AAC-LC, a tenth of
+ * the video, and decoded to the same place by every browser), then the video itself
+ * for a lesson that has none (a second download of the whole video, 3-9 MB, and on
+ * Safari HE-AAC audio comes out late: see audioShiftS).
+ */
 const decoded = new Map<string, Promise<Float32Array[]>>();
-function decode(ctx: AudioContext, url: string): Promise<Float32Array[]> {
+function decode(ctx: AudioContext, urls: readonly string[]): Promise<Float32Array[]> {
+  const url = urls.join(" ");
   let p = decoded.get(url);
   if (!p) {
-    // ponytail: downloads the whole video a second time for its audio (3-9 MB). An
-    // audio-only asset from the pipeline would halve that; add it if bandwidth shows.
-    p = fetch(url)
-      .then((r) => {
-        if (!r.ok) throw new Error(`audio fetch ${r.status}`);
-        return r.arrayBuffer();
-      })
+    p = (async () => {
+      for (const [i, u] of urls.entries()) {
+        const r = await fetch(u).catch(() => null);
+        if (r?.ok) {
+          syncStats.source = i < urls.length - 1 ? "own file" : "video";
+          return r.arrayBuffer();
+        }
+      }
+      throw new Error("audio fetch failed");
+    })()
       .then((bytes) => new Promise<AudioBuffer>((ok, fail) => ctx.decodeAudioData(bytes, ok, fail)))
       .then((buf) => {
         const left = buf.getChannelData(0);
@@ -174,6 +204,7 @@ export function useAudioClock(
   onWrapRef: React.RefObject<(() => void) | null>,
   loopKey: string,
   offsetMs: number,
+  audioUrl: string | null = null,
 ) {
   const speedRef = useRef(speed);
   const offsetRef = useRef(offsetMs);
@@ -200,6 +231,21 @@ export function useAudioClock(
     gain.gain.value = volume; // linear, as video.volume was
     gain.connect(ctx.destination);
     gainRef.current = gain;
+    const shift = audioShiftS();
+    syncStats.shiftMs = Math.round(shift * 1000);
+    const stage = (s: string) => {
+      syncStats.stage = s;
+      syncStats.ctx = ctx.state;
+    };
+    stage("loading");
+    // Any tap, not only Play: on a phone the context is then running, and the
+    // stretcher ready, before the first play, so that play starts on the audio clock
+    // instead of handing over from the video's sound a moment in.
+    const unlock = () => {
+      if (ctx.state !== "running") void ctx.resume().catch(() => {});
+    };
+    const GESTURES = ["click", "touchend", "keydown"] as const;
+    GESTURES.forEach((e) => document.addEventListener(e, unlock, true));
 
     /** Context time of the sound the learner hears at `perfMs`, their nudge included. */
     const heard = (perfMs: number) => ctxTimeAt(ctx, perfMs) - offsetRef.current / 1000;
@@ -227,7 +273,11 @@ export function useAudioClock(
       wrapsSeen = 0;
       preSeeked = false;
       // Always both loop edges: a new segment inherits the last one's.
-      stretch.schedule({ active: true, output, input, rate, loopStart: map.loop?.[0] ?? 0, loopEnd: map.loop?.[1] ?? 0 });
+      // `shift`: where media time sits in the decoded buffer (audioShiftS).
+      stretch.schedule({
+        active: true, output, input: Math.max(0, input + shift), rate,
+        loopStart: map.loop ? map.loop[0] + shift : 0, loopEnd: map.loop ? map.loop[1] + shift : 0,
+      });
       clock.engaged = true;
       clock.rate = rate;
       changed();
@@ -364,7 +414,7 @@ export function useAudioClock(
     void (async () => {
       try {
         const [channels, { default: SignalsmithStretch }] = await Promise.all([
-          decode(ctx, url),
+          decode(ctx, audioUrl ? [audioUrl, url] : [url]),
           // Served as-is from public/, never bundled: it builds its AudioWorklet from
           // its own source text (`${Module}`), which a bundler's rewrite breaks (the
           // worklet then never answers). MIT, see NOTICE.
@@ -374,6 +424,7 @@ export function useAudioClock(
         // The stretcher's worklet only answers once the context runs, which needs a
         // tap: until the first play the video's own sound carries the lesson.
         if (ctx.state !== "running") {
+          stage("waiting for a tap");
           await new Promise<void>((ok) => {
             const on = () => {
               if (ctx.state !== "running") return;
@@ -384,6 +435,7 @@ export function useAudioClock(
           });
           if (cancelled) return;
         }
+        stage("starting");
         stretch = await SignalsmithStretch(ctx);
         if (cancelled) return stretch.disconnect();
         await stretch.addBuffers(channels.map((c) => c.slice()));
@@ -399,15 +451,19 @@ export function useAudioClock(
         video.addEventListener("seeked", onSeeked);
         raf = requestAnimationFrame(follow);
         if (hasVfc) vfc = (video as any).requestVideoFrameCallback(onFrame);
+        stage("ready");
         if (!video.paused) start();
       } catch (e) {
         // Any failure: the video keeps its own sound.
+        stage(`failed: ${String((e as Error)?.message ?? e).slice(0, 80)}`);
         console.warn("[audioClock] music stays on the video:", e);
       }
     })();
 
     return () => {
       cancelled = true;
+      stage("off");
+      GESTURES.forEach((e) => document.removeEventListener(e, unlock, true));
       cancelAnimationFrame(raf);
       if (hasVfc && vfc) (video as any).cancelVideoFrameCallback(vfc);
       video.removeEventListener("play", onPlay);
@@ -429,7 +485,7 @@ export function useAudioClock(
       changed();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- speed, loop, nudge and volume are applied below without a reload
-  }, [video, url]);
+  }, [video, url, audioUrl]);
 
   useEffect(() => {
     speedRef.current = speed;

@@ -71,6 +71,9 @@ export interface LessonSource {
   /** A job's creator credit (404 for an uploaded file); null for a fixture. */
   creditUrl: string | null;
   videoUrl: string;
+  /** The song on its own, as plain AAC-LC (services/motion-api lesson_audio.py);
+   * 404 for a lesson made before it. null for a fixture: its video's audio is used. */
+  audioUrl: string | null;
   glbUrls: (doc: MotionResult) => string[];
 }
 
@@ -90,6 +93,7 @@ export function lessonSource(id: string): LessonSource {
       docUrl: `/fixtures/${id}.json`,
       creditUrl: null,
       videoUrl: `/fixtures/${id}.mp4`,
+      audioUrl: null,
       glbUrls: (doc) => doc.persons.map((p) => `/fixtures/${id}.${p.person_id}.glb`),
     };
   }
@@ -99,6 +103,7 @@ export function lessonSource(id: string): LessonSource {
     docUrl: `/api/jobs/${job}/result`,
     creditUrl: `/api/jobs/${job}/source`,
     videoUrl: `/api/jobs/${job}/video`,
+    audioUrl: `/api/jobs/${job}/audio`,
     // The asset id is versioned by the GLB's bytes (`{clip}_track{n}.{hash}.glb`;
     // lessons exported before that keep `{clip}_track{n}.glb`), so a re-export
     // is a new URL and the immutable cache never serves the old body.

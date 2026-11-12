@@ -494,6 +494,8 @@ export const lesson = {
     tapHint: "While it plays, press Tap on 1 as you hear a 1.",
     earlier: "−1",
     later: "+1",
+    swap: "+4",
+    swapLabel: "Count 5 becomes count 1",
     earlierLabel: "Count 1 one count earlier",
     laterLabel: "Count 1 one count later",
     guess: "is a guess",

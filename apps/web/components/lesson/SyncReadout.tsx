@@ -23,6 +23,7 @@ export default function SyncReadout() {
       setText(
         [
           `clock ${s.engaged ? "audio" : "video"} · ${s.webkit ? "webkit" : "other"} · ${s.rate}x`,
+          `audio ${s.stage}${s.source ? ` (${s.source})` : ""} · ctx ${s.ctx}${s.shiftMs ? ` · shift ${s.shiftMs} ms` : ""}`,
           `picture ${n(s.pictureMs)} ms · landed ${n(s.landedMs)} ms`,
           `seek ${n(s.seekMs)} ms · wraps ${s.wraps}`,
           `nudge ${s.offsetMs} ms · out ${n(s.outputLatencyMs)} · base ${n(s.baseLatencyMs)} · ts ${s.outputTimestamp ? "yes" : "no"}`,
