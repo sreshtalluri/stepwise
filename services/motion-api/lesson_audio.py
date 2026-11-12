@@ -3,15 +3,22 @@
 Why it exists (measured 2026-11-12, on a TikTok lesson whose audio is HE-AACv2
 with an edit list skipping 7106 samples of encoder delay):
 
-* The lesson page plays the music through Web Audio, from `decodeAudioData`.
-  Chromium's decode of that mp4 sits 0.0 ms from the `<video>` timeline.
-  Apple's decoder (afconvert, the AudioToolbox Safari decodes with) comes out
-  43.5 ms LATE: it trims its own idea of HE-AAC's delay, not the file's. The
-  click and the counts are on the video's timeline, so on an iPhone they sat
-  ~44 ms off the music. The same audio re-encoded as AAC-LC: 0.0 ms in both.
+* The lesson page plays the music through Web Audio, from `decodeAudioData`,
+  and browsers do not agree where HE-AAC starts. Each decode of that mp4
+  against ffmpeg's (which is the `<video>` timeline):
+
+      Chromium decodeAudioData               0.0 ms
+      WebKit 27.2 decodeAudioData (macOS)  -117.6 ms  (the music 118 ms EARLY)
+      afconvert (AudioToolbox)              +43.5 ms
+
+  WebKit skips the edit list's delay and then Apple's own 5186 samples. The
+  click and the counts are on the video's timeline, so in Safari they sounded
+  late against the music. The same audio as AAC-LC: 0.0 ms in WebKit, in
+  Chromium and in afconvert. Not measured on iOS itself; on the owner's iPhone
+  the click was late, and shifting the music 44 ms earlier made it worse.
 * The page fetched the whole video a second time just for its audio (7.4 MB
-  for that lesson). This file is about a tenth of that, so the audio clock is
-  ready that much sooner on a phone.
+  for that lesson). This file is 0.9 MB, so the audio clock is ready that much
+  sooner on a phone.
 
 ffmpeg is imageio-ffmpeg's pinned 7.x build, never the system one: Debian
 bookworm's 5.1 double-trims HE-AAC priming (see beat_detect/propose.py), which

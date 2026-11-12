@@ -2,10 +2,10 @@
 
     cd services/motion-api && python -m pytest test_lesson_audio.py -q
 
-What cannot be tested here is the reason the file exists: Apple's decoder
-placing HE-AAC 43.5 ms late (lesson_audio.py). No free encoder makes HE-AAC and
-CI has no Apple decoder. What is tested is what must stay true for the fix to
-hold: the output is AAC-LC, and its sound sits where the source's did.
+What cannot be tested here is the reason the file exists: WebKit decoding
+HE-AAC 118 ms early (lesson_audio.py). No free encoder makes HE-AAC and CI has
+no WebKit. What is tested is what must stay true for the fix to hold: the
+output is AAC-LC, and its sound sits where the source's did.
 """
 import json
 import os
