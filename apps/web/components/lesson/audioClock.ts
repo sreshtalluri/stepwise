@@ -76,13 +76,23 @@ export const syncStats = {
 };
 
 /**
- * `?audioShift=<ms>`: the decoded song sits this many ms LATE in its buffer. Safari
- * (Apple's decoder) does not trim HE-AAC's encoder delay the way the `<video>`
- * element and ffmpeg do: on the owner's TikTok lesson of 2026-11-12 (HE-AACv2, an
- * edit list skipping 7106 samples) afconvert's decode came out 43.5 ms later than
- * ffmpeg's, Chromium's 0.0. The click and the counts are on the video's timeline, so
- * there they sounded ~44 ms off the music. The fix is in the pipeline (store plain
- * AAC-LC: 0.0 ms in both decoders); this knob is for proving it on a device.
+ * `?audioShift=<ms>`: the decoded song sits this many ms LATE in its buffer
+ * (negative: early). WebKit does not put HE-AAC where the `<video>` element does.
+ * The owner's TikTok lesson of 2026-11-12 (HE-AACv2, an edit list skipping 7106
+ * samples of encoder delay), each decode against ffmpeg's (= the video timeline):
+ *
+ *   Chromium decodeAudioData                0.0 ms
+ *   WebKit 27.2 decodeAudioData (macOS)  -117.6 ms: the music 118 ms EARLY, so the
+ *                                        click and the counts sound late against it
+ *   the same audio as AAC-LC, WebKit        0.0 ms
+ *
+ * -117.6 ms is 5186 samples, the amount Apple's decoder trims by itself: WebKit
+ * skips the edit list's delay and then its own. (afconvert trims only its own and
+ * comes out +43.5 ms, which was first taken for Safari's answer; on the owner's
+ * iPhone `?audioShift=44` made it worse.) Not measured on iOS itself.
+ *
+ * The fix is the lesson's own AAC-LC audio file (decode's first URL). This knob
+ * is for checking a lesson that has none: `?audioShift=-118` on that one.
  */
 function audioShiftS(): number {
   const v = Number(new URLSearchParams(window.location.search).get("audioShift"));
@@ -116,8 +126,8 @@ export function audioContext(): AudioContext | null {
  * Decoded once per lesson: a layout switch remounts the <video>, not the song.
  * `urls` are tried in order: the lesson's own audio file (plain AAC-LC, a tenth of
  * the video, and decoded to the same place by every browser), then the video itself
- * for a lesson that has none (a second download of the whole video, 3-9 MB, and on
- * Safari HE-AAC audio comes out late: see audioShiftS).
+ * for a lesson that has none (a second download of the whole video, 3-9 MB, and
+ * WebKit decodes HE-AAC audio 118 ms early: see audioShiftS).
  */
 const decoded = new Map<string, Promise<Float32Array[]>>();
 function decode(ctx: AudioContext, urls: readonly string[]): Promise<Float32Array[]> {

@@ -44,12 +44,21 @@ import { audioContext, clockEvents, clockRef } from "./audioClock";
  * burned into the video and a time code drawn into the canvas, ~970 frames per run
  * (2026-10-21): no lead +4 ms (mesh behind), 33 ms lead -33 ms, 66 ms lead -62 ms.
  * The learner's iPhone still showed the mesh a tick behind, which the Simulator
- * (Mac GPU, no hardware video plane) cannot reproduce: tune it there, then bake it in.
+ * (Mac GPU, no hardware video plane) cannot reproduce.
+ *
+ * iPhone and iPad default to IOS_MESH_LEAD_MS: on the owner's iPhone (2026-11-12, a
+ * real two-dancer lesson) 40 looked better than none; 20 and 60 were not judged (the
+ * music was off that day, see audioClock.ts audioShiftS). One device, by eye: the
+ * knob stays for the next one.
  */
+const IOS_MESH_LEAD_MS = 40;
 function meshLatencyMs(): number | null {
   if (typeof window === "undefined") return null;
   const knob = new URLSearchParams(window.location.search).get("meshLead");
-  return knob !== null && Number.isFinite(Number(knob)) ? Number(knob) : null;
+  if (knob !== null && Number.isFinite(Number(knob))) return Number(knob);
+  // iPadOS reports itself as a Mac; it is the one "Mac" with a touch screen.
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  return ios ? IOS_MESH_LEAD_MS : null;
 }
 
 /** The video time on screen at `displayAt` (ms, performance.now() clock), carried
