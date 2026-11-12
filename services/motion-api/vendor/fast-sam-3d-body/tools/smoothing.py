@@ -393,6 +393,53 @@ def _make_cv_filter(dt: float, sigma_meas: float, sigma_accel: float):
     return kf
 
 
+def _cv_step(x, P, rows, dt, z, r, q_var) -> np.ndarray:
+    """One predict + update of the rotation filters of the joints in `rows`.
+
+    The same constant-velocity filter as `_make_cv_filter`, all three axes of
+    every accepted joint in one numpy step instead of a filterpy object each:
+    381 objects stepped one by one in Python was 6-31 s of every job
+    (docs/research/pipeline-latency.md #6). Same arithmetic in the same order
+    as filterpy's predict() and update() (Joseph-form covariance), so the output
+    is the old one to float rounding; test_smoothing.py checks it against
+    filterpy itself.
+
+    x (J, 3, 2) and P (J, 3, 2, 2) are updated in place. dt (n,) is seconds
+    since each block last updated, z (n, 3) the measurements, r and q_var
+    (J, 3) the measurement and acceleration variances. Returns the posterior
+    angle (n, 3); the angle state is left at zero (the caller folds it into the
+    nominal rotation) and the rate is kept.
+    """
+    dt = dt[:, None]
+    x0 = x[rows, :, 0] + dt * x[rows, :, 1]
+    x1 = x[rows, :, 1]
+    p00, p01, p10, p11 = P[rows, :, 0, 0], P[rows, :, 0, 1], P[rows, :, 1, 0], P[rows, :, 1, 1]
+    q = q_var[rows]
+    # predict: F P F' + Q, F = [[1, dt], [0, 1]], Q = q * [[dt^4/4, dt^3/2], [dt^3/2, dt^2]]
+    a00 = p00 + dt * p10 + dt * (p01 + dt * p11) + 0.25 * dt**4 * q
+    a01 = p01 + dt * p11 + 0.5 * dt**3 * q
+    a10 = p10 + dt * p11 + 0.5 * dt**3 * q
+    a11 = p11 + dt**2 * q
+    # update with H = [1, 0]
+    rr = r[rows]
+    s = a00 + rr
+    k0, k1 = a00 / s, a10 / s
+    y = z - x0
+    x0 = x0 + k0 * y
+    x1 = x1 + k1 * y
+    # P = (I - K H) P (I - K H)' + K R K'
+    c = 1.0 - k0
+    b00, b01 = c * a00, c * a01
+    b10, b11 = a10 - k1 * a00, a11 - k1 * a01
+    P[rows, :, 0, 0] = b00 * c + k0 * rr * k0
+    P[rows, :, 0, 1] = b01 - b00 * k1 + k0 * rr * k1
+    P[rows, :, 1, 0] = b10 * c + k1 * rr * k0
+    P[rows, :, 1, 1] = b11 - b10 * k1 + k1 * rr * k1
+    x[rows, :, 0] = 0.0
+    x[rows, :, 1] = x1
+    return x0
+
+
 def _set_dt(kf, dt: float, sigma_accel: float) -> None:
     """Recompute F and Q from the actual dt (docs/PRD.md section 4)."""
     kf.F[0, 1] = dt
@@ -664,9 +711,16 @@ def smooth_track(
     # --- the filters -------------------------------------------------------
     # One independent constant-velocity filter per unwrapped scalar: three per
     # joint for the tangent-space rotation error, plus three for the root's
-    # world translation. 384 filters for the MHR skeleton, ~4 s for a 20 s
-    # clip -- next to 78 s of GPU reconstruction, not worth vectorizing.
-    rot_kf = [[_make_cv_filter(dt_nominal, sigma[j, a], accel[j, a]) for a in range(3)] for j in range(J)]
+    # world translation. The rotation ones (381 for the MHR skeleton) are held
+    # as arrays and stepped together by `_cv_step`; the three translation ones
+    # stay filterpy objects.
+    rot_r = sigma**2
+    rot_q = accel**2
+    rot_P0 = np.zeros((J, 3, 2, 2))
+    rot_P0[..., 0, 0] = rot_r
+    rot_P0[..., 1, 1] = (accel * dt_nominal) ** 2
+    rot_x = np.zeros((J, 3, 2))
+    rot_P = rot_P0.copy()
     trans_kf = [_make_cv_filter(dt_nominal, trans_sigma[a], trans_accel[a]) for a in range(3)]
     for a in range(3):
         trans_kf[a].x[0, 0] = off[obs_idx[0], root, a]
@@ -766,28 +820,21 @@ def smooth_track(
             # The scalars the filters see: the measurement expressed as a
             # tangent-space angle about each block's current nominal rotation.
             z = _rot_measurement(q_nom, lq[f])
-            for j in np.flatnonzero(accept):
-                if needs_reset[j]:
-                    # Re-entry after a gap: restart this block at the new
-                    # measurement with zero velocity rather than filtering
-                    # across the hole (docs/PRD.md section 4).
-                    q_nom[j] = lq[f, j]
-                    for a in range(3):
-                        rot_kf[j][a].x[:] = 0.0
-                        rot_kf[j][a].P = np.diag([sigma[j, a] ** 2, (accel[j, a] * dt_nominal) ** 2])
-                    needs_reset[j] = False
-                    continue
-                dtj = float(dt_block[j])
-                dtheta_post = np.zeros(3)
-                for a in range(3):
-                    _set_dt(rot_kf[j][a], dtj, accel[j, a])
-                    rot_kf[j][a].predict()
-                    rot_kf[j][a].update(z[j, a])
-                    dtheta_post[a] = rot_kf[j][a].x[0, 0]
-                    # The error has been absorbed into the nominal quaternion
-                    # below; reset the error state and keep the rate.
-                    rot_kf[j][a].x[0, 0] = 0.0
-                q_nom[j] = _rot_inject(q_nom[j][None], dtheta_post[None])[0]
+            # Re-entry after a gap: restart those blocks at the new measurement
+            # with zero velocity rather than filtering across the hole
+            # (docs/PRD.md section 4).
+            restart = accept & needs_reset
+            if restart.any():
+                q_nom[restart] = lq[f, restart]
+                rot_x[restart] = 0.0
+                rot_P[restart] = rot_P0[restart]
+                needs_reset[restart] = False
+            run = accept & ~restart
+            if run.any():
+                # The error is absorbed into the nominal quaternion; `_cv_step`
+                # resets the error state and keeps the rate.
+                dtheta_post = _cv_step(rot_x, rot_P, run, dt_block[run], z[run], rot_r, rot_q)
+                q_nom[run] = _rot_inject(q_nom[run], dtheta_post)
             last_update_t[accept] = sample_times_s[f]
 
         # Reset is driven by absence of *evidence*, not by our own refusal to
@@ -799,9 +846,7 @@ def smooth_track(
         no_evidence = (raw_sev[f] != OBSERVED) if has_meas else np.ones(J, dtype=bool)
         stale = np.where(no_evidence, stale + 1, 0)
         newly_frozen = (stale == max_hold_frames + 1) & ~needs_reset
-        for j in np.flatnonzero(newly_frozen):
-            for a in range(3):
-                rot_kf[j][a].x[1, 0] = 0.0
+        rot_x[newly_frozen, :, 1] = 0.0
         needs_reset |= newly_frozen
 
         # Root translation -- the one *translation* filter (every other offset

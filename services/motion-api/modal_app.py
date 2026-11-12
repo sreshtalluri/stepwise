@@ -416,6 +416,11 @@ SAM3D_MHR = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
     volumes={WEIGHTS_DIR: weights, CLIPS_DIR: eval_clips, UPLOADS_DIR: uploads, RESULTS_DIR: results},
     secrets=OBS_SECRETS,
     timeout=3600,
+    # Without a reservation the container got Modal's small default share, and
+    # the per-frame loop (JPEG decode, numpy, launching CUDA kernels one frame
+    # at a time) is CPU-bound: identical runs measured 0.34-0.6 s/frame
+    # (docs/research/pipeline-latency.md #5). ~$0.01 a job at 4 cores.
+    cpu=4.0,
     # Scale to zero, Modal's default idle window (60 s). No standing GPU cost:
     # a warm container only exists because a job (or a pre-warm) just ran.
     min_containers=0,
@@ -588,7 +593,12 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         _write_job_status(job_id, state, stage_message, progress, retry_count, error,
                           {k: v for k, v in milestones.items() if v is not None}, clip_id=clip_id)
 
+    # When each stage began, epoch seconds: the job's waterfall, written into
+    # performance.json so "where did the time go" is a query, not a log scrape.
+    stage_at = {"started": time.time()}
+
     def on_progress(stage: str, message: str, progress, frames_done=None, frames_total=None) -> None:
+        stage_at.setdefault("finishing" if progress == 0.95 else stage, time.time())
         if frames_done is not None:
             milestones["frames_done"], milestones["frames_total"] = frames_done, frames_total
         write_status("refused" if stage == "refused" else "processing", message, progress)
@@ -651,6 +661,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
     finally:
         shutil.rmtree(frames_dir, ignore_errors=True)
     wall_s = time.time() - t0
+    stage_at["processed"] = time.time()
 
     if result.get("refused"):
         # job-status "state" has no dedicated refused value (job-status.schema.json
@@ -691,6 +702,7 @@ def run_clip(clip_id: str, fps: float = 15.0, max_seconds: float = 60.0, bbox_th
         # why (tools/track_hygiene.py). Operator-only: motion_result.py passes
         # just the three numbers above into the MotionResult.
         "track_hygiene": result.get("track_hygiene", []),
+        "stage_at": {k: round(v, 2) for k, v in stage_at.items()},
     }
     guard()
     with open(f"{RESULTS_DIR}/{clip_id}.performance.json", "w") as f:
@@ -1513,7 +1525,10 @@ def _export_and_report(clip_id: str, job_id: str | None, retry_count: int | None
         if retry_count is None:
             out = _export_clip_gltf(clip_id, job_id)
         else:
+            import time
+
             import observability
+            export_started = time.time()
             try:
                 out = _export_clip_gltf(clip_id, job_id)
             except retention.Removed:
@@ -1524,6 +1539,7 @@ def _export_and_report(clip_id: str, job_id: str | None, retry_count: int | None
                 observability.capture(e, "export_clip_gltf", stage="export", clip_id=clip_id,
                                       job_id=job_id, retry_count=retry_count)
                 raise
+            _mark_stages(clip_id, export_started=export_started, finished=time.time())
             _write_job_status(job_id, "succeeded", "", 1.0, retry_count, clip_id=clip_id)
         # The last write is done. A removal that landed after the last check
         # (between it and the commit) is caught here, and swept below.
@@ -1591,6 +1607,26 @@ def _prune_old_versions(clip_id: str, out: dict) -> None:
 # clip_id -> monotonic time its tombstone was last confirmed absent (this container).
 _CLEARED: dict[str, float] = {}
 _PROGRESS_CHECK_S = 5.0
+
+
+def _mark_stages(clip_id: str, **marks: float) -> None:
+    """Add stage times (epoch seconds) to the clip's performance.json, beside
+    the ones run_clip wrote. `finished` is the worker's own finish time: the API
+    used to time a job to the moment somebody next polled it, which for a closed
+    tab was hours. Best-effort, and only into a file that is already there: a
+    timing is never worth a failed export. Committed by the status write that
+    follows."""
+    import json
+    path = f"{RESULTS_DIR}/{clip_id}.performance.json"
+    try:
+        if not os.path.exists(path):
+            return
+        perf = json.load(open(path))
+        perf["stage_at"] = {**perf.get("stage_at", {}), **{k: round(v, 2) for k, v in marks.items()}}
+        with open(path, "w") as f:
+            json.dump(perf, f)
+    except Exception as e:  # noqa: BLE001
+        print(f"[timings] {clip_id}: not recorded ({type(e).__name__}: {e})")
 
 
 def _write_job_status(job_id: str, state: str, stage_message: str, progress, retry_count: int,
@@ -1961,20 +1997,32 @@ def _publish_to_r2(clip_id: str, glb_paths: list[str], validated: str | None,
         return []
 
     written = []
+    mr_path = f"{RESULTS_DIR}/{clip_id}.motion-result.json.gz"
+    # Stored gzipped; declaring the encoding is what lets a browser (and
+    # api.py's passthrough) decompress it transparently instead of handing the
+    # caller a bag of bytes.
+    gz = {"content_encoding": "gzip"}
     try:
-        for path in glb_paths:
-            written.append(storage.put_file(
-                storage.glb_key(os.path.basename(path)), path, "model/gltf-binary"))
+        # Everything immutable goes up together: one after another was 3-12 s
+        # for a multi-dancer lesson (docs/research/pipeline-latency.md #13).
+        puts = [((storage.glb_key(os.path.basename(path)), path, "model/gltf-binary"), {}) for path in glb_paths]
+        if validated and mr_version:
+            puts.append(((storage.motion_result_key(clip_id, mr_version), mr_path, "application/json"),
+                         {"metadata": {"validated": validated}, **gz}))
+        if puts:
+            from concurrent.futures import ThreadPoolExecutor
+            storage.client()  # made once, before the threads share it
+            with ThreadPoolExecutor(max_workers=min(8, len(puts))) as pool:
+                futures = [pool.submit(storage.put_file, *args, **kwargs) for args, kwargs in puts]
+            failed = None
+            for future in futures:
+                try:
+                    written.append(future.result())
+                except Exception as e:  # noqa: BLE001 -- count what did land, then stop below
+                    failed = failed or e
+            if failed:
+                raise failed
         if validated:
-            mr_path = f"{RESULTS_DIR}/{clip_id}.motion-result.json.gz"
-            # Stored gzipped; declaring the encoding is what lets a browser
-            # (and api.py's passthrough) decompress it transparently instead
-            # of handing the caller a bag of bytes.
-            gz = {"content_encoding": "gzip"}
-            if mr_version:
-                written.append(storage.put_file(
-                    storage.motion_result_key(clip_id, mr_version), mr_path, "application/json",
-                    metadata={"validated": validated}, **gz))
             written.append(storage.put_file(
                 storage.motion_result_key(clip_id), mr_path, "application/json",
                 metadata={"validated": validated, **({"version": mr_version} if mr_version else {})},

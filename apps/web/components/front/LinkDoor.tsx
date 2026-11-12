@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { privacy, upload } from "../../lib/copy";
 import { fitText } from "../../lib/fitText";
-import { submitLink, type Failure } from "../../lib/submit";
+import { submitLink, wakeApi, type Failure } from "../../lib/submit";
 import { FAILURE_POSE, StateNote, type StateAction } from "../StateScreen";
 
 const copy = upload.link;
@@ -90,6 +90,7 @@ export default function LinkDoor({ id, onAddFile }: { id: string; onAddFile?: ()
           required
           placeholder={placeholder}
           value={url}
+          onFocus={wakeApi}
           onChange={(e) => setUrl(e.target.value)}
         />
         <button type="submit" className="fd-btn" disabled={busy}>
