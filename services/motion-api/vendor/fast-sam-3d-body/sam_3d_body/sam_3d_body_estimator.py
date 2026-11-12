@@ -15,7 +15,7 @@ from sam_3d_body.data.transforms import (
 )
 
 from sam_3d_body.data.utils.io import load_image
-from sam_3d_body.data.utils.prepare_batch import prepare_batch
+from sam_3d_body.data.utils.prepare_batch import concat_person_batches, prepare_batch
 from sam_3d_body.utils import recursive_to
 from torchvision.transforms import ToTensor
 
@@ -226,7 +226,21 @@ class SAM3DBodyEstimator:
                 - body_decoder: use hand boxes from body decoder output (default)
                 - yolo_pose: use hand boxes computed from YOLO-Pose wrist keypoints
                   (requires detector to be yolo_pose type)
+
+        Several frames at once (stepwise, docs/research/pipeline-latency.md #7):
+        pass `img` as a LIST of frames of one clip (same size, same camera) and
+        `bboxes` as a list with each frame's boxes. They share one forward pass,
+        and the return value is one list of people per frame, the same dicts a
+        call per frame gives. Boxes only: no masks, no camera, no detector.
         """
+        frames = counts = None
+        if isinstance(img, (list, tuple)):
+            assert bboxes is not None and masks is None and cam_int is None and self.fov_estimator is None, \
+                "several frames at once takes boxes only"
+            frames = list(img)
+            counts = [len(np.asarray(b).reshape(-1, 4)) for b in bboxes]
+            bboxes = np.concatenate([np.asarray(b).reshape(-1, 4) for b in bboxes])
+            img = frames[0]
         process_total_start = time.time()
         print("      [process_one_image] Starting...")
 
@@ -292,7 +306,7 @@ class SAM3DBodyEstimator:
 
         # If there are no detected humans, don't run prediction
         if len(boxes) == 0:
-            return []
+            return [] if frames is None else [[] for _ in frames]
 
         # The following models expect RGB images instead of BGR
         if image_format == "bgr":
@@ -324,7 +338,14 @@ class SAM3DBodyEstimator:
 
         #################### Construct batch data samples ####################
         t0 = time.time()
-        batch = prepare_batch(img, self.transform, boxes, masks, masks_score)
+        if frames is None:
+            batch = prepare_batch(img, self.transform, boxes, masks, masks_score)
+        else:
+            starts = np.concatenate([[0], np.cumsum(counts)])
+            batch = concat_person_batches([
+                prepare_batch(f, self.transform, boxes[starts[i]:starts[i + 1]])
+                for i, f in enumerate(frames) if counts[i]
+            ])
         print(f"        [process_one_image] prepare_batch: {time.time() - t0:.4f}s")
 
         #################### Run model inference on an image ####################
@@ -356,7 +377,7 @@ class SAM3DBodyEstimator:
         t0 = time.time()
         torch.cuda.synchronize()
         outputs = self.model.run_inference(
-            img,
+            img if frames is None else frames,
             batch,
             inference_type=inference_type,
             transform_hand=self.transform_hand,
@@ -364,6 +385,7 @@ class SAM3DBodyEstimator:
             hand_box_source=hand_box_source,
             yolo_pose_keypoints=yolo_pose_keypoints,
             yolo_pose_body_boxes=yolo_pose_body_boxes,
+            persons_per_image=counts,
         )
         torch.cuda.synchronize()
         print(f"        [process_one_image] model_run_inference: {time.time() - t0:.4f}s")
@@ -450,4 +472,7 @@ class SAM3DBodyEstimator:
 
         print(f"        [process_one_image] postprocess_output: {time.time() - t0:.4f}s")
         print(f"      [process_one_image] TOTAL: {time.time() - process_total_start:.4f}s")
+        if frames is not None:
+            starts = np.concatenate([[0], np.cumsum(counts)])
+            return [all_out[starts[i]:starts[i + 1]] for i in range(len(frames))]
         return all_out

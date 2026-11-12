@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from sam_3d_body.data.utils.prepare_batch import prepare_batch
+from sam_3d_body.data.utils.prepare_batch import PERSON_KEYS, prepare_batch, prepare_batch_frames
 from sam_3d_body.models.decoders.prompt_encoder import PositionEmbeddingRandom
 from sam_3d_body.models.modules.mhr_utils import (
     euler_to_rotmat_XZY,
@@ -27,6 +27,30 @@ from ..modules.camera_embed import CameraEncoder
 from ..modules.transformer import FFN, MLP
 
 from .base_model import BaseModel
+
+
+def _people(value, idx, n, batch_layout=False):
+    """The people `idx` (a list) out of anything laid out per person: tensors
+    and arrays with n rows, lists of n, dicts of those. With `batch_layout`,
+    the keys prepare_batch lays out as [1, num_person, ...] are cut along
+    dim 1 and cam_int (one per image) is left whole."""
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if batch_layout and k in PERSON_KEYS:
+                out[k] = v[:, idx]
+            elif batch_layout and k == "cam_int":
+                out[k] = v
+            else:
+                out[k] = _people(v, idx, n)
+        return out
+    if isinstance(value, (torch.Tensor, np.ndarray)) and value.shape[:1] == (n,):
+        return value[idx]
+    if isinstance(value, (list, tuple)) and len(value) == n:
+        return type(value)(value[i] for i in idx)
+    if isinstance(value, (list, tuple)):
+        return type(value)(_people(v, idx, n) for v in value)
+    return value
 
 # stepwise: ~45 debug lines per frame are pure overhead and flood Modal's log
 # API (docs/research/pipeline-latency.md #5). SAM3D_VERBOSE=1 brings them back.
@@ -2566,9 +2590,15 @@ class SAM3DBody(BaseModel):
         yolo_pose_keypoints: Optional[np.ndarray] = None,  # YOLO-Pose keypoints [N, 17, 3]
         yolo_pose_body_boxes: Optional[np.ndarray] = None,  # YOLO-Pose body boxes [N, 4]
         parallel_decoders: bool = True,  # Enable merged batch execution for shared backbone
+        persons_per_image: Optional[list] = None,
     ):
         """
         Run 3DB inference (optionally with hand detector).
+
+        persons_per_image: `img` is a LIST of frames of one clip and `batch`
+        holds persons_per_image[i] people of img[i], in order (stepwise:
+        several frames in one forward pass). Only the hand crops need to know,
+        each is cut from its own frame; everything after works per person.
 
         inference_type:
             - full: full-body inference with both body and hand decoders
@@ -2593,7 +2623,7 @@ class SAM3DBody(BaseModel):
         # DEBUG flag for NaN tracing
         _DEBUG_NAN = os.environ.get('DEBUG_NAN', '1') == '1'
 
-        height, width = img.shape[:2]
+        height, width = (img if persons_per_image is None else img[0]).shape[:2]
         cam_int = batch["cam_int"].clone()
 
         if inference_type == "body":
@@ -2624,6 +2654,7 @@ class SAM3DBody(BaseModel):
             and env_parallel
             and hand_box_source == "yolo_pose"
             and yolo_pose_keypoints is not None
+            and persons_per_image is None
         )
 
         if use_parallel:
@@ -2803,19 +2834,21 @@ class SAM3DBody(BaseModel):
             t0 = time.time()
 
             ## Prepare left hand batch (flip image & box)
-            flipped_img = img[:, ::-1]
             tmp = left_xyxy.copy()
             left_xyxy[:, 0] = width - tmp[:, 2] - 1
             left_xyxy[:, 2] = width - tmp[:, 0] - 1
 
-            batch_lhand = prepare_batch(
-                flipped_img, transform_hand, left_xyxy, cam_int=cam_int.clone()
+            # One image, or each person's own frame (persons_per_image).
+            frames = [img] if persons_per_image is None else img
+            counts = [len(left_xyxy)] if persons_per_image is None else persons_per_image
+            batch_lhand = prepare_batch_frames(
+                frames, counts, transform_hand, left_xyxy, cam_int=cam_int, flip=True
             )
             batch_lhand = recursive_to(batch_lhand, "cuda")
 
             ## Prepare right hand batch
-            batch_rhand = prepare_batch(
-                img, transform_hand, right_xyxy, cam_int=cam_int.clone()
+            batch_rhand = prepare_batch_frames(
+                frames, counts, transform_hand, right_xyxy, cam_int=cam_int
             )
             batch_rhand = recursive_to(batch_rhand, "cuda")
 
@@ -3029,7 +3062,15 @@ class SAM3DBody(BaseModel):
         keypoint_prompt[:, 2, -1] = kps_right_elbow_idx
         keypoint_prompt[:, 3, -1] = kps_left_elbow_idx
 
-        if keypoint_prompt.shape[0] > 1:
+        if persons_per_image is not None:
+            # People from several frames: each gets the pass its own frame
+            # would have given it (see _keypoint_prompt_per_frame). Emptied,
+            # so the single-image pass below is skipped.
+            pose_output = self._keypoint_prompt_per_frame(
+                batch, pose_output, keypoint_prompt, hand_valid_mask, persons_per_image
+            )
+            keypoint_prompt = keypoint_prompt[:0]
+        elif keypoint_prompt.shape[0] > 1:
             # Replace invalid keypoints to dummy prompts
             invalid_prompt = (
                 (keypoint_prompt[..., 0] < -0.5)
@@ -3301,6 +3342,88 @@ class SAM3DBody(BaseModel):
         print(f"        [run_inference] TOTAL: {time.time() - run_inference_start:.4f}s")
 
         return pose_output, batch_lhand, batch_rhand, lhand_output, rhand_output
+
+    def _keypoint_prompt_per_frame(self, batch, pose_output, keypoint_prompt, hand_valid_mask, persons_per_image):
+        """The wrist/elbow keypoint-prompt pass for people gathered from several
+        frames, each treated exactly as a forward pass of its own frame would.
+
+        That pass is NOT the same for one person and for several (stepwise,
+        measured on an L40S, solo-01: the same person alone vs twice in one
+        image differs by a median 12 cm in pred_keypoints_3d, while two calls
+        alone agree to 1e-6). A frame with ONE person keeps only its valid
+        prompts, and skips the pass when none is; a frame with several
+        replaces invalid prompts with dummies and always runs. So people are
+        grouped by what their own frame would do, each group gets one pass,
+        and a batched run gives what frame-by-frame gave.
+        """
+        import os
+        if os.environ.get('SKIP_KEYPOINT_PROMPT', '0') == '1':
+            return pose_output
+        n = keypoint_prompt.shape[0]
+        hand_ok = hand_valid_mask[..., [1, 0, 1, 0]]
+        frame_size = [c for c in persons_per_image for _ in range(c)]
+        groups = {}  # what the frame would do -> people
+        for i in range(n):
+            if frame_size[i] > 1:
+                key = "dummies"
+            else:
+                valid = (
+                    torch.all(
+                        (keypoint_prompt[i:i + 1, :, :2] > -0.5)
+                        & (keypoint_prompt[i:i + 1, :, :2] < 0.5),
+                        dim=2,
+                    )
+                    & hand_ok[i:i + 1]
+                ).reshape(-1)
+                key = tuple(valid.tolist())
+                if not any(key):
+                    continue  # no valid prompt: its frame would skip the pass
+            groups.setdefault(key, []).append(i)
+
+        refined = []
+        try:
+            for key, idx in groups.items():
+                prompt = keypoint_prompt[idx].clone()
+                if key == "dummies":
+                    invalid_prompt = (
+                        (prompt[..., 0] < -0.5)
+                        | (prompt[..., 0] > 0.5)
+                        | (prompt[..., 1] < -0.5)
+                        | (prompt[..., 1] > 0.5)
+                        | (~hand_ok[idx])
+                    ).unsqueeze(-1)
+                    dummy_prompt = torch.zeros((1, 1, 3)).to(prompt)
+                    dummy_prompt[:, :, -1] = -2
+                    prompt[:, :, :2] = torch.clamp(prompt[:, :, :2] + 0.5, min=0.0, max=1.0)
+                    prompt = torch.where(invalid_prompt, dummy_prompt, prompt)
+                else:
+                    prompt = prompt[:, torch.tensor(key, device=prompt.device)]
+                    prompt[:, :, :2] = torch.clamp(prompt[:, :, :2] + 0.5, min=0.0, max=1.0)
+                if len(idx) == n:
+                    out, _ = self.run_keypoint_prompt(batch, pose_output, prompt)
+                    return out
+                sub_batch = _people(batch, idx, n, batch_layout=True)
+                self._initialize_batch(sub_batch)
+                self.body_batch_idx = list(range(len(idx)))
+                out, _ = self.run_keypoint_prompt(sub_batch, _people(pose_output, idx, n), prompt)
+                refined.append((idx, out["mhr"]))
+        finally:
+            self._initialize_batch(batch)
+            self.hand_batch_idx = []
+            self.body_batch_idx = list(range(n))
+
+        if refined:
+            mhr = dict(pose_output["mhr"])
+            for name, value in mhr.items():
+                if isinstance(value, torch.Tensor) and value.shape[:1] == (n,):
+                    value = value.clone()
+                    for idx, new in refined:
+                        if isinstance(new.get(name), torch.Tensor):
+                            value[idx] = new[name].to(value.dtype)
+                    mhr[name] = value
+            pose_output = dict(pose_output)
+            pose_output["mhr"] = mhr
+        return pose_output
 
     def run_keypoint_prompt(self, batch, output, keypoint_prompt):
         import os

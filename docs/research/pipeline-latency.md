@@ -403,3 +403,73 @@ from the Volume every second.
 One note for #4: models now load once per container, so its 30–60 s compile
 warm-up would be paid once per container, not once per job. That weakens the
 cost argument against it in §3.
+
+---
+
+## 8. The second pass (2026-11-11): what shipped, and what the GPU said
+
+Branch `feat/pipeline-latency`. GPU numbers are from a throwaway Modal app on an
+L40S with `cpu=4`, reading the weights and eval Volumes and writing nothing.
+Nothing here was measured in production.
+
+**Shipped, no change to the output:**
+- **#6 smoothing.** The 381 rotation filters are arrays stepped together. A
+  synthetic 600-frame clip comes out bit-identical. On solo-01 (296 frames, 127
+  joints) everything after reconstruction (bone constraint, hand crops,
+  smoothing) now takes 2.8 s; this doc measured 12-35 s for that stage.
+- **#5 CPU.** `Reconstructor` reserves 4 cores.
+- **#13 R2.** Immutable objects go up together; the "latest" copy still goes
+  last.
+- **Section 5's gap.** `performance.json` carries `stage_at`, and
+  `job_finished` carries `stages` (seconds since dispatch) and a `wall_s` that
+  ends at the worker's own finish time.
+- **API wake-up.** The upload page and a focus on the link field call
+  `/health`, so the API's cold start is not in front of the GPU pre-warm.
+
+**#7 batching: built, measured, OFF (`RECON_BATCH=1`).**
+
+| | one frame per pass | eight per pass |
+|---|---|---|
+| model call, per frame | 200-245 ms | ~100 ms |
+| reconstruction, solo-01 (296 frames) | 76.5 s | 32.5 s |
+| whole GPU stage, solo-01, warm | 86.8 s | 41.6 s |
+| peak VRAM | 3.7 GB | 4.7 GB |
+
+Per-crop cost by people per forward: 246 / 160 / 120 / 102 / 98 ms at 1 / 2 / 4
+/ 8 / 16. The gain is flat past eight.
+
+It is off because it is not the same answer:
+- **The model treats one person and several differently.** Its last pass (wrist
+  and elbow keypoint prompts) keeps only the valid prompts for a lone person
+  and skips the pass when none is valid; with several people it substitutes
+  dummy prompts and always runs. The same person alone vs twice in one image:
+  a median 12 cm apart in `pred_keypoints_3d`. Two calls alone: 1e-6. So a solo
+  clip and a group clip already go through different code today, and naive
+  batching silently moves solo dancers onto the group path.
+  `_keypoint_prompt_per_frame` groups people by what their own frame would do,
+  which brings solo frames back to a median 0.25-0.5 mm (p99 1-4 mm).
+- **Several-dancer frames are not batched at all.** Batched across frames they
+  were up to 18 cm from a per-frame run, and the cause was not found.
+- **What is left is rounding that tips decisions.** Batch size changes the low
+  bits. On solo-01, 285 of 291 frames agree to a worst joint of 0.28 degrees
+  (median); in 6 frames the worst joint is 10-39 degrees away. After smoothing:
+  a median 0.34 cm / 0.7 degrees, p99 5 cm / 16 degrees, 2% of visibility flags
+  differ, and 2.7% more samples are flagged uncertain (9,386 vs 9,141). The raw
+  output's own frame-to-frame jumps are identical in both runs (worst joint a
+  median 31 degrees from its neighbours' midpoint), so these are frames where
+  the model was already unsure. One clip; no ground truth.
+
+To turn it on: `RECON_BATCH=8` in the `Reconstructor`'s environment
+(`modal_app.py` has the line), after looking at one lesson made both ways.
+
+**#4 bf16 is not a flag flip.** `LAYER_DTYPE=bf16` crashes on the first frame:
+the MHR TorchScript body model gets BFloat16 inside the autocast region
+(`pose_dirs_predictor`, `RuntimeError: ... 'BFloat16'`). It needs the MHR head
+taken out of autocast, then the accuracy check. Not done. `USE_COMPILE` was not
+tried: its 30-60 s warm-up is paid on every cold start, and at beta volume
+nearly every job is cold.
+
+**Not done:** #10 (split across GPUs): after batching a 45 s clip's
+reconstruction is roughly 75 s, and each extra GPU costs a ~30 s cold start, so
+measure with batching on first. Exporting dancers in parallel. #8 (lesson
+before 3D) is still the owner's call.
