@@ -428,6 +428,8 @@ export const lesson = {
     music: "Music volume",
     guess: "It clicks on our counts, a guess from the music until you set count 1.",
     yours: "It clicks on the counts you set.",
+    timing: (ms: number) => (ms === 0 ? "Sound timing" : `Sound timing: ${ms > 0 ? "+" : ""}${ms} ms`),
+    timingHint: "On wireless headphones or a speaker the sound can arrive late. Turn the click on, then slide until it lands as the count changes.",
   },
 
   /** How many counts a chip or a preset loops. Nothing is forced to be an eight. */

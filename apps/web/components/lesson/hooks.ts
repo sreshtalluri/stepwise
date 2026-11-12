@@ -81,6 +81,19 @@ export function useVideoClock(
       },
     };
   });
+  // The 3D views draw the body from the music itself while the audio clock plays it:
+  // every screen refresh at any speed (a video frame at 0.25x lasts eight of them),
+  // straight through loop wraps, and on the sound even where the picture trails it.
+  // The mesh over the video stays on `meshTimeRef`: there it must match the pixels.
+  const [musicTimeRef] = useState(() => {
+    const lead = meshLatencyMs() ?? 0;
+    return {
+      get current() {
+        const clock = clockRef.current;
+        return clock?.engaged ? clock.heardAt(performance.now() + lead) : meshTimeRef.current;
+      },
+    };
+  });
 
   useEffect(() => {
     if (!video) return;
@@ -94,7 +107,9 @@ export function useVideoClock(
       const loop = loopRef.current;
       // Only the trailing edge: running into the loop from before it is harmless,
       // and snapping a deliberate seek outside it would look broken.
-      if (loop && t >= loop[1] && !video.paused) {
+      // With the music on the audio clock the loop is the clock's (audioClock.ts): it
+      // wraps the music on the count and brings the picture round itself.
+      if (loop && t >= loop[1] && !video.paused && !clockRef.current?.engaged) {
         // Set, not stepped, so no arithmetic accumulates over forty minutes of loops.
         video.currentTime = loop[0];
         anchor.current = null;
@@ -144,7 +159,7 @@ export function useVideoClock(
     };
   }, [video, loopRef, onWrapRef]);
 
-  return { timeRef, meshTimeRef, displayTime };
+  return { timeRef, meshTimeRef, musicTimeRef, displayTime };
 }
 
 /**
@@ -288,7 +303,9 @@ export function useMetronome(
       const t = clock ? clock.mediaAt(now) : video.currentTime;
       const lead = clock ? 0 : videoLead;
       const gap = (0.4 * (mode === "ands" ? 0.5 : 1) * grid.secondsPerCount) / rate;
-      for (const c of clicksAhead({ grid, loop: loopRef.current, t, rate, lookahead: LOOKAHEAD_S + Math.max(lead, 0), mode })) {
+      // On the audio clock the loop's wrap is known ahead, so clicks are booked across it.
+      const loop = clock ? clock.loop : loopRef.current;
+      for (const c of clicksAhead({ grid, loop, t, rate, lookahead: LOOKAHEAD_S + Math.max(lead, 0), mode, wrap: !!clock })) {
         const when = now + c.in - lead;
         if (when < now) continue; // too late to sound on time
         if (when < last + gap) continue; // already booked on an earlier tick

@@ -82,3 +82,18 @@ test("click volume: quiet by default, remembered, private mode never throws", ()
   saveClickVolume(0.1);
   delete (globalThis as any).window;
 });
+
+test("wrap: on the audio clock the clicks carry on from the loop's start, with no gap", () => {
+  // Counts 3-4: [1.2, 2.2). 0.1 s before the end, a 0.4 s lookahead reaches round to count 3.
+  const loop = loopTimesS(grid, { startCount: 3, endCount: 4 });
+  const o = { grid, loop, t: 2.1, rate: 1, lookahead: 0.4, mode: "counts" as const };
+  assert.deepEqual(clicksAhead(o), [], "the video clock stops at the loop's end");
+  const cs = clicksAhead({ ...o, wrap: true });
+  assert.deepEqual(at(cs), [1.2]);
+  assert.ok(near(cs[0].in, 0.1), "count 3 sounds the moment the loop wraps");
+  assert.equal(cs[0].label, 3);
+  // Slowed: the same media distance takes twice the wall time.
+  assert.ok(near(clicksAhead({ ...o, rate: 0.5, wrap: true })[0].in, 0.2));
+  // A lookahead longer than the whole loop goes round it more than once.
+  assert.deepEqual(at(clicksAhead({ ...o, lookahead: 1.5, wrap: true })), [1.2, 1.7, 1.2]);
+});
