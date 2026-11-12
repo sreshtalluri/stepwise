@@ -1,12 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Lockup } from "../../components/brand/Mark";
 import { useRouter } from "next/navigation";
 import LinkDoor from "../../components/front/LinkDoor";
 import { marketing, upload as copy } from "../../lib/copy";
-import { submitFile, type Failure, type Submitted } from "../../lib/submit";
+import { submitFile, wakeApi, type Failure, type Submitted } from "../../lib/submit";
 import { FAILURE_POSE, StateNote, type StateAction } from "../../components/StateScreen";
 
 /**
@@ -21,6 +21,7 @@ import { FAILURE_POSE, StateNote, type StateAction } from "../../components/Stat
  */
 export default function UploadPage() {
   const router = useRouter();
+  useEffect(wakeApi, []);
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<{ error: string; kind: Failure } | null>(null);
   const [busy, setBusy] = useState(false);

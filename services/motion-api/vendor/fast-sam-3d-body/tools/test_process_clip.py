@@ -5,7 +5,7 @@ No ffmpeg, torch, GPU, or detector needed -- refusal_reason_for is plain
 logic. Which tracks count as dancers is test_track_hygiene.py's job.
 Run: python tools/test_process_clip.py
 """
-from process_clip import MAX_DANCERS, _strip_unread, refusal_reason_for
+from process_clip import MAX_DANCERS, _strip_unread, recon_groups, refusal_reason_for
 
 
 def test_the_npz_keeps_no_body_shape():
@@ -31,3 +31,22 @@ if __name__ == "__main__":
         t()
         print(f"ok  {t.__name__}")
     print(f"\n{len(tests)} passed")
+
+
+def test_single_dancer_frames_share_a_forward_pass_and_nothing_else_does():
+    #          0  1  2  3  4  5  6  7  8
+    people = [1, 1, 0, 1, 2, 1, 1, 3, 1]
+    groups = recon_groups(people, batch=3)
+    # every frame with somebody in it, exactly once
+    assert sorted(i for g in groups for i in g) == [0, 1, 3, 4, 5, 6, 7, 8]
+    # several-dancer frames stay alone; grouped frames all have one dancer
+    assert [4] in groups and [7] in groups
+    assert all(len(g) <= 3 and (len(g) == 1 or all(people[i] == 1 for i in g)) for g in groups)
+    assert [0, 1, 3] in groups and [5, 6, 8] in groups
+    # in the order their last frame comes, so progress only moves forward
+    assert [g[-1] for g in groups] == sorted(g[-1] for g in groups)
+
+
+def test_a_batch_of_one_is_one_frame_per_pass_as_before():
+    assert recon_groups([1, 1, 2, 0, 1], batch=1) == [[0], [1], [2], [4]]
+    assert recon_groups([], batch=8) == [] and recon_groups([0, 0], batch=8) == []

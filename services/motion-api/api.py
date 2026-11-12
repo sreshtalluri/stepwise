@@ -963,8 +963,11 @@ def get_job_status(job_id: str) -> dict:
         _prime_result(job_id)
     if doc["state"] in ("succeeded", "failed"):
         clip_id = _clip_id_for(job_id)
-        analytics.record_finished(doc, clip_id, lambda: len((_volume_read_json(
-            results_volume, f"/{clip_id}.export-manifest.json") or {}).get("glb_paths") or {}))
+        analytics.record_finished(
+            doc, clip_id,
+            lambda: len((_volume_read_json(
+                results_volume, f"/{clip_id}.export-manifest.json") or {}).get("glb_paths") or {}),
+            lambda: (_volume_read_json(results_volume, f"/{clip_id}.performance.json") or {}).get("stage_at"))
     return doc
 
 

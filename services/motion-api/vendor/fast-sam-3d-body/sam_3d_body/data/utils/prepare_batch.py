@@ -76,3 +76,46 @@ def prepare_batch(
 
     batch["img_ori"] = [NoCollate(img)]
     return batch
+
+
+# Keys prepare_batch lays out as [1, num_person, ...]: people are along dim 1.
+PERSON_KEYS = (
+    "img", "img_size", "ori_img_size", "bbox_center", "bbox_scale",
+    "bbox", "affine_trans", "mask", "mask_score", "person_valid",
+)
+
+
+def concat_person_batches(parts):
+    """Several prepare_batch results as one batch, people along dim 1.
+
+    For frames of ONE clip (stepwise, docs/research/pipeline-latency.md #7):
+    same size and camera, so everything that is not per person (cam_int) is
+    the first frame's. The model already takes N people in one image; this
+    makes N people from several images look exactly like that, so one forward
+    pass serves a run of frames. Measured on an L40S: 246 ms a frame alone,
+    ~100 ms a frame eight at a time.
+    """
+    if len(parts) == 1:
+        return parts[0]
+    out = dict(parts[0])
+    for key in PERSON_KEYS:
+        if key in out:
+            out[key] = torch.cat([p[key] for p in parts], dim=1)
+    if "img_ori" in out:
+        out["img_ori"] = [x for p in parts for x in p["img_ori"]]
+    return out
+
+
+def prepare_batch_frames(imgs, counts, transform, boxes, cam_int=None, flip=False):
+    """prepare_batch for people spread over frames: `boxes` holds counts[i]
+    people of imgs[i], in order, and each crop is cut from its own frame.
+    `flip` mirrors every frame first (the left-hand crops)."""
+    parts, start = [], 0
+    for img, n in zip(imgs, counts):
+        if n:
+            parts.append(prepare_batch(
+                img[:, ::-1] if flip else img, transform, boxes[start:start + n],
+                cam_int=None if cam_int is None else cam_int.clone(),
+            ))
+        start += n
+    return concat_person_batches(parts)
