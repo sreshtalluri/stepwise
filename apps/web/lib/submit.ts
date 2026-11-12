@@ -17,6 +17,20 @@ export type Submitted = { jobId: string } | { error: string; kind: Failure };
 const MAX_SECONDS = 60;
 
 /**
+ * Wake the service before the clip is sent. It scales to zero, and its GPU pre-warm
+ * starts when the upload request ARRIVES: with the service cold, its own start
+ * (~8 s, docs/research/pipeline-latency.md) sat in front of that. Called when someone
+ * shows they are about to add a clip (the upload page, a focus on the link field).
+ * Once per page; a failure is nothing: the upload wakes it as before.
+ */
+let woken = false;
+export function wakeApi(): void {
+  if (woken) return;
+  woken = true;
+  void fetch("/api/health", { cache: "no-store" }).catch(() => {});
+}
+
+/**
  * A failed response from the service. Its sentence when it wrote one, in the
  * `{detail: {error: {message}}}` shape; `fallback` (ours) when it did not.
  *

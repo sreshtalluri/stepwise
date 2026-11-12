@@ -25,6 +25,9 @@ from smoothing import (
     OBSERVED,
     OUT_OF_FRAME,
     UNCERTAIN,
+    _cv_step,
+    _make_cv_filter,
+    _set_dt,
     decompose,
     detector_joint_signals,
     recompose,
@@ -367,3 +370,38 @@ if __name__ == "__main__":
             fn()
             print(f"ok  {name}")
     print("all smoothing self-checks passed")
+
+
+def test_array_filter_step_is_filterpy_step_for_step():
+    """`_cv_step` replaced 381 filterpy objects stepped one at a time. It has to
+    be the same filter: same predict, same Joseph-form update, the angle folded
+    away after each step, uneven dt, and blocks that sit steps out."""
+    rng = np.random.default_rng(3)
+    J = 5
+    sigma = rng.uniform(0.01, 0.05, (J, 3))
+    accel = rng.uniform(5.0, 40.0, (J, 3))
+    ref = [[_make_cv_filter(DT, sigma[j, a], accel[j, a]) for a in range(3)] for j in range(J)]
+    x = np.zeros((J, 3, 2))
+    P = np.zeros((J, 3, 2, 2))
+    P[..., 0, 0] = sigma**2
+    P[..., 1, 1] = (accel * DT) ** 2
+    for _ in range(200):
+        rows = rng.random(J) < 0.7
+        if not rows.any():
+            continue
+        dt = np.where(rng.random(J) < 0.2, 3 * DT, DT)
+        z = rng.normal(0, 0.1, (J, 3))
+        want = np.zeros((J, 3))
+        for j in np.flatnonzero(rows):
+            for a in range(3):
+                _set_dt(ref[j][a], float(dt[j]), accel[j, a])
+                ref[j][a].predict()
+                ref[j][a].update(z[j, a])
+                want[j, a] = ref[j][a].x[0, 0]
+                ref[j][a].x[0, 0] = 0.0
+        got = _cv_step(x, P, rows, dt[rows], z[rows], sigma**2, accel**2)
+        np.testing.assert_allclose(got, want[rows], rtol=1e-10, atol=1e-13)
+    for j in range(J):
+        for a in range(3):
+            np.testing.assert_allclose(x[j, a], ref[j][a].x[:, 0], rtol=1e-9, atol=1e-13)
+            np.testing.assert_allclose(P[j, a], ref[j][a].P, rtol=1e-9, atol=1e-15)

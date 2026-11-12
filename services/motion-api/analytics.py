@@ -188,14 +188,24 @@ def record(name: str, props: dict, headers, client_host, *, job_id=None, clip_id
 _FINISHED: set[tuple[str, int]] = set()
 
 
-def record_finished(doc: dict, clip_id: str, persons_of) -> None:
-    """job_finished, once per (job, attempt), from a terminal job-status the API
-    served. `persons_of()` is only called the first time.
+def stage_seconds(stage_at: dict, dispatched: float | None) -> dict:
+    """The worker's stage times (epoch seconds, performance.json `stage_at`) as
+    whole seconds since dispatch: the job's waterfall, one number per stage."""
+    if dispatched is None:
+        return {}
+    return {k: round(v - dispatched) for k, v in stage_at.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)}
 
-    Wall seconds run from this attempt's dispatch row to the moment we first
-    SAW the terminal state. ponytail: if nobody was polling (tab closed), that
-    is the next lesson open, so it overstates; the worker writing its own
-    finish time is the upgrade if the number starts to matter."""
+
+def record_finished(doc: dict, clip_id: str, persons_of, stage_at_of=None) -> None:
+    """job_finished, once per (job, attempt), from a terminal job-status the API
+    served. `persons_of()` and `stage_at_of()` are only called the first time.
+
+    Wall seconds run from this attempt's dispatch row to the worker's own
+    finish time (`stage_at_of()["finished"]`, written by export). Without one
+    (a failed job, a worker from before it wrote them) they run to the moment
+    we first SAW the terminal state, which overstates when nobody was polling:
+    a closed tab once made that 6,925 s."""
     key = (doc["job_id"], doc.get("retry_count", 0))
     if key in _FINISHED or doc["state"] not in ("succeeded", "failed"):
         return
@@ -206,13 +216,19 @@ def record_finished(doc: dict, clip_id: str, persons_of) -> None:
                 "SELECT 1 FROM events WHERE name = 'job_finished' AND job_id = %s "
                 "AND (props->>'retry_count')::int = %s", (key[0], key[1])).fetchone()
             if not seen:
-                (wall,) = conn.execute(
-                    "SELECT extract(epoch FROM now() - max(occurred_at)) FROM events "
+                dispatched, now = conn.execute(
+                    "SELECT extract(epoch FROM max(occurred_at)), extract(epoch FROM now()) FROM events "
                     "WHERE name = 'dispatch' AND job_id = %s", (key[0],)).fetchone()
+                dispatched = float(dispatched) if dispatched is not None else None
+                stage_at = (stage_at_of() if stage_at_of else None) or {}
+                wall = (float(stage_at.get("finished") or now) - dispatched) if dispatched is not None else None
                 props = {"state": doc["state"], "retry_count": key[1],
                          "error_code": (doc.get("error") or {}).get("code"),
-                         "wall_s": round(float(wall)) if wall is not None else None,
+                         "wall_s": round(wall) if wall is not None else None,
                          "persons": persons_of() if doc["state"] == "succeeded" else None}
+                stages = stage_seconds(stage_at, dispatched)
+                if stages:
+                    props["stages"] = stages
                 # ponytail: two replicas seeing the same finish in the same
                 # instant can both insert; one duplicate in a completion rate is
                 # noise. An advisory lock is the fix if it ever is not.

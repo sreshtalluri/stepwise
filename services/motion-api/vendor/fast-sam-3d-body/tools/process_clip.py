@@ -25,6 +25,7 @@ Python/torch version (see docs/PRD.md G3, E5).
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -55,6 +56,55 @@ def _emit(on_progress: StageCallback, stage: str, message: str, progress: Option
           **milestones) -> None:
     if on_progress is not None:
         on_progress(stage, message, progress, **milestones)
+
+
+RECON_BATCH = int(os.environ.get("RECON_BATCH", "1"))
+"""How many single-dancer frames share one forward pass of SAM 3D Body. 1 (the
+default) is one frame per pass, as it always was; RECON_BATCH=8 in the
+container's environment turns batching on.
+
+OFF until the owner has looked at a lesson made both ways, because it is faster
+but not the same answer (docs/research/pipeline-latency.md section 8, L40S,
+solo-01, 296 frames, same container):
+
+- Speed: the reconstruction pass 76.5 s -> 32.5 s, the whole GPU stage 86.8 s
+  -> 41.6 s. Per frame ~200-245 ms alone, ~100 ms eight at a time; past eight
+  the gain is flat (16: 98 ms) and VRAM is 4.7 GB of 48.
+- Output: 285 of 291 frames agree to batch-size rounding (worst joint a median
+  0.28 degrees apart). In 6 frames the worst joint lands 10-39 degrees away:
+  frames where the model sits on one of its own yes/no decisions (is this hand
+  crop usable) and rounding tips it. After smoothing: joints a median 0.34 cm /
+  0.7 degrees apart, p99 5 cm / 16 degrees, and 2% of the visibility flags
+  differ. Neither run is the truth there; the raw output's own frame-to-frame
+  jumps are the same in both (worst joint a median 31 degrees from its
+  neighbours' midpoint, p99 85). The smoother flagged 2.7% more samples
+  uncertain with batching (9,386 vs 9,141), on this one clip.
+"""
+
+
+def recon_groups(people_per_frame: list[int], batch: int = RECON_BATCH) -> list[list[int]]:
+    """Which frames go through the model together: lists of frame indices, in
+    the order their last frame comes.
+
+    Only frames with ONE dancer are grouped, up to `batch` of them. A frame
+    with several dancers keeps its own forward pass, exactly as before: the
+    model's last refinement pass treats one person and several differently
+    (sam3d_body._keypoint_prompt_per_frame), and for several-dancer frames a
+    batched run was measured up to 18 cm away from a per-frame one. A frame
+    with nobody is in no group.
+    """
+    groups, solo = [], []
+    for i, n in enumerate(people_per_frame):
+        if n == 1:
+            solo.append(i)
+            if len(solo) >= max(1, batch):
+                groups.append(solo)
+                solo = []
+        elif n > 1:
+            groups.append([i])
+    if solo:
+        groups.append(solo)
+    return sorted(groups, key=lambda g: g[-1])
 
 
 def refusal_reason_for(n_confident_dancers: int, max_dancers: int = MAX_DANCERS) -> Optional[str]:
@@ -260,50 +310,58 @@ def process_clip(
     )
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()  # per clip, not per warm container
-    per_frame = []
     peak_vram_bytes = 0
     t_start = time.time()
 
-    for i, (t_s, det) in enumerate(zip(sample_times_s, raw_detections)):
-        boxes = det["boxes"]
-        track_ids = det["track_ids"]
-        keep = np.array([tid in confident_track_ids for tid in track_ids.tolist()], dtype=bool)
-        boxes = boxes[keep]
-        track_ids = track_ids[keep]
+    # Who is reconstructed in each frame: the confidently-tracked dancers only.
+    kept = []
+    for det in raw_detections:
+        keep = np.array([tid in confident_track_ids for tid in det["track_ids"].tolist()], dtype=bool)
+        kept.append((det["boxes"][keep], det["track_ids"][keep]))
+    # A frame with no confidently-tracked dancer stays an empty dict -- G5's
+    # gate: no fabricated pose. Recorded as absent, not silently skipped, so
+    # the sample time still exists in the output (PRD section 6).
+    per_frame = [{} for _ in raw_detections]
+    reported = -10
 
-        if len(boxes) == 0:
-            # Genuinely no confidently-tracked dancer this frame -- G5's gate:
-            # no fabricated pose. Recorded as absent (empty dict), not silently
-            # skipped, so the sample time still exists in the output (PRD
-            # section 6).
-            per_frame.append({})
-            continue
-
-        img = cv2.imread(str(frame_files[i]))
-        # Every confidently-tracked dancer, not just one (docs/PRD.md section
-        # 5, capped at MAX_DANCERS above). One process_one_image call, all
-        # boxes at once -- SAM 3D Body runs per-crop internally, so this is N
-        # crops in one batch, not N calls. Cost is linear in N, not free --
-        # measure per-clip cost/fps here, don't assume it from the solo case.
-        outputs = estimator.process_one_image(
-            img,
-            bboxes=boxes,
-            bbox_thr=bbox_thr,
-            hand_box_source="yolo_pose",
-        )
-        per_frame.append(dict(zip(track_ids.tolist(), outputs)))
+    for group in recon_groups([len(boxes) for boxes, _ in kept], RECON_BATCH):
+        imgs = [cv2.imread(str(frame_files[i])) for i in group]
+        if len(group) == 1:
+            # Every confidently-tracked dancer of the frame, not just one
+            # (docs/PRD.md section 5, capped at MAX_DANCERS above), in one call:
+            # SAM 3D Body runs per crop, so this is N crops in one batch, not N
+            # calls. Cost is linear in N, not free -- measure per-clip cost/fps
+            # here, don't assume it from the solo case.
+            outputs = [estimator.process_one_image(
+                imgs[0],
+                bboxes=kept[group[0]][0],
+                bbox_thr=bbox_thr,
+                hand_box_source="yolo_pose",
+            )]
+        else:
+            # Several single-dancer frames in one forward pass (recon_groups).
+            outputs = estimator.process_one_image(
+                imgs,
+                bboxes=[kept[i][0] for i in group],
+                bbox_thr=bbox_thr,
+                hand_box_source="yolo_pose",
+            )
+        for i, people in zip(group, outputs):
+            per_frame[i] = dict(zip(kept[i][1].tolist(), people))
 
         if torch.cuda.is_available():
             peak_vram_bytes = max(peak_vram_bytes, torch.cuda.max_memory_allocated())
 
-        if i % 10 == 0:
-            print(f"  frame {i}/{len(frame_files)}  t={t_s:.2f}s  "
-                  f"dancers={len(boxes)}  vram_peak={peak_vram_bytes / 1e9:.2f}GB")
+        done = group[-1] + 1
+        if done - reported >= 10:
+            reported = done
+            print(f"  frame {done}/{len(frame_files)}  t={sample_times_s[group[-1]]:.2f}s  "
+                  f"dancers={len(kept[group[-1]][0])}  vram_peak={peak_vram_bytes / 1e9:.2f}GB")
             _emit(
                 on_progress, "reconstructing",
-                f"Building the body, frame {i + 1} of {len(frame_files)}",
-                0.25 + 0.7 * (i + 1) / max(1, len(frame_files)),
-                frames_done=i + 1, frames_total=len(frame_files),
+                f"Building the body, frame {done} of {len(frame_files)}",
+                0.25 + 0.7 * done / max(1, len(frame_files)),
+                frames_done=done, frames_total=len(frame_files),
             )
 
     elapsed_s = time.time() - t_start

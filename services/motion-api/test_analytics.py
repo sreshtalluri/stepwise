@@ -184,6 +184,25 @@ def test_job_finished_is_recorded_once_per_attempt(pg):
 
 
 @needs_pg
+def test_job_finished_times_the_job_to_the_workers_finish_not_the_next_poll(pg):
+    """Nobody was polling: the terminal status is first seen an hour after the
+    worker finished. wall_s is the 100 s the job took, and the stages are there."""
+    pg.execute("INSERT INTO events (name, job_id, occurred_at) VALUES ('dispatch', 'job_w', now() - interval '3600 seconds')")
+    (dispatched,) = pg.execute("SELECT extract(epoch FROM max(occurred_at)) FROM events WHERE job_id = 'job_w'").fetchone()
+    dispatched = float(dispatched)
+    stage_at = {"started": dispatched + 12, "reconstructing": dispatched + 40, "finished": dispatched + 100}
+    analytics.record_finished({"job_id": "job_w", "state": "succeeded", "retry_count": 0}, "w", lambda: 1, lambda: stage_at)
+    (props,) = pg.execute("SELECT props FROM events WHERE name = 'job_finished' AND job_id = 'job_w'").fetchone()
+    assert props["wall_s"] == 100
+    assert props["stages"] == {"started": 12, "reconstructing": 40, "finished": 100}
+
+
+def test_stage_seconds_are_whole_seconds_since_dispatch():
+    assert analytics.stage_seconds({"started": 1010.4, "finished": 1100.6, "junk": "x"}, 1000.0) == {"started": 10, "finished": 101}
+    assert analytics.stage_seconds({"started": 5.0}, None) == {}
+
+
+@needs_pg
 def test_job_created_on_upload(api, pg, tmp_path):  # noqa: F811
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"not really a video")
