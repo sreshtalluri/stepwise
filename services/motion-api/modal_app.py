@@ -421,6 +421,9 @@ SAM3D_MHR = f"{WEIGHTS_DIR}/facebook__sam-3d-body-dinov3/assets/mhr_model.pt"
     # at a time) is CPU-bound: identical runs measured 0.34-0.6 s/frame
     # (docs/research/pipeline-latency.md #5). ~$0.01 a job at 4 cores.
     cpu=4.0,
+    # To batch single-dancer frames (about half the GPU stage; OFF until the
+    # owner has compared a lesson made both ways, see tools/process_clip.py
+    # RECON_BATCH): secrets=OBS_SECRETS + [modal.Secret.from_dict({"RECON_BATCH": "8"})]
     # Scale to zero, Modal's default idle window (60 s). No standing GPU cost:
     # a warm container only exists because a job (or a pre-warm) just ran.
     min_containers=0,
