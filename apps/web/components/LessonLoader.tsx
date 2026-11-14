@@ -94,6 +94,7 @@ export default function LessonLoader({ lessonId }: { lessonId: string }) {
         lessonId={lessonId}
         title={title}
         videoUrl={source.videoUrl}
+        audioUrl={source.audioUrl}
         credit={credit ?? null}
         glbUrls={source.glbUrls(load.doc)}
         onRemoveFromMyLessons={isExample ? undefined : () => {

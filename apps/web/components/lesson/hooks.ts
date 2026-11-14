@@ -44,17 +44,30 @@ import { audioContext, clockEvents, clockRef } from "./audioClock";
  * burned into the video and a time code drawn into the canvas, ~970 frames per run
  * (2026-10-21): no lead +4 ms (mesh behind), 33 ms lead -33 ms, 66 ms lead -62 ms.
  * The learner's iPhone still showed the mesh a tick behind, which the Simulator
- * (Mac GPU, no hardware video plane) cannot reproduce: tune it there, then bake it in.
+ * (Mac GPU, no hardware video plane) cannot reproduce.
+ *
+ * iPhone and iPad default to IOS_MESH_LEAD_MS: on the owner's iPhone (2026-11-12, a
+ * real two-dancer lesson) 40 looked better than none; 20 and 60 were not judged (the
+ * music was off that day, see audioClock.ts audioShiftS). One device, by eye: the
+ * knob stays for the next one.
  */
+const IOS_MESH_LEAD_MS = 40;
 function meshLatencyMs(): number | null {
   if (typeof window === "undefined") return null;
   const knob = new URLSearchParams(window.location.search).get("meshLead");
-  return knob !== null && Number.isFinite(Number(knob)) ? Number(knob) : null;
+  if (knob !== null && Number.isFinite(Number(knob))) return Number(knob);
+  // iPadOS reports itself as a Mac; it is the one "Mac" with a touch screen.
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  return ios ? IOS_MESH_LEAD_MS : null;
 }
 
 /** The video time on screen at `displayAt` (ms, performance.now() clock), carried
  * forward from the last rVFC frame. Clamped to 0.1 s: a stalled video must not run
  * the mesh off on its own. */
+/** No video frame for this long (the video is off screen, so rVFC is silent): the
+ * last frame is no longer worth carrying forward; `timeRef` has the watchdog's time. */
+const STALE_FRAME_MS = 250;
+
 export function meshTimeAt(anchor: { media: number; at: number }, displayAt: number, rate: number): number {
   const ahead = ((displayAt - anchor.at) / 1000) * rate;
   return anchor.media + Math.min(Math.max(ahead, 0), 0.1);
@@ -76,8 +89,25 @@ export function useVideoClock(
     return {
       get current() {
         const a = anchor.current;
-        if (lead === null || !a || a.video.paused || a.video.seeking) return timeRef.current;
+        if (lead === null || !a || a.video.paused || a.video.seeking || performance.now() - a.at > STALE_FRAME_MS) return timeRef.current;
         return meshTimeAt(a, performance.now() + lead, a.video.playbackRate);
+      },
+    };
+  });
+  // The 3D views draw the body between video frames too: the last frame carried
+  // forward at the playback rate, so it moves on every screen refresh at any speed (a
+  // video frame at 0.25x lasts eight of them). On the PICTURE, not the music: beside
+  // the video the eye compares the body with the dancer, and on Safari the picture
+  // sits up to ~30 ms either side of the sound (measured on the owner's iPhone,
+  // 2026-11-12), so a body drawn from the music read as lagging the dance.
+  const [smoothTimeRef] = useState(() => {
+    const lead = meshLatencyMs() ?? 0;
+    return {
+      get current() {
+        const a = anchor.current;
+        const now = performance.now();
+        if (!a || a.video.paused || a.video.seeking || now - a.at > STALE_FRAME_MS) return timeRef.current;
+        return meshTimeAt(a, now + lead, a.video.playbackRate);
       },
     };
   });
@@ -94,7 +124,9 @@ export function useVideoClock(
       const loop = loopRef.current;
       // Only the trailing edge: running into the loop from before it is harmless,
       // and snapping a deliberate seek outside it would look broken.
-      if (loop && t >= loop[1] && !video.paused) {
+      // With the music on the audio clock the loop is the clock's (audioClock.ts): it
+      // wraps the music on the count and brings the picture round itself.
+      if (loop && t >= loop[1] && !video.paused && !clockRef.current?.engaged) {
         // Set, not stepped, so no arithmetic accumulates over forty minutes of loops.
         video.currentTime = loop[0];
         anchor.current = null;
@@ -144,7 +176,7 @@ export function useVideoClock(
     };
   }, [video, loopRef, onWrapRef]);
 
-  return { timeRef, meshTimeRef, displayTime };
+  return { timeRef, meshTimeRef, smoothTimeRef, displayTime };
 }
 
 /**
@@ -288,7 +320,9 @@ export function useMetronome(
       const t = clock ? clock.mediaAt(now) : video.currentTime;
       const lead = clock ? 0 : videoLead;
       const gap = (0.4 * (mode === "ands" ? 0.5 : 1) * grid.secondsPerCount) / rate;
-      for (const c of clicksAhead({ grid, loop: loopRef.current, t, rate, lookahead: LOOKAHEAD_S + Math.max(lead, 0), mode })) {
+      // On the audio clock the loop's wrap is known ahead, so clicks are booked across it.
+      const loop = clock ? clock.loop : loopRef.current;
+      for (const c of clicksAhead({ grid, loop, t, rate, lookahead: LOOKAHEAD_S + Math.max(lead, 0), mode, wrap: !!clock })) {
         const when = now + c.in - lead;
         if (when < now) continue; // too late to sound on time
         if (when < last + gap) continue; // already booked on an earlier tick

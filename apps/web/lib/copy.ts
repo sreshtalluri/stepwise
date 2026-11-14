@@ -428,6 +428,8 @@ export const lesson = {
     music: "Music volume",
     guess: "It clicks on our counts, a guess from the music until you set count 1.",
     yours: "It clicks on the counts you set.",
+    timing: (ms: number) => (ms === 0 ? "Sound timing" : `Sound timing: ${ms > 0 ? "+" : ""}${ms} ms`),
+    timingHint: "On wireless headphones or a speaker the sound can arrive late. Turn the click on, then slide until it lands as the count changes.",
   },
 
   /** How many counts a chip or a preset loops. Nothing is forced to be an eight. */
@@ -492,6 +494,8 @@ export const lesson = {
     tapHint: "While it plays, press Tap on 1 as you hear a 1.",
     earlier: "−1",
     later: "+1",
+    swap: "+4",
+    swapLabel: "Count 5 becomes count 1",
     earlierLabel: "Count 1 one count earlier",
     laterLabel: "Count 1 one count later",
     guess: "is a guess",

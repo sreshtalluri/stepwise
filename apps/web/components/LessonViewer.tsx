@@ -31,7 +31,9 @@ import {
   ONE_SURE,
   type Eight,
 } from "../lib/lessonEngine";
-import { loadClickVolume, loadMusicVolume, saveClickVolume, saveMusicVolume, type ClickMode } from "../lib/metronome";
+import {
+  loadClickVolume, loadMusicVolume, loadSyncOffsetMs, saveClickVolume, saveMusicVolume, saveSyncOffsetMs, type ClickMode,
+} from "../lib/metronome";
 import {
   currentCount,
   eightStartCount,
@@ -45,6 +47,7 @@ import {
 import type { LessonStructure, LoopSpan } from "../../../packages/navigation/src/core";
 import { PHONE_QUERY, unlockAudio, useMedia, useMetronome, useVideoClock, useVideoCrop } from "./lesson/hooks";
 import { useAudioClock } from "./lesson/audioClock";
+import SyncReadout from "./lesson/SyncReadout";
 import DesktopLesson from "./lesson/DesktopLesson";
 import PhoneLesson from "./lesson/PhoneLesson";
 import { addPlay, referrerHost, track } from "../lib/analytics";
@@ -81,6 +84,8 @@ export interface LessonViewerProps {
   doc: MotionResult;
   title: string;
   videoUrl: string;
+  /** The song on its own (lib/lessons.ts `audioUrl`); the video's audio when absent. */
+  audioUrl?: string | null;
   /** Who made the original video, for a link lesson; null for an upload. */
   credit?: Credit | null;
   /** One GLB URL per entry in `doc.persons`. */
@@ -119,13 +124,18 @@ const EVERYONE_KEY = (id: string) => `stepwise.lesson-everyone.v1.${id}`;
 export default function LessonViewer(props: LessonViewerProps) {
   const phone = useMedia(PHONE_QUERY);
   const l = useLesson(props, phone);
-  return phone ? <PhoneLesson l={l} /> : <DesktopLesson l={l} />;
+  return (
+    <>
+      {phone ? <PhoneLesson l={l} /> : <DesktopLesson l={l} />}
+      <SyncReadout />
+    </>
+  );
 }
 
 export type Lesson = ReturnType<typeof useLesson>;
 
 function useLesson(
-  { doc, title, videoUrl, credit = null, glbUrls, lessonId, onRemoveFromMyLessons, onReportOrRemove }: LessonViewerProps,
+  { doc, title, videoUrl, audioUrl = null, credit = null, glbUrls, lessonId, onRemoveFromMyLessons, onReportOrRemove }: LessonViewerProps,
   phone: boolean,
 ) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
@@ -278,7 +288,7 @@ function useLesson(
   const loopRef = useRef<[number, number] | null>(null);
   loopRef.current = loopTimes(loop);
   const onWrapRef = useRef<(() => void) | null>(null);
-  const { timeRef, meshTimeRef, displayTime } = useVideoClock(video, loopRef, onWrapRef);
+  const { timeRef, meshTimeRef, smoothTimeRef, displayTime } = useVideoClock(video, loopRef, onWrapRef);
   const [playing, setPlayingState] = useState(false);
   const playingRef = useRef(false);
   const setPlaying = useCallback((p: boolean) => {
@@ -473,7 +483,13 @@ function useLesson(
   useEffect(() => {
     if (video) video.volume = musicVol;
   }, [video, musicVol]);
-  useAudioClock(video, videoUrl, speed, musicVol);
+  // Sound timing: the learner's nudge for sound that reaches them late (wireless).
+  const [syncOffsetMs, setSyncOffsetState] = useState(0);
+  useEffect(() => setSyncOffsetState(loadSyncOffsetMs()), []);
+  const setSyncOffset = useCallback((ms: number) => (setSyncOffsetState(ms), saveSyncOffsetMs(ms)), []);
+  // Not while "Who are you learning?" is up: fetching and decoding the song then
+  // competes with the dancers' stills and the 3D bodies for the phone.
+  useAudioClock(pickerOpen ? null : video, videoUrl, speed, musicVol, loopRef, onWrapRef, loopRef.current?.join("-") ?? "", syncOffsetMs, audioUrl);
   useMetronome(video, loopRef, structure.grid, clickOn, clickMode, clickVol);
 
   // ---- the "&" between the counts on screen: per device, and apart from the click's own "and"s
@@ -519,15 +535,20 @@ function useLesson(
   useOnChange(buildUp, (on) => track("build_up_toggled", { on }, lessonId));
   useOnChange(`${clickOn}|${clickMode}`, () => track("click_toggled", { on: clickOn, mode: clickMode }, lessonId));
 
-  const crop = useVideoCrop(video, doc, focusRef, timeRef, selected, follow && panels.includes("video"), mirrored);
+  // The video keeps its whole frame. Following the picked dancer with a moving crop
+  // (`follow && panels.includes("video")`) is off: on a two-dancer lesson it read as the
+  // video zooming and sliding about (owner, 2026-11-12). Follow still frames the 3D views.
+  // ponytail: the crop code stays behind this `false`; delete it, or make it one steady
+  // window per dancer, once the owner has decided.
+  const crop = useVideoCrop(video, doc, focusRef, timeRef, selected, false, mirrored);
 
   return {
     doc, title, videoUrl, credit, glbUrls, lessonId, endS, aspect, wide,
-    video, setVideo, timeRef, meshTimeRef, displayTime, playing, setPlaying, play, pause, togglePlay, seek,
+    video, setVideo, timeRef, meshTimeRef, smoothTimeRef, displayTime, playing, setPlaying, play, pause, togglePlay, seek,
     structure, editStructure, authored, countsFrom, oneUnsure, oneChecked, tapOne, nudgeOne, tryOne, alternates,
     eights, loop, setLoop, loopEight, here, hereCount, stepLoop, loopLen, setLoopLen, next, done, sameSpan,
     speed, speedPick, pickSpeed, cycleSpeed, nudgeSpeed, buildUp, setBuildUp, passes, setHoldSlow,
-    clickOn, setClickOn, clickMode, setClickMode, clickVol, setClickVol, musicVol, setMusicVol, showAnds, setShowAnds,
+    clickOn, setClickOn, clickMode, setClickMode, clickVol, setClickVol, musicVol, setMusicVol, syncOffsetMs, setSyncOffset, showAnds, setShowAnds,
     multi, selected, chooseDancer, pickerOpen, setPickerOpen, showEveryone, setShowEveryone,
     panels, maxPanels, bumped, toggleView, mirrored, setMirrored, follow, setFollow,
     absent, setAbsent, focusRef, crop,
