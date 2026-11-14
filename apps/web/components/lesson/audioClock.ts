@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import {
+  aroundLoop, loopFor, mediaAt, nextSeekLatency, SEEK_LATENCY_START_S, steadyOffset, untilWrap, wrapsAt,
+  type Loop, type TimeMap,
+} from "../../lib/clockMap";
 
 /**
  * One audio clock for the lesson: the music and the click both play through the
@@ -18,6 +22,17 @@ import { useEffect, useRef } from "react";
  * (createMediaElementSource, #64) is NOT an option: on an iPhone it went choppy at any
  * speed but 1× and could not be undone (#66).
  *
+ * The loop is the music's too. The stretcher folds the loop's end onto its start
+ * with no gap, on the count, at any speed, so a looped eight keeps time pass after
+ * pass; before, each wrap waited for a video frame past the end and then for a video
+ * seek, which is a different length on every phone. The clock knows when each wrap
+ * comes, so the click is booked across it and the picture is sent to the loop's start
+ * one seek early (how long a seek takes is measured as they happen), to land with it.
+ *
+ * `offsetMs` is the learner's own nudge for sound that reaches them late: wireless
+ * headphones and speakers add a delay that Safari does not report at all. It moves
+ * the picture and the mesh against the sound; the click needs none (same path).
+ *
  * Anything that fails (no Web Audio, decode refused, context not unlocked yet) leaves
  * the video playing its own sound, exactly as before.
  */
@@ -29,6 +44,59 @@ export interface AudioClock {
   rate: number;
   /** Media seconds the music plays at context time `at`. Valid while engaged. */
   mediaAt(at: number): number;
+  /** Media seconds the learner hears at `perfMs` (performance.now() clock). */
+  heardAt(perfMs: number): number;
+  /** The loop the music is running, [start, end) in media seconds. */
+  loop: Loop | null;
+}
+
+/** What the clock last measured, for the `?sync=1` readout (SyncReadout.tsx). */
+export const syncStats = {
+  engaged: false,
+  webkit: false,
+  rate: 1,
+  /** Picture minus music, ms: + is the picture ahead of the sound. */
+  pictureMs: NaN,
+  /** How long a video seek takes here, ms (learned). */
+  seekMs: SEEK_LATENCY_START_S * 1000,
+  wraps: 0,
+  /** Picture minus music on the first frame after the last loop wrap, ms. */
+  landedMs: NaN,
+  offsetMs: 0,
+  outputLatencyMs: NaN,
+  baseLatencyMs: NaN,
+  /** The browser reports when a sample reaches the speaker (else the context's own time). */
+  outputTimestamp: false,
+  /** Where the audio clock has got to: off, loading, waiting for a tap, starting, ready, failed: why. */
+  stage: "off",
+  /** Where the music was decoded from: the lesson's own audio file, or the video. */
+  source: "",
+  ctx: "",
+  shiftMs: 0,
+};
+
+/**
+ * `?audioShift=<ms>`: the decoded song sits this many ms LATE in its buffer
+ * (negative: early). WebKit does not put HE-AAC where the `<video>` element does.
+ * The owner's TikTok lesson of 2026-11-12 (HE-AACv2, an edit list skipping 7106
+ * samples of encoder delay), each decode against ffmpeg's (= the video timeline):
+ *
+ *   Chromium decodeAudioData                0.0 ms
+ *   WebKit 27.2 decodeAudioData (macOS)  -117.6 ms: the music 118 ms EARLY, so the
+ *                                        click and the counts sound late against it
+ *   the same audio as AAC-LC, WebKit        0.0 ms
+ *
+ * -117.6 ms is 5186 samples, the amount Apple's decoder trims by itself: WebKit
+ * skips the edit list's delay and then its own. (afconvert trims only its own and
+ * comes out +43.5 ms, which was first taken for Safari's answer; on the owner's
+ * iPhone `?audioShift=44` made it worse.) Not measured on iOS itself.
+ *
+ * The fix is the lesson's own AAC-LC audio file (decode's first URL). This knob
+ * is for checking a lesson that has none: `?audioShift=-118` on that one.
+ */
+function audioShiftS(): number {
+  const v = Number(new URLSearchParams(window.location.search).get("audioShift"));
+  return Number.isFinite(v) ? v / 1000 : 0;
 }
 
 /** Fired on `clockEvents` whenever the time mapping changes (start, stop, seek, rate). */
@@ -54,18 +122,28 @@ export function audioContext(): AudioContext | null {
   return shared;
 }
 
-/** Decoded once per URL: a layout switch remounts the <video>, not the song. */
+/**
+ * Decoded once per lesson: a layout switch remounts the <video>, not the song.
+ * `urls` are tried in order: the lesson's own audio file (plain AAC-LC, a tenth of
+ * the video, and decoded to the same place by every browser), then the video itself
+ * for a lesson that has none (a second download of the whole video, 3-9 MB, and
+ * WebKit decodes HE-AAC audio 118 ms early: see audioShiftS).
+ */
 const decoded = new Map<string, Promise<Float32Array[]>>();
-function decode(ctx: AudioContext, url: string): Promise<Float32Array[]> {
+function decode(ctx: AudioContext, urls: readonly string[]): Promise<Float32Array[]> {
+  const url = urls.join(" ");
   let p = decoded.get(url);
   if (!p) {
-    // ponytail: downloads the whole video a second time for its audio (3-9 MB). An
-    // audio-only asset from the pipeline would halve that; add it if bandwidth shows.
-    p = fetch(url)
-      .then((r) => {
-        if (!r.ok) throw new Error(`audio fetch ${r.status}`);
-        return r.arrayBuffer();
-      })
+    p = (async () => {
+      for (const [i, u] of urls.entries()) {
+        const r = await fetch(u).catch(() => null);
+        if (r?.ok) {
+          syncStats.source = i < urls.length - 1 ? "own file" : "video";
+          return r.arrayBuffer();
+        }
+      }
+      throw new Error("audio fetch failed");
+    })()
       .then((bytes) => new Promise<AudioBuffer>((ok, fail) => ctx.decodeAudioData(bytes, ok, fail)))
       .then((buf) => {
         const left = buf.getChannelData(0);
@@ -82,10 +160,17 @@ function decode(ctx: AudioContext, url: string): Promise<Float32Array[]> {
  * clock), where the browser says. Safari reports no output latency (0), so there
  * this is the context's own time: still one clock for music and click.
  */
+const offsets: number[] = [];
 function ctxTimeAt(ctx: AudioContext, perfMs: number): number {
   const ts = ctx.getOutputTimestamp?.();
-  if (ts && ts.contextTime && ts.performanceTime) return ts.contextTime + (perfMs - ts.performanceTime) / 1000;
-  return ctx.currentTime - (ctx.outputLatency || 0) + (perfMs - performance.now()) / 1000;
+  const reported = !!(ts && ts.contextTime && ts.performanceTime);
+  syncStats.outputTimestamp = reported;
+  // Either reading only moves once per audio callback: `steadyOffset` reads it steady,
+  // so a mesh drawn from it every frame does not judder.
+  const sample = reported
+    ? ts!.contextTime! - ts!.performanceTime! / 1000
+    : ctx.currentTime - (ctx.outputLatency || 0) - performance.now() / 1000;
+  return steadyOffset(offsets, sample) + perfMs / 1000;
 }
 
 const STRETCH_SRC = "/vendor/signalsmith-stretch-1.3.2.mjs";
@@ -117,18 +202,38 @@ const AHEAD_S = 0.03;
 /**
  * Attach the lesson's music to `video`. `speed` is the learner's speed (the video's
  * own playbackRate is not read: the drift correction must not feed back into it).
+ * `loopKey` changes whenever `loopRef` does, so a loop edge dragged mid-play reaches
+ * the music without a seek. `onWrapRef` fires once per pass of the loop.
  */
-export function useAudioClock(video: HTMLVideoElement | null, url: string, speed: number, volume: number) {
+export function useAudioClock(
+  video: HTMLVideoElement | null,
+  url: string,
+  speed: number,
+  volume: number,
+  loopRef: React.RefObject<Loop | null>,
+  onWrapRef: React.RefObject<(() => void) | null>,
+  loopKey: string,
+  offsetMs: number,
+  audioUrl: string | null = null,
+) {
   const speedRef = useRef(speed);
+  const offsetRef = useRef(offsetMs);
   const gainRef = useRef<GainNode | null>(null);
   const restart = useRef<(() => void) | null>(null);
+  const realign = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const ctx = audioContext();
     if (!video || !ctx || !url) return;
     let cancelled = false;
     let stretch: any = null;
-    let map = { output: 0, input: 0, rate: 1 };
+    let map: TimeMap = { output: 0, input: 0, rate: 1, loop: null };
+    let wrapsSeen = 0;
+    /** The picture has been sent to the loop's start for the wrap that is coming. */
+    let preSeeked = false;
+    /** A seek of ours still to land: when it was sent, and where to. */
+    let sent: { at: number; to: number } | null = null;
+    let seekLatency = SEEK_LATENCY_START_S;
     let selfSeek = false;
     let lastFix = 0;
     let raf = 0;
@@ -136,14 +241,63 @@ export function useAudioClock(video: HTMLVideoElement | null, url: string, speed
     gain.gain.value = volume; // linear, as video.volume was
     gain.connect(ctx.destination);
     gainRef.current = gain;
+    const shift = audioShiftS();
+    syncStats.shiftMs = Math.round(shift * 1000);
+    const stage = (s: string) => {
+      syncStats.stage = s;
+      syncStats.ctx = ctx.state;
+    };
+    stage("loading");
+    // Any tap, not only Play: on a phone the context is then running, and the
+    // stretcher ready, before the first play, so that play starts on the audio clock
+    // instead of handing over from the video's sound a moment in.
+    const unlock = () => {
+      if (ctx.state !== "running") void ctx.resume().catch(() => {});
+    };
+    const GESTURES = ["click", "touchend", "keydown"] as const;
+    GESTURES.forEach((e) => document.addEventListener(e, unlock, true));
 
+    /** Context time of the sound the learner hears at `perfMs`, their nudge included. */
+    const heard = (perfMs: number) => ctxTimeAt(ctx, perfMs) - offsetRef.current / 1000;
     const clock: AudioClock = {
       ctx,
       engaged: false,
       rate: speedRef.current,
-      mediaAt: (at) => map.input + (at - map.output) * map.rate,
+      mediaAt: (at) => mediaAt(map, at),
+      heardAt: (perfMs) => mediaAt(map, heard(perfMs)),
+      get loop() {
+        return map.loop;
+      },
     };
-    const changed = () => clockEvents?.dispatchEvent(new Event("change"));
+    const changed = () => {
+      syncStats.engaged = clock.engaged;
+      syncStats.rate = clock.rate;
+      clockEvents?.dispatchEvent(new Event("change"));
+    };
+
+    /** The music plays media `input` from 30 ms on, looping if a loop is set. */
+    const book = (input: number) => {
+      const output = ctx.currentTime + AHEAD_S;
+      const rate = speedRef.current;
+      map = { output, input, rate, loop: loopFor(loopRef.current, input) };
+      wrapsSeen = 0;
+      preSeeked = false;
+      // Always both loop edges: a new segment inherits the last one's.
+      // `shift`: where media time sits in the decoded buffer (audioShiftS).
+      stretch.schedule({
+        active: true, output, input: Math.max(0, input + shift), rate,
+        loopStart: map.loop ? map.loop[0] + shift : 0, loopEnd: map.loop ? map.loop[1] + shift : 0,
+      });
+      clock.engaged = true;
+      clock.rate = rate;
+      changed();
+    };
+    const seekPicture = (to: number, now: number) => {
+      selfSeek = true;
+      lastFix = now;
+      sent = { at: now, to };
+      video.currentTime = to;
+    };
 
     const start = () => {
       if (!stretch || cancelled) return;
@@ -155,14 +309,17 @@ export function useAudioClock(video: HTMLVideoElement | null, url: string, speed
         changed();
         return;
       }
-      const output = ctx.currentTime + AHEAD_S;
-      map = { output, input: video.currentTime + AHEAD_S * speedRef.current, rate: speedRef.current };
-      stretch.schedule({ active: true, output, input: map.input, rate: map.rate });
-      clock.engaged = true;
-      clock.rate = map.rate;
+      const now = performance.now();
+      const lp = loopRef.current;
+      let from = video.currentTime;
+      // Playing on past the loop's end goes back to its start, as it always has.
+      if (lp && from >= lp[1]) seekPicture((from = lp[0]), now);
+      // The sound booked now is heard a moment later (and the learner's nudge later
+      // still): by then the picture is this far on. Folded if that crosses the loop's end.
+      const lead = AHEAD_S + offsetRef.current / 1000;
+      book(Math.max(0, mediaAt({ output: 0, input: from, rate: speedRef.current, loop: loopFor(lp, from) }, lead)));
       video.muted = true;
-      lastFix = performance.now();
-      changed();
+      lastFix = now;
     };
     const stop = () => {
       if (!stretch) return;
@@ -170,53 +327,93 @@ export function useAudioClock(video: HTMLVideoElement | null, url: string, speed
       clock.engaged = false;
       changed();
     };
+    // A new speed or loop: the music carries on from where it is.
     restart.current = () => {
-      if (!clock.engaged) return;
-      const output = ctx.currentTime + AHEAD_S;
-      map = { output, input: clock.mediaAt(output), rate: speedRef.current };
-      stretch.schedule({ output, input: map.input, rate: map.rate });
-      clock.rate = map.rate;
-      changed();
+      if (clock.engaged) book(clock.mediaAt(ctx.currentTime + AHEAD_S));
+    };
+    // A new nudge: the music moves against the picture, so line them up afresh.
+    realign.current = () => {
+      if (clock.engaged) start();
     };
 
     const onPlay = () => start();
     const onPause = () => stop();
+    const onEnded = () => {
+      // The video ran out before the wrap reached it (a loop up to the last frame).
+      if (!clock.engaged || !map.loop) return stop();
+      seekPicture(clock.heardAt(performance.now()), performance.now());
+      void video.play().catch(() => {});
+    };
     const onSeeking = () => {
       if (selfSeek) return;
       if (!video.paused) start();
     };
+    const landed = (resumedMs: number, shownMs: number, media: number) => {
+      if (!sent) return;
+      seekLatency = nextSeekLatency(seekLatency, (resumedMs - sent.at) / 1000);
+      syncStats.seekMs = Math.round(seekLatency * 1000);
+      if (clock.engaged) syncStats.landedMs = Math.round(aroundLoop(media - clock.heardAt(shownMs), map.loop) * 1000);
+      sent = null;
+    };
     const onSeeked = () => {
       selfSeek = false;
+      if (!hasVfc) landed(performance.now(), performance.now(), video.currentTime);
     };
 
-    // Keep the picture on the music: the mesh and the counts read the video's frames.
-    // The frame on screen and when, from requestVideoFrameCallback: Safari's
-    // `currentTime` trails the picture (~66 ms at 0.5x on iOS 26.5), so it is only the
-    // fallback where rVFC is missing.
+    // Keep the picture on the music: the counts and the mesh over the video read the
+    // video's frames. The frame on screen and when, from requestVideoFrameCallback:
+    // Safari's `currentTime` trails the picture (~66 ms at 0.5x on iOS 26.5), so it is
+    // only the fallback where rVFC is missing.
     let frame: { media: number; shown: number } | null = null;
     let vfc = 0;
     const onFrame = (_now: number, meta: { mediaTime: number; expectedDisplayTime: number }) => {
       frame = { media: meta.mediaTime, shown: meta.expectedDisplayTime };
+      // A seek of ours, playing again: when it would have shown the frame it was sent
+      // to, had it been playing all along. That is the seek's whole cost (the frame
+      // itself appears sooner, then sits while the decoder restarts), on the video's
+      // own timing alone, so no audio reading can bias it.
+      if (sent && frame.shown > sent.at && frame.media > sent.to + 0.02 && frame.media < sent.to + 0.5) {
+        landed(frame.shown - ((frame.media - sent.to) / (video.playbackRate || 1)) * 1000, frame.shown, frame.media);
+      }
       vfc = (video as any).requestVideoFrameCallback(onFrame);
     };
     const hasVfc = typeof (video as any).requestVideoFrameCallback === "function";
     const webkit = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg/.test(navigator.userAgent);
+    syncStats.webkit = webkit;
     const follow = () => {
       raf = requestAnimationFrame(follow);
-      if (!clock.engaged || video.paused || video.seeking) return;
+      if (!clock.engaged || video.paused) return;
       const now = performance.now();
-      if (now - lastFix < SETTLE_MS) return;
+      const lp = map.loop;
+      if (lp) {
+        const at = heard(now);
+        const wraps = wrapsAt(map, at);
+        if (wraps > wrapsSeen) {
+          // The music is back at the loop's start. The picture is on its way there,
+          // unless the frame loop was held up (a hidden tab): then straight to the music.
+          wrapsSeen = wraps;
+          syncStats.wraps++;
+          if (!preSeeked) seekPicture(clock.heardAt(now) + seekLatency * map.rate, now);
+          preSeeked = false;
+          onWrapRef.current?.();
+        } else if (!preSeeked && untilWrap(map, at) <= Math.min(seekLatency, (0.4 * (lp[1] - lp[0])) / map.rate)) {
+          preSeeked = true;
+          seekPicture(lp[0], now);
+        } else if (!preSeeked && !video.seeking && video.currentTime >= lp[1]) {
+          // The picture ran off the end of the loop (it was started within a breath of it).
+          seekPicture(clock.heardAt(now) + seekLatency * map.rate, now);
+        }
+      }
+      if (video.seeking) return;
       const fresh = frame && now - frame.shown < 250 ? frame : null;
-      const d = fresh
-        ? fresh.media - clock.mediaAt(ctxTimeAt(ctx, fresh.shown))
-        : video.currentTime - clock.mediaAt(ctxTimeAt(ctx, now));
+      const d = aroundLoop(fresh ? fresh.media - clock.heardAt(fresh.shown) : video.currentTime - clock.heardAt(now), lp);
+      syncStats.pictureMs = Math.round(d * 1000);
+      if (now - lastFix < SETTLE_MS) return;
       if (Math.abs(d) > (webkit ? WEBKIT_SEEK_S : SEEK_S)) {
-        selfSeek = true;
-        lastFix = now;
         // At the music itself, never `currentTime - d`: Safari's currentTime trails
-        // the picture, so that landed every seek short by the same ~90 ms. A little
-        // ahead: playback resumes once the seek lands, ~50 ms later.
-        video.currentTime = clock.mediaAt(ctxTimeAt(ctx, now)) + 0.05 * map.rate;
+        // the picture, so that landed every seek short by the same ~90 ms. A seek
+        // ahead: playback resumes once the seek lands.
+        seekPicture(clock.heardAt(now) + seekLatency * map.rate, now);
         return;
       }
       const ease = webkit || Math.abs(d) < DEADBAND_S ? 0 : Math.min(Math.max(d * EASE_GAIN, -EASE_MAX), EASE_MAX);
@@ -227,7 +424,7 @@ export function useAudioClock(video: HTMLVideoElement | null, url: string, speed
     void (async () => {
       try {
         const [channels, { default: SignalsmithStretch }] = await Promise.all([
-          decode(ctx, url),
+          decode(ctx, audioUrl ? [audioUrl, url] : [url]),
           // Served as-is from public/, never bundled: it builds its AudioWorklet from
           // its own source text (`${Module}`), which a bundler's rewrite breaks (the
           // worklet then never answers). MIT, see NOTICE.
@@ -237,6 +434,7 @@ export function useAudioClock(video: HTMLVideoElement | null, url: string, speed
         // The stretcher's worklet only answers once the context runs, which needs a
         // tap: until the first play the video's own sound carries the lesson.
         if (ctx.state !== "running") {
+          stage("waiting for a tap");
           await new Promise<void>((ok) => {
             const on = () => {
               if (ctx.state !== "running") return;
@@ -247,33 +445,40 @@ export function useAudioClock(video: HTMLVideoElement | null, url: string, speed
           });
           if (cancelled) return;
         }
+        stage("starting");
         stretch = await SignalsmithStretch(ctx);
         if (cancelled) return stretch.disconnect();
         await stretch.addBuffers(channels.map((c) => c.slice()));
         if (cancelled) return stretch.disconnect();
         stretch.connect(gain);
         clockRef.current = clock;
+        syncStats.outputLatencyMs = Math.round((ctx.outputLatency ?? NaN) * 1000);
+        syncStats.baseLatencyMs = Math.round((ctx.baseLatency ?? NaN) * 1000);
         video.addEventListener("play", onPlay);
         video.addEventListener("pause", onPause);
-        video.addEventListener("ended", onPause);
+        video.addEventListener("ended", onEnded);
         video.addEventListener("seeking", onSeeking);
         video.addEventListener("seeked", onSeeked);
         raf = requestAnimationFrame(follow);
         if (hasVfc) vfc = (video as any).requestVideoFrameCallback(onFrame);
+        stage("ready");
         if (!video.paused) start();
       } catch (e) {
         // Any failure: the video keeps its own sound.
+        stage(`failed: ${String((e as Error)?.message ?? e).slice(0, 80)}`);
         console.warn("[audioClock] music stays on the video:", e);
       }
     })();
 
     return () => {
       cancelled = true;
+      stage("off");
+      GESTURES.forEach((e) => document.removeEventListener(e, unlock, true));
       cancelAnimationFrame(raf);
       if (hasVfc && vfc) (video as any).cancelVideoFrameCallback(vfc);
       video.removeEventListener("play", onPlay);
       video.removeEventListener("pause", onPause);
-      video.removeEventListener("ended", onPause);
+      video.removeEventListener("ended", onEnded);
       video.removeEventListener("seeking", onSeeking);
       video.removeEventListener("seeked", onSeeked);
       if (stretch) {
@@ -284,16 +489,24 @@ export function useAudioClock(video: HTMLVideoElement | null, url: string, speed
       video.muted = false;
       video.playbackRate = speedRef.current;
       if (clockRef.current === clock) clockRef.current = null;
+      clock.engaged = false;
       restart.current = null;
+      realign.current = null;
       changed();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- speed/volume applied below without a reload
-  }, [video, url]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- speed, loop, nudge and volume are applied below without a reload
+  }, [video, url, audioUrl]);
 
   useEffect(() => {
     speedRef.current = speed;
     restart.current?.();
-  }, [speed]);
+  }, [speed, loopKey]);
+
+  useEffect(() => {
+    offsetRef.current = offsetMs;
+    syncStats.offsetMs = offsetMs;
+    realign.current?.();
+  }, [offsetMs]);
 
   useEffect(() => {
     if (gainRef.current) gainRef.current.gain.value = volume;

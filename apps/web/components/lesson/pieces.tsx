@@ -57,6 +57,7 @@ import {
 } from "../../lib/lessonEngine";
 import { lesson as copy, privacy } from "../../lib/copy";
 import { prefersReducedMotion } from "../../lib/reveal";
+import { SYNC_MAX_MS, SYNC_MIN_MS } from "../../lib/metronome";
 import { useCount, useFrameGrabs } from "./hooks";
 import { CountNumeral } from "./CountNumeral";
 import type { Lesson, PanelId } from "../LessonViewer";
@@ -117,7 +118,7 @@ export function AnglePane({ l, angle, focus }: { l: Lesson; angle: ViewId; focus
         selectedIndex={l.selected}
         view={angle}
         mirrored={l.mirrored}
-        timeRef={l.meshTimeRef}
+        timeRef={l.smoothTimeRef}
         follow={l.follow}
         focusRef={focus ? l.focusRef : undefined}
         glbUrls={l.glbUrls}
@@ -941,6 +942,10 @@ export function CountOneTools({ l }: { l: Lesson }) {
         <button type="button" className="ls-chip" onClick={() => l.nudgeOne(1)} aria-label={copy.countOne.laterLabel}>
           {copy.countOne.later}
         </button>
+        {/* The tracker finds the bar, not which of an eight's two bars comes first. */}
+        <button type="button" className="ls-chip" onClick={() => l.nudgeOne(4)} aria-label={copy.countOne.swapLabel}>
+          {copy.countOne.swap}
+        </button>
       </div>
       {!unsure && altRow}
       <span className="ls-hint">{copy.countOne.tapHint}</span>
@@ -982,6 +987,11 @@ export function ClickTools({ l }: { l: Lesson }) {
         </label>
       )}
       <span className="ls-hint">{l.countsFrom === "hand" ? copy.click.yours : copy.click.guess}</span>
+      <label className="ls-vol">
+        <span>{copy.click.timing(l.syncOffsetMs)}</span>
+        <input type="range" min={SYNC_MIN_MS} max={SYNC_MAX_MS} step={10} value={l.syncOffsetMs} onChange={(e) => l.setSyncOffset(Number(e.target.value))} />
+      </label>
+      <span className="ls-hint">{copy.click.timingHint}</span>
     </div>
   );
 }
